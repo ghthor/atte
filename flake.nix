@@ -26,8 +26,8 @@
     };
   };
 
-
-  outputs = { nixpkgs, nixpkgs-unstable, ... }:
+  outputs =
+    { nixpkgs, nixpkgs-unstable, ... }:
     let
       systems = [
         "x86_64-linux"
