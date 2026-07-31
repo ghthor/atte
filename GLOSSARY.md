@@ -80,6 +80,32 @@ Common relationship types include:
 
 ---
 
+## Detector
+
+A component that observes system-specific artifacts and records the
+Entities and Relationships they reveal.
+
+Detectors translate source code, manifests, build metadata, schemas, and
+other representations into the language-agnostic structure of the
+Universe. Their output provides the graph on which Propagation operates.
+
+Examples include:
+
+* Git repository detector
+* Go dependency detector
+* Rust package detector
+* Java import detector
+* Docker image detector
+* Kubernetes relationship detector
+* Protocol Buffer dependency detector
+* CI workflow detector
+
+A Detector identifies possible structure. It does not determine whether an
+Entity experienced an observable change; that responsibility belongs to a
+Refiner.
+
+---
+
 ## Perturbation
 
 A modification to one or more Entities within the Universe.
