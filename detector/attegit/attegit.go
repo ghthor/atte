@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os/exec"
 	"path"
+	"slices"
 	"strings"
 	"sync"
 
@@ -39,9 +41,11 @@ type Obj struct {
 // Repo contains the objects and direct-child index for one Git revision.
 // Show returns a new byte slice, so callers may safely modify its result.
 type Repo struct {
-	Obj   map[Path]Obj
-	Tree  map[Path][]Obj
-	blobs map[Path][]byte
+	Obj      map[Path]Obj
+	ObjKeys  []Path
+	Tree     map[Path][]Obj
+	TreeKeys []Path
+	blobs    map[Path][]byte
 
 	gitRepo *git.Repository
 	mu      sync.RWMutex
@@ -70,6 +74,9 @@ func Open(repositoryPath, ref string) (*Repo, error) {
 	if err := d.readTree(repositoryPath, ref); err != nil {
 		return nil, err
 	}
+	d.ObjKeys = slices.Sorted(maps.Keys(d.Obj))
+	d.TreeKeys = slices.Sorted(maps.Keys(d.Tree))
+
 	return d, nil
 }
 

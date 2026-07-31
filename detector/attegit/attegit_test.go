@@ -71,6 +71,8 @@ git commit -m initial
 	})
 
 	must.MapLen(t, 0, sliceToMap(repo.Tree["nested/child.txt"]))
+	must.SliceEqOp(t, []Path{"nested", "nested/child.txt", "nested/deeper", "nested/deeper/leaf.txt", "root.txt"}, repo.ObjKeys)
+	must.SliceEqOp(t, []Path{"", "nested", "nested/deeper"}, repo.TreeKeys)
 }
 
 func initGitRepo(t *testing.T, dir string) {
