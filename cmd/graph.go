@@ -29,6 +29,7 @@ import (
 	"sort"
 
 	"github.com/ghthor/atte/detector/attegit"
+	"github.com/ghthor/atte/graph"
 	"github.com/spf13/cobra"
 	"github.com/xlab/treeprint"
 )
@@ -68,27 +69,51 @@ func init() {
 
 func printGraph(w io.Writer, repo *attegit.Repo) error {
 	tree := treeprint.New()
-	if err := addGraphChildren(tree, repo, ""); err != nil {
+	g, err := repo.Graph()
+	if err != nil {
+		return fmt.Errorf("build graph: %w", err)
+	}
+	if err := addGraphChildren(tree, g, attegit.EntityID("")); err != nil {
 		return err
 	}
-	_, err := fmt.Fprint(w, tree.String())
+	_, err = fmt.Fprint(w, tree.String())
 	return err
 }
 
-func addGraphChildren(parent treeprint.Tree, repo *attegit.Repo, parentPath attegit.Path) error {
-	children := append([]attegit.Obj(nil), repo.Tree[parentPath]...)
-	sort.Slice(children, func(i, j int) bool {
-		return children[i].Path < children[j].Path
-	})
+func addGraphChildren(parent treeprint.Tree, g *graph.Graph, parentID graph.EntityID) error {
+	if g == nil {
+		return fmt.Errorf("graph is nil")
+	}
+	if !g.Has(parentID) {
+		return fmt.Errorf("parent entity %q not found", parentID)
+	}
 
-	for _, obj := range children {
-		name := path.Base(string(obj.Path))
-		if obj.Kind == attegit.Tree {
+	children := make([]graph.EntityID, 0)
+	for _, id := range g.EntityKeys {
+		for _, relation := range g.Out(id) {
+			if relation.Kind == attegit.ContainsRelation && relation.To == parentID {
+				children = append(children, id)
+				break
+			}
+		}
+	}
+	sort.Slice(children, func(i, j int) bool { return children[i] < children[j] })
+
+	for _, id := range children {
+		entity, ok := g.Entity(id)
+		if !ok {
+			return fmt.Errorf("child entity %q not found", id)
+		}
+		name := path.Base(string(attegit.EntityPath(id)))
+		if entity.Kind == attegit.TreeKind {
 			branch := parent.AddBranch(name + "/")
-			if err := addGraphChildren(branch, repo, obj.Path); err != nil {
+			if err := addGraphChildren(branch, g, id); err != nil {
 				return err
 			}
 			continue
+		}
+		if entity.Kind != attegit.BlobKind {
+			return fmt.Errorf("unsupported entity kind %q for %q", entity.Kind, id)
 		}
 		parent.AddNode(name)
 	}
