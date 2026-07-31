@@ -15,8 +15,11 @@ func TestOpenAndShow(t *testing.T) {
 	must.NoError(t, os.Mkdir(filepath.Join(dir, "nested"), 0o755))
 	must.NoError(t, os.WriteFile(filepath.Join(dir, "root.txt"), []byte("root"), 0o644))
 	must.NoError(t, os.WriteFile(filepath.Join(dir, "nested", "child.txt"), []byte("child"), 0o644))
-	runGit(t, dir, "add", ".")
-	runGit(t, dir, "commit", "-m", "initial")
+	runGitScript(t, dir, `
+set -x
+git add .
+git commit -m initial
+`)
 
 	repo, err := Open(dir, "HEAD")
 	must.NoError(t, err)
@@ -46,8 +49,11 @@ func TestTreeIndex(t *testing.T) {
 	must.NoError(t, os.WriteFile(filepath.Join(dir, "root.txt"), []byte("root"), 0o644))
 	must.NoError(t, os.WriteFile(filepath.Join(dir, "nested", "child.txt"), []byte("child"), 0o644))
 	must.NoError(t, os.WriteFile(filepath.Join(dir, "nested", "deeper", "leaf.txt"), []byte("leaf"), 0o644))
-	runGit(t, dir, "add", ".")
-	runGit(t, dir, "commit", "-m", "initial")
+	runGitScript(t, dir, `
+set -x
+git add .
+git commit -m initial
+`)
 
 	repo, err := Open(dir, "HEAD")
 	must.NoError(t, err)
@@ -69,11 +75,14 @@ func TestTreeIndex(t *testing.T) {
 
 func initGitRepo(t *testing.T, dir string) {
 	t.Helper()
-	runGit(t, dir, "init")
-	runGit(t, dir, "config", "user.email", "test@example.com")
-	runGit(t, dir, "config", "user.name", "Test")
-	runGit(t, dir, "config", "commit.gpgSign", "false")
-	runGit(t, dir, "config", "tag.gpgSign", "false")
+	runGitScript(t, dir, `
+set -x
+git init
+git config user.email test@example.com
+git config user.name Test
+git config commit.gpgSign false
+git config tag.gpgSign false
+`)
 }
 
 func assertTreeChildren(t *testing.T, got []Obj, want map[Path]Kind) {
@@ -94,10 +103,10 @@ func sliceToMap(objs []Obj) map[Path]Obj {
 	return m
 }
 
-func runGit(t *testing.T, dir string, args ...string) {
+func runGitScript(t *testing.T, dir, script string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
+	cmd := exec.Command("bash", "-c", script)
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
-	must.NoError(t, err, must.Sprintf("git %v: %s", args, output))
+	must.NoError(t, err, must.Sprintf("git script: %s", output))
 }
