@@ -33,7 +33,10 @@ import (
 	"github.com/xlab/treeprint"
 )
 
-var graphRef string
+var (
+	graphRef         string
+	graphWorkingTree bool
+)
 
 // graphCmd represents the graph command.
 var graphCmd = &cobra.Command{
@@ -45,7 +48,11 @@ var graphCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("get working directory: %w", err)
 		}
-		repo, err := attegit.Open(repositoryPath, graphRef)
+		var options []attegit.OpenOption
+		if graphWorkingTree {
+			options = append(options, attegit.WithWorkingTree())
+		}
+		repo, err := attegit.Open(repositoryPath, graphRef, options...)
 		if err != nil {
 			return err
 		}
@@ -56,6 +63,7 @@ var graphCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(graphCmd)
 	graphCmd.Flags().StringVarP(&graphRef, "ref", "r", "HEAD", "Git revision to print")
+	graphCmd.Flags().BoolVar(&graphWorkingTree, "working-tree", false, "Include modified and non-ignored untracked files")
 }
 
 func printGraph(w io.Writer, repo *attegit.Repo) error {

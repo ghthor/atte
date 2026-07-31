@@ -42,6 +42,48 @@ git commit -m initial
 	must.Error(t, err)
 }
 
+func TestWorkingTree(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	must.NoError(t, os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("committed"), 0o644))
+	runGitScript(t, dir, "git add . && git commit -m initial")
+	must.NoError(t, os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("modified"), 0o644))
+	must.NoError(t, os.MkdirAll(filepath.Join(dir, "nested"), 0o755))
+	must.NoError(t, os.WriteFile(filepath.Join(dir, "nested", "untracked.txt"), []byte("new"), 0o644))
+
+	committed, err := Open(dir, "HEAD")
+	must.NoError(t, err)
+	got, err := committed.Show("tracked.txt")
+	must.NoError(t, err)
+	must.EqOp(t, "committed", string(got))
+	_, ok := committed.Obj["nested/untracked.txt"]
+	must.False(t, ok)
+
+	repo, err := Open(dir, "HEAD", WithWorkingTree())
+	must.NoError(t, err)
+	got, err = repo.Show("tracked.txt")
+	must.NoError(t, err)
+	must.EqOp(t, "modified", string(got))
+	got, err = repo.Show("nested/untracked.txt")
+	must.NoError(t, err)
+	must.EqOp(t, "new", string(got))
+	must.EqOp(t, Blob, repo.Obj["nested/untracked.txt"].Kind)
+}
+
+func TestWorkingTreeRejectsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	must.NoError(t, os.WriteFile(filepath.Join(dir, "target.txt"), []byte("target"), 0o644))
+	must.NoError(t, os.WriteFile(filepath.Join(dir, "link.txt"), []byte("committed"), 0o644))
+	runGitScript(t, dir, "git add . && git commit -m initial")
+	must.NoError(t, os.Remove(filepath.Join(dir, "link.txt")))
+	must.NoError(t, os.Symlink("target.txt", filepath.Join(dir, "link.txt")))
+
+	_, err := Open(dir, "HEAD", WithWorkingTree())
+	must.Error(t, err)
+	must.ErrorContains(t, err, "working-tree symlink")
+}
+
 func TestTreeIndex(t *testing.T) {
 	dir := t.TempDir()
 	initGitRepo(t, dir)
