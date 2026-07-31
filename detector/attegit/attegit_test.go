@@ -84,6 +84,27 @@ func TestWorkingTreeRejectsSymlink(t *testing.T) {
 	must.ErrorContains(t, err, "working-tree symlink")
 }
 
+func TestGitAlternates(t *testing.T) {
+	dir := t.TempDir()
+	initGitRepo(t, dir)
+	must.NoError(t, os.WriteFile(filepath.Join(dir, "alternate.txt"), []byte("from alternate"), 0o644))
+	runGitScript(t, dir, `
+set -eux
+ git add alternate.txt
+ git commit -m initial
+ git clone --bare . ../objects.git
+ git -C ../objects.git repack -a -d --window=0 --depth=0
+ printf '%s/objects\n' "$(cd ../objects.git && pwd)" > .git/objects/info/alternates
+ find .git/objects -mindepth 1 -maxdepth 1 -type d -regex '.*/[0-9a-f][0-9a-f]' -exec rm -rf {} +
+`)
+
+	repo, err := Open(dir, "HEAD")
+	must.NoError(t, err)
+	got, err := repo.Show("alternate.txt")
+	must.NoError(t, err)
+	must.EqOp(t, "from alternate", string(got))
+}
+
 func TestTreeIndex(t *testing.T) {
 	dir := t.TempDir()
 	initGitRepo(t, dir)

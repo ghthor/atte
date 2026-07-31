@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -20,6 +21,10 @@ import (
 	"github.com/go-git/go-billy/v5/osfs"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/cache"
+	"github.com/go-git/go-git/v5/plumbing/object"
+	"github.com/go-git/go-git/v5/storage/filesystem"
+	"github.com/go-git/go-git/v5/storage/filesystem/dotgit"
 )
 
 // Path is a slash-separated path relative to the repository root. The root
@@ -72,6 +77,7 @@ type Repo struct {
 	blobs    map[Path][]byte
 
 	gitRepo  *git.Repository
+	gitRepos []*git.Repository
 	worktree billy.Filesystem
 	mu       sync.RWMutex
 }
@@ -89,11 +95,12 @@ func Open(repositoryPath, ref string, options ...OpenOption) (*Repo, error) {
 		option(&cfg)
 	}
 
-	gr, err := git.PlainOpen(repositoryPath)
+	gr, repos, err := openGitRepositories(repositoryPath)
 	if err != nil {
 		return nil, fmt.Errorf("open git repository: %w", err)
 	}
 	d := &Repo{
+		gitRepos: repos,
 		Obj:     make(map[Path]Obj),
 		Tree:    make(map[Path][]Obj),
 		blobs:   make(map[Path][]byte),
@@ -110,6 +117,50 @@ func Open(repositoryPath, ref string, options ...OpenOption) (*Repo, error) {
 	}
 	d.rebuildIndexes()
 	return d, nil
+}
+
+func openGitRepositories(repositoryPath string) (*git.Repository, []*git.Repository, error) {
+	root, err := git.PlainOpenWithOptions(repositoryPath, &git.PlainOpenOptions{
+		DetectDotGit:          false,
+		EnableDotGitCommonDir: false,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	repos := []*git.Repository{root}
+	dotgitPath := filepath.Join(repositoryPath, ".git")
+	isBare, err := isBareRepository(repositoryPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	if isBare {
+		dotgitPath = repositoryPath
+	}
+	dot, err := dotgit.NewWithOptions(osfs.New(dotgitPath), dotgit.Options{
+		ExclusiveAccess: false,
+		KeepDescriptors: false,
+		AlternatesFS:    osfs.New("/"),
+	}).Alternates()
+	if err != nil && !os.IsNotExist(err) {
+		return nil, nil, err
+	}
+	for _, alternate := range dot {
+		repo, err := git.Open(filesystem.NewStorage(alternate.Fs(), cache.NewObjectLRUDefault()), nil)
+		if err != nil {
+			return nil, nil, err
+		}
+		repos = append(repos, repo)
+	}
+	return root, repos, nil
+}
+
+func isBareRepository(repositoryPath string) (bool, error) {
+	cmd := gitCommand(repositoryPath, "rev-parse", "--is-bare-repository")
+	output, err := cmd.Output()
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(output)) == "true", nil
 }
 
 func (r *Repo) readTree(repositoryPath, ref string) error {
@@ -307,6 +358,18 @@ func parentPath(p Path) Path {
 	return Path(path.Dir(s))
 }
 
+func (r *Repo) blobObject(hash plumbing.Hash) (*object.Blob, error) {
+	var err error
+	for _, repo := range r.gitRepos {
+		blob, readErr := repo.BlobObject(hash)
+		if readErr == nil {
+			return blob, nil
+		}
+		err = readErr
+	}
+	return nil, err
+}
+
 // Show lazily reads a blob's contents from the repository or working tree.
 func (r *Repo) Show(relativePath Path) ([]byte, error) {
 	obj, ok := r.Obj[relativePath]
@@ -336,7 +399,7 @@ func (r *Repo) Show(relativePath Path) ([]byte, error) {
 			err = openErr
 		}
 	} else {
-		blob, readErr := r.gitRepo.BlobObject(obj.Hash)
+		blob, readErr := r.blobObject(obj.Hash)
 		if readErr == nil {
 			reader, readerErr := blob.Reader()
 			if readerErr == nil {
