@@ -9,6 +9,8 @@
 pkgs.mkShell {
   packages = [
     pkgs-unstable.go_1_26
+    pkgs.treefmt
+    pkgs.nixfmt
     nucleusPackage
     cobraCli
     (pkgs.writeShellScriptBin "atte-agent" ''
