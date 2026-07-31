@@ -6,6 +6,7 @@ require (
 	github.com/go-git/go-git/v5 v5.19.2
 	github.com/shoenig/test v1.13.2
 	github.com/spf13/cobra v1.10.2
+	github.com/xlab/treeprint v1.2.0
 )
 
 require (
