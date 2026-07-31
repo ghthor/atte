@@ -8,6 +8,7 @@ require (
 	github.com/shoenig/test v1.13.2
 	github.com/spf13/cobra v1.10.2
 	github.com/xlab/treeprint v1.2.0
+	golang.org/x/mod v0.38.0
 )
 
 require (

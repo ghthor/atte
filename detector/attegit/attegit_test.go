@@ -2,20 +2,20 @@ package attegit
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 
+	"github.com/ghthor/atte/detector/attegittest"
 	"github.com/shoenig/test/must"
 )
 
 func TestOpenAndShow(t *testing.T) {
 	dir := t.TempDir()
-	initGitRepo(t, dir)
+	attegittest.InitGitRepo(t, dir)
 	must.NoError(t, os.Mkdir(filepath.Join(dir, "nested"), 0o755))
 	must.NoError(t, os.WriteFile(filepath.Join(dir, "root.txt"), []byte("root"), 0o644))
 	must.NoError(t, os.WriteFile(filepath.Join(dir, "nested", "child.txt"), []byte("child"), 0o644))
-	runGitScript(t, dir, `
+	attegittest.RunGitScript(t, dir, `
 set -x
 git add .
 git commit -m initial
@@ -44,14 +44,14 @@ git commit -m initial
 
 func TestWorkingTree(t *testing.T) {
 	dir := t.TempDir()
-	initGitRepo(t, dir)
+	attegittest.InitGitRepo(t, dir)
 	must.NoError(t, os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("committed"), 0o644))
-	runGitScript(t, dir, "git add . && git commit -m initial")
+	attegittest.RunGitScript(t, dir, "git add . && git commit -m initial")
 	must.NoError(t, os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("modified"), 0o644))
 	must.NoError(t, os.MkdirAll(filepath.Join(dir, "nested"), 0o755))
 	must.NoError(t, os.WriteFile(filepath.Join(dir, "nested", "untracked.txt"), []byte("new"), 0o644))
 	must.NoError(t, os.WriteFile(filepath.Join(dir, "staged.txt"), []byte("staged"), 0o644))
-	runGitScript(t, dir, "git add staged.txt")
+	attegittest.RunGitScript(t, dir, "git add staged.txt")
 
 	committed, err := Open(dir, "HEAD")
 	must.NoError(t, err)
@@ -78,10 +78,10 @@ func TestWorkingTree(t *testing.T) {
 
 func TestWorkingTreeRejectsSymlink(t *testing.T) {
 	dir := t.TempDir()
-	initGitRepo(t, dir)
+	attegittest.InitGitRepo(t, dir)
 	must.NoError(t, os.WriteFile(filepath.Join(dir, "target.txt"), []byte("target"), 0o644))
 	must.NoError(t, os.WriteFile(filepath.Join(dir, "link.txt"), []byte("committed"), 0o644))
-	runGitScript(t, dir, "git add . && git commit -m initial")
+	attegittest.RunGitScript(t, dir, "git add . && git commit -m initial")
 	must.NoError(t, os.Remove(filepath.Join(dir, "link.txt")))
 	must.NoError(t, os.Symlink("target.txt", filepath.Join(dir, "link.txt")))
 
@@ -92,9 +92,9 @@ func TestWorkingTreeRejectsSymlink(t *testing.T) {
 
 func TestGitAlternates(t *testing.T) {
 	dir := t.TempDir()
-	initGitRepo(t, dir)
+	attegittest.InitGitRepo(t, dir)
 	must.NoError(t, os.WriteFile(filepath.Join(dir, "alternate.txt"), []byte("from alternate"), 0o644))
-	runGitScript(t, dir, `
+	attegittest.RunGitScript(t, dir, `
 set -eux
  git add alternate.txt
  git commit -m initial
@@ -113,12 +113,12 @@ set -eux
 
 func TestTreeIndex(t *testing.T) {
 	dir := t.TempDir()
-	initGitRepo(t, dir)
+	attegittest.InitGitRepo(t, dir)
 	must.NoError(t, os.MkdirAll(filepath.Join(dir, "nested", "deeper"), 0o755))
 	must.NoError(t, os.WriteFile(filepath.Join(dir, "root.txt"), []byte("root"), 0o644))
 	must.NoError(t, os.WriteFile(filepath.Join(dir, "nested", "child.txt"), []byte("child"), 0o644))
 	must.NoError(t, os.WriteFile(filepath.Join(dir, "nested", "deeper", "leaf.txt"), []byte("leaf"), 0o644))
-	runGitScript(t, dir, `
+	attegittest.RunGitScript(t, dir, `
 set -x
 git add .
 git commit -m initial
@@ -144,18 +144,6 @@ git commit -m initial
 	must.SliceEqOp(t, []Path{"", "nested", "nested/deeper"}, repo.TreeKeys)
 }
 
-func initGitRepo(t *testing.T, dir string) {
-	t.Helper()
-	runGitScript(t, dir, `
-set -x
-git init
-git config user.email test@example.com
-git config user.name Test
-git config commit.gpgSign false
-git config tag.gpgSign false
-`)
-}
-
 func assertTreeChildren(t *testing.T, got []Obj, want map[Path]Kind) {
 	t.Helper()
 	must.MapLen(t, len(want), sliceToMap(got))
@@ -172,12 +160,4 @@ func sliceToMap(objs []Obj) map[Path]Obj {
 		m[obj.Path] = obj
 	}
 	return m
-}
-
-func runGitScript(t *testing.T, dir, script string) {
-	t.Helper()
-	cmd := exec.Command("bash", "-c", script)
-	cmd.Dir = dir
-	output, err := cmd.CombinedOutput()
-	must.NoError(t, err, must.Sprintf("git script: %s", output))
 }
