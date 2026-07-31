@@ -50,6 +50,8 @@ func TestWorkingTree(t *testing.T) {
 	must.NoError(t, os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("modified"), 0o644))
 	must.NoError(t, os.MkdirAll(filepath.Join(dir, "nested"), 0o755))
 	must.NoError(t, os.WriteFile(filepath.Join(dir, "nested", "untracked.txt"), []byte("new"), 0o644))
+	must.NoError(t, os.WriteFile(filepath.Join(dir, "staged.txt"), []byte("staged"), 0o644))
+	runGitScript(t, dir, "git add staged.txt")
 
 	committed, err := Open(dir, "HEAD")
 	must.NoError(t, err)
@@ -61,6 +63,10 @@ func TestWorkingTree(t *testing.T) {
 
 	repo, err := Open(dir, "HEAD", WithWorkingTree())
 	must.NoError(t, err)
+	got, err = repo.Show("staged.txt")
+	must.NoError(t, err)
+	must.EqOp(t, "staged", string(got))
+	must.EqOp(t, WorkingTreeSource, repo.Obj["staged.txt"].Source)
 	got, err = repo.Show("tracked.txt")
 	must.NoError(t, err)
 	must.EqOp(t, "modified", string(got))

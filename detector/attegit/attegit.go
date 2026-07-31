@@ -214,8 +214,15 @@ func (r *Repo) overlayWorkingTree() error {
 	if err != nil {
 		return fmt.Errorf("list modified working-tree files: %w", err)
 	}
-	workingTreePaths := make(map[string]bool, len(modified))
+	staged, err := runGitNul(root, "diff", "--cached", "--name-only", "-z")
+	if err != nil {
+		return fmt.Errorf("list staged working-tree files: %w", err)
+	}
+	workingTreePaths := make(map[string]bool, len(modified)+len(staged))
 	for _, raw := range modified {
+		workingTreePaths[string(raw)] = true
+	}
+	for _, raw := range staged {
 		workingTreePaths[string(raw)] = true
 	}
 	untracked, err := runGitNul(root, "ls-files", "--others", "--exclude-standard", "-z")
