@@ -9,15 +9,19 @@ import (
 	"github.com/shoenig/test/must"
 )
 
-func TestOpenAndShow(t *testing.T) {
+func committedRepo(t *testing.T, files map[string]string) *attegittest.GitRepo {
+	t.Helper()
 	git := attegittest.NewGitRepo(t)
-	git.WriteFile("root.txt", []byte("root"), 0o644)
-	git.WriteFile("nested/child.txt", []byte("child"), 0o644)
-	git.RunGitScript(`
-set -x
-git add .
-git commit -m initial
-`)
+	git.WriteFiles(t, files)
+	git.CommitAll(t, "initial")
+	return git
+}
+
+func TestOpenAndShow(t *testing.T) {
+	git := committedRepo(t, map[string]string{
+		"root.txt":         "root",
+		"nested/child.txt": "child",
+	})
 	dir := git.Dir()
 
 	repo, err := Open(dir, "HEAD")
@@ -32,7 +36,7 @@ git commit -m initial
 
 	got, err := repo.Show("nested/child.txt")
 	must.NoError(t, err)
-	must.EqOp(t, "child", string(got))
+	must.EqOp(t, "child\n", string(got))
 
 	_, err = repo.Show("nested")
 	must.Error(t, err)
@@ -42,20 +46,20 @@ git commit -m initial
 }
 
 func TestWorkingTree(t *testing.T) {
-	git := attegittest.NewGitRepo(t)
-	git.WriteFile("tracked.txt", []byte("committed"), 0o644)
-	git.RunGitScript("git add . && git commit -m initial")
-	git.WriteFile("tracked.txt", []byte("modified"), 0o644)
-	git.WriteFile("nested/untracked.txt", []byte("new"), 0o644)
-	git.WriteFile("staged.txt", []byte("staged"), 0o644)
-	git.RunGitScript("git add staged.txt")
+	git := committedRepo(t, map[string]string{
+		"tracked.txt": "committed",
+	})
+	git.WriteFile(t, "tracked.txt", []byte("modified"), 0o644)
+	git.WriteFile(t, "nested/untracked.txt", []byte("new"), 0o644)
+	git.WriteFile(t, "staged.txt", []byte("staged"), 0o644)
+	git.RunGitScript(t, "git add staged.txt")
 	dir := git.Dir()
 
 	committed, err := Open(dir, "HEAD")
 	must.NoError(t, err)
 	got, err := committed.Show("tracked.txt")
 	must.NoError(t, err)
-	must.EqOp(t, "committed", string(got))
+	must.EqOp(t, "committed\n", string(got))
 	must.MapNotContainsKey(t, committed.Obj, "nested/untracked.txt")
 
 	repo, err := Open(dir, "HEAD", WithWorkingTree())
@@ -74,10 +78,10 @@ func TestWorkingTree(t *testing.T) {
 }
 
 func TestWorkingTreeRejectsSymlink(t *testing.T) {
-	git := attegittest.NewGitRepo(t)
-	git.WriteFile("target.txt", []byte("target"), 0o644)
-	git.WriteFile("link.txt", []byte("committed"), 0o644)
-	git.RunGitScript("git add . && git commit -m initial")
+	git := committedRepo(t, map[string]string{
+		"target.txt": "target",
+		"link.txt":   "committed",
+	})
 	dir := git.Dir()
 	must.NoError(t, os.Remove(filepath.Join(dir, "link.txt")))
 	must.NoError(t, os.Symlink("target.txt", filepath.Join(dir, "link.txt")))
@@ -89,8 +93,8 @@ func TestWorkingTreeRejectsSymlink(t *testing.T) {
 
 func TestGitAlternates(t *testing.T) {
 	git := attegittest.NewGitRepo(t)
-	git.WriteFile("alternate.txt", []byte("from alternate"), 0o644)
-	git.RunGitScript(`
+	git.WriteFile(t, "alternate.txt", []byte("from alternate"), 0o644)
+	git.RunGitScript(t, `
 set -eux
  git add alternate.txt
  git commit -m initial
@@ -109,15 +113,11 @@ set -eux
 }
 
 func TestTreeIndex(t *testing.T) {
-	git := attegittest.NewGitRepo(t)
-	git.WriteFile("root.txt", []byte("root"), 0o644)
-	git.WriteFile("nested/child.txt", []byte("child"), 0o644)
-	git.WriteFile("nested/deeper/leaf.txt", []byte("leaf"), 0o644)
-	git.RunGitScript(`
-set -x
-git add .
-git commit -m initial
-`)
+	git := committedRepo(t, map[string]string{
+		"root.txt":               "root",
+		"nested/child.txt":       "child",
+		"nested/deeper/leaf.txt": "leaf",
+	})
 
 	repo, err := Open(git.Dir(), "HEAD")
 	must.NoError(t, err)

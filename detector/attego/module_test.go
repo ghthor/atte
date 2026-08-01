@@ -15,21 +15,24 @@ import (
 func newBasicFixture(t *testing.T) string {
 	t.Helper()
 	git := attegittest.NewGitRepo(t)
-	git.WriteFile("go.mod", []byte(`module example.com/root
+	git.WriteFiles(t, map[string]string{
+		"go.mod": `
+module example.com/root
 
 go 1.24
 
 require github.com/shoenig/test v1.13.2
 
 require github.com/google/go-cmp v0.7.0 // indirect
-`), 0o644)
-	git.WriteFile("go.sum", []byte(`github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
+`,
+		"go.sum": `
+github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
 github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
 github.com/shoenig/test v1.13.2 h1:SaGxHxg7xkRuKuNtuFmHf0LgNGaAgcBT7HN4WHCKfqU=
 github.com/shoenig/test v1.13.2/go.mod h1:MKmiRyEeuFl8y9PCoThaRDgYQZeWBhRQlH99poXz5LI=
-`), 0o644)
-
-	git.WriteFile("p/p.go", []byte(`package p
+`,
+		"p/p.go": `
+package p
 import (
 	"fmt"
 
@@ -37,9 +40,9 @@ import (
 )
 var _ = fmt.Println
 var _ = must.NoError
-`), 0o644)
-
-	git.WriteFile("p/p_test.go", []byte(`package p_test
+`,
+		"p/p_test.go": `
+package p_test
 import (
 	"testing"
 
@@ -50,8 +53,9 @@ import (
 var _ = p.X
 var _ *testing.T
 var _ = must.NoError
-`), 0o644)
-	git.RunGitScript("git add . && git commit -qm init")
+`,
+	})
+	git.CommitAll(t, "init")
 	return git.Dir()
 }
 
@@ -86,21 +90,22 @@ func TestDecodeEntityIDRejectsMalformed(t *testing.T) {
 	must.Error(t, err)
 }
 
+func openTestGraph(t *testing.T, dir string) *graph.Graph {
+	t.Helper()
+	repo, err := attegit.Open(dir, "HEAD")
+	must.NoError(t, err)
+	got, err := Graph(repo)
+	must.NoError(t, err)
+	return got
+}
+
 func TestGraphMatchesGoList(t *testing.T) {
 	dir := newBasicFixture(t)
-	r, e := attegit.Open(dir, "HEAD")
-	must.NoError(t, e)
-	got, e := Graph(r)
-	must.NoError(t, e)
-	assertGraphsEqual(t, goListGraph(t, dir), got)
+	assertGraphsEqual(t, goListGraph(t, dir), openTestGraph(t, dir))
 }
 
 func TestGraphPackagesAndTests(t *testing.T) {
-	dir := newBasicFixture(t)
-	r, e := attegit.Open(dir, "HEAD")
-	must.NoError(t, e)
-	g, e := Graph(r)
-	must.NoError(t, e)
+	g := openTestGraph(t, newBasicFixture(t))
 	var normal, test graph.EntityID
 	for _, id := range g.EntityKeys {
 		if g.Entities[id].Kind == PackageKind && string(id) != "" {
