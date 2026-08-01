@@ -8,25 +8,35 @@ import (
 	"strings"
 )
 
+// EntityID uniquely identifies an entity in a Graph.
 type EntityID string
 
+// Entity describes a graph entity and its kind.
 type Entity struct {
 	ID   EntityID
 	Kind string
 }
+
+// RelationKind identifies the meaning and direction of a relationship.
 type RelationKind string
+
+// Relationship is a directed edge from From to To.
 type Relationship struct {
 	From EntityID
 	To   EntityID
 	Kind RelationKind
 }
 
+// Graph stores entities and their outgoing relationships. EntityKeys and outgoing
+// relationships are kept in deterministic order by New and graph mutations.
 type Graph struct {
 	Entities   map[EntityID]Entity
 	EntityKeys []EntityID
 	out        map[EntityID][]Relationship
 }
 
+// New validates and constructs a graph. Entity IDs and relationship kinds must
+// be non-empty, and relationships must reference known entities.
 func New(entities []Entity, relationships []Relationship) (*Graph, error) {
 	byID := make(map[EntityID]Entity, len(entities))
 	for _, entity := range entities {
@@ -112,6 +122,12 @@ func (g *Graph) Absorb(other *Graph) error {
 	return nil
 }
 
-func (g *Graph) Has(id EntityID) bool              { _, ok := g.Entities[id]; return ok }
+// Has reports whether id identifies an entity in g.
+func (g *Graph) Has(id EntityID) bool { _, ok := g.Entities[id]; return ok }
+
+// Entity returns the entity identified by id, if present.
 func (g *Graph) Entity(id EntityID) (Entity, bool) { entity, ok := g.Entities[id]; return entity, ok }
-func (g *Graph) Out(id EntityID) []Relationship    { return append([]Relationship(nil), g.out[id]...) }
+
+// Out returns a copy of the relationships leaving id. Modifying the returned
+// slice does not change the graph.
+func (g *Graph) Out(id EntityID) []Relationship { return append([]Relationship(nil), g.out[id]...) }

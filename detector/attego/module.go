@@ -19,12 +19,16 @@ import (
 	"golang.org/x/mod/modfile"
 )
 
+// Namespace prefixes entity IDs produced by this package. The package-kind
+// values distinguish repository packages, package tests, and unresolved imports.
 const (
-	Namespace                          = "attego"
-	PackageKind                        = Namespace + ":package"
-	PackageTestKind                    = Namespace + ":package-test"
-	PackageStdlibKind                  = Namespace + ":package-stdlib"
-	PackageExternalKind                = Namespace + ":package-external"
+	Namespace           = "attego"
+	PackageKind         = Namespace + ":package"
+	PackageTestKind     = Namespace + ":package-test"
+	PackageStdlibKind   = Namespace + ":package-stdlib"
+	PackageExternalKind = Namespace + ":package-external"
+
+	// ImportsRelation relates a package to an imported package entity.
 	ImportsRelation graph.RelationKind = "imports"
 )
 

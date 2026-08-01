@@ -25,7 +25,9 @@ var (
 	graphExternalImports bool
 )
 
+// PrintGraphOptions controls the details included in graph output.
 type PrintGraphOptions struct {
+	// IncludeExternalImports includes imports that cannot be resolved inside the repository.
 	IncludeExternalImports bool
 }
 
@@ -140,10 +142,10 @@ func addGraphChildren(parent treeprint.Tree, repo *attegit.Repo, g *graph.Graph,
 			}
 		case attegit.BlobKind:
 			label := path.Base(string(attegit.EntityPath(id)))
-				if obj, ok := repo.Obj[attegit.EntityPath(id)]; ok && obj.Source == attegit.WorkingTreeSource {
-					label = workingTreeStyle.Render(label)
-				}
-				parent.AddNode(label)
+			if obj, ok := repo.Obj[attegit.EntityPath(id)]; ok && obj.Source == attegit.WorkingTreeSource {
+				label = workingTreeStyle.Render(label)
+			}
+			parent.AddNode(label)
 		case attego.PackageKind, attego.PackageTestKind:
 			label := "go package"
 			if entity.Kind == attego.PackageTestKind {

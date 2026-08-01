@@ -8,19 +8,27 @@ import (
 	"github.com/ghthor/atte/graph"
 )
 
+// Impulse identifies an entity from which propagation begins and records why it
+// was selected.
 type Impulse struct {
 	Entity graph.EntityID
 	Reason string
 }
 
+// Cone contains every entity reachable from the impulses, grouped by breadth-
+// first depth.
 type Cone struct {
 	Candidates []graph.EntityID
 	Depth      map[graph.EntityID]int
 	Frontiers  [][]graph.EntityID
 }
 
+// Contains reports whether id is included in the cone.
 func (c *Cone) Contains(id graph.EntityID) bool { _, ok := c.Depth[id]; return ok }
 
+// Broad computes the breadth-first transitive closure of impulses. Repeated
+// impulses are ignored, and an error is returned when an impulse names an
+// unknown entity.
 func Broad(g *graph.Graph, impulses []Impulse) (*Cone, error) {
 	if g == nil {
 		return nil, fmt.Errorf("graph is nil")

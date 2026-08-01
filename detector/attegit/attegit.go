@@ -35,7 +35,9 @@ type Path string
 type Kind uint8
 
 const (
+	// Blob identifies a Git blob object.
 	Blob Kind = iota + 1
+	// Tree identifies a Git tree object.
 	Tree
 )
 
@@ -43,7 +45,9 @@ const (
 type Source uint8
 
 const (
+	// GitSource identifies content read from the selected Git revision.
 	GitSource Source = iota + 1
+	// WorkingTreeSource identifies content overlaid from the working tree.
 	WorkingTreeSource
 )
 
@@ -82,7 +86,7 @@ type Repo struct {
 	mu       sync.RWMutex
 }
 
-// Open detects ref from repositoryPath. ref may be a commit, branch, or tag.
+// Open opens repositoryPath at ref, which may be a commit, branch, or tag. Options can overlay the working tree.
 func Open(repositoryPath, ref string, options ...OpenOption) (*Repo, error) {
 	if strings.TrimSpace(repositoryPath) == "" {
 		return nil, errors.New("repository path is empty")
@@ -101,10 +105,10 @@ func Open(repositoryPath, ref string, options ...OpenOption) (*Repo, error) {
 	}
 	d := &Repo{
 		gitRepos: repos,
-		Obj:     make(map[Path]Obj),
-		Tree:    make(map[Path][]Obj),
-		blobs:   make(map[Path][]byte),
-		gitRepo: gr,
+		Obj:      make(map[Path]Obj),
+		Tree:     make(map[Path][]Obj),
+		blobs:    make(map[Path][]byte),
+		gitRepo:  gr,
 	}
 	if err := d.readTree(repositoryPath, ref); err != nil {
 		return nil, err
