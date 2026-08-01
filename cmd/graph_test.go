@@ -16,6 +16,12 @@ import (
 func TestPrintGraphGolden(t *testing.T) {
 	repo := repoWithFiles(t, map[string]string{
 		"README.md": "read me",
+		"atte.hcl": `
+			test "default" {
+				script = "./test.sh"
+			}
+		`,
+		"test.sh": "#!/bin/sh\n",
 		"go.mod": `
 			module example.com/root
 

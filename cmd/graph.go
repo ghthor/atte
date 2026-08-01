@@ -14,6 +14,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attego"
+	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/graph"
 	"github.com/spf13/cobra"
 	"github.com/xlab/treeprint"
@@ -101,6 +102,13 @@ func printGraph(w io.Writer, repo *attegit.Repo, relativePath string, options ..
 	if err := gitGraph.Absorb(goGraph); err != nil {
 		return fmt.Errorf("merge Go graph: %w", err)
 	}
+	hclGraph, err := attehcl.GraphWithContainment(repo)
+	if err != nil {
+		return fmt.Errorf("build HCL graph: %w", err)
+	}
+	if err := gitGraph.Absorb(hclGraph); err != nil {
+		return fmt.Errorf("merge HCL graph: %w", err)
+	}
 	return printGitGraph(w, repo, gitGraph, relativePath, printOptions)
 }
 
@@ -137,7 +145,7 @@ func addGraphChildren(parent treeprint.Tree, repo *attegit.Repo, g *graph.Graph,
 			switch {
 			case relation.To == parentID:
 				child = id
-			case id == parentID && (g.Entities[relation.To].Kind == attego.PackageKind || g.Entities[relation.To].Kind == attego.PackageTestKind):
+			case id == parentID && (g.Entities[relation.To].Kind == attego.PackageKind || g.Entities[relation.To].Kind == attego.PackageTestKind || g.Entities[relation.To].Kind == attehcl.TestKind):
 				child = relation.To
 			default:
 				continue
@@ -163,6 +171,8 @@ func addGraphChildren(parent treeprint.Tree, repo *attegit.Repo, g *graph.Graph,
 			if err := addPackageNode(parent, repo, g, id, options); err != nil {
 				return err
 			}
+		case attehcl.TestKind:
+			parent.AddBranch("test " + string(id))
 		default:
 			return fmt.Errorf("unsupported entity kind %q for %q", entity.Kind, id)
 		}

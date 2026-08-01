@@ -13,6 +13,7 @@ pkgs.mkShell {
     pkgs-unstable.golangci-lint
     pkgs.treefmt
     pkgs.nixfmt
+    pkgs.hclfmt
     pkgs.graph-easy
     pkgs.uv
     # nucleusPackage

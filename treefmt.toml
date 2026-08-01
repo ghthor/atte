@@ -6,3 +6,8 @@ includes = ["*.go"]
 [formatter.nix]
 command = "nixfmt"
 includes = ["*.nix"]
+
+[formatter.hcl]
+command = "hclfmt"
+options = ["-w"]
+includes = ["*.hcl"]
