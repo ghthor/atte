@@ -11,6 +11,7 @@ pkgs.mkShell {
     pkgs-unstable.go_1_26
     pkgs.treefmt
     pkgs.nixfmt
+    pkgs.graph-easy
     # nucleusPackage
     cobraCli
     (pkgs.writeShellScriptBin "atte-agent" ''

@@ -32,27 +32,63 @@ type module struct {
 	replaces []replace
 }
 type replace struct{ old, target string }
+
 type goFile struct {
 	dir, name string
 	imports   []string
 	test      bool
 }
 type packageInfo struct {
-	module          *module
-	dir, importPath string
-	imports         map[string]struct{}
-	testImports     map[string]struct{}
-	hasTests        bool
+	module               *module
+	dir, importPath      string
+	imports, testImports map[string]struct{}
+	hasTests             bool
 }
 
-// EntityID returns a stable ID for a package owned by moduleDir.
+// EntityID encodes kind, moduleDir, and importPath into an attego graph.EntityID.
+// It is the inverse of DecodeEntityID.
 func EntityID(kind string, moduleDir attegit.Path, importPath string) graph.EntityID {
 	enc := func(s string) string { return base64.RawURLEncoding.EncodeToString([]byte(s)) }
-	return graph.EntityID(fmt.Sprintf("%s:%s:%s:%s", Namespace, kind[len(Namespace)+1:], enc(string(moduleDir)), enc(importPath)))
+	goModPath := path.Join(string(moduleDir), "go.mod")
+	return graph.EntityID(fmt.Sprintf("%s:%s:%s:%s", Namespace, kind[len(Namespace)+1:], goModPath, enc(importPath)))
 }
 
-// Graph analyzes Go modules and returns their package dependency graph.
-func Graph(repo *attegit.Repo) (*graph.Graph, error) {
+// DecodeEntityID returns the kind, module directory, and import path encoded in an attego entity ID.
+func DecodeEntityID(id graph.EntityID) (string, attegit.Path, string, error) {
+	parts := strings.Split(string(id), ":")
+	if len(parts) != 4 || parts[0] != Namespace {
+		return "", "", "", fmt.Errorf("invalid attego entity ID %q", id)
+	}
+	goModPath := parts[2]
+	if goModPath != "go.mod" && !strings.HasSuffix(goModPath, "/go.mod") {
+		return "", "", "", fmt.Errorf("invalid attego module path %q", goModPath)
+	}
+	moduleDir := strings.TrimSuffix(strings.TrimSuffix(goModPath, "go.mod"), "/")
+
+	decoded, err := base64.RawURLEncoding.DecodeString(parts[3])
+	if err != nil {
+		return "", "", "", fmt.Errorf("decode %q: %w", parts[3], err)
+	}
+	importPath := string(decoded)
+
+	kind := Namespace + ":" + parts[1]
+	if kind != PackageKind && kind != PackageTestKind {
+		return "", "", "", fmt.Errorf("invalid attego entity kind %q", kind)
+	}
+	return kind, attegit.Path(moduleDir), importPath, nil
+}
+
+// Graph builds the dependency graph of Go packages and package tests found in
+// repo, related by ImportsRelation. Package entities are not related to the
+// repository's filesystem tree; use GraphWithContainment for that.
+func Graph(repo *attegit.Repo) (*graph.Graph, error) { return graphFor(repo, false) }
+
+// GraphWithContainment builds the same graph as Graph, but additionally
+// relates each package and package-test entity to the attegit.Tree entity for
+// its containing directory via attegit.ContainsRelation.
+func GraphWithContainment(repo *attegit.Repo) (*graph.Graph, error) { return graphFor(repo, true) }
+
+func graphFor(repo *attegit.Repo, containment bool) (*graph.Graph, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("nil repository")
 	}
@@ -98,17 +134,24 @@ func Graph(repo *attegit.Repo) (*graph.Graph, error) {
 	for _, p := range packages {
 		pid := EntityID(PackageKind, p.module.dir, p.importPath)
 		entities[pid] = graph.Entity{ID: pid, Kind: PackageKind}
+		var treeID graph.EntityID
+		if containment {
+			treeID = attegit.EntityID(attegit.Path(p.dir))
+			entities[treeID] = graph.Entity{ID: treeID, Kind: attegit.TreeKind}
+			relations[graph.Relationship{From: pid, To: treeID, Kind: attegit.ContainsRelation}] = struct{}{}
+		}
 		tid := EntityID(PackageTestKind, p.module.dir, p.importPath)
 		if p.hasTests {
 			entities[tid] = graph.Entity{ID: tid, Kind: PackageTestKind}
+			if containment {
+				relations[graph.Relationship{From: tid, To: treeID, Kind: attegit.ContainsRelation}] = struct{}{}
+			}
 		}
 		for _, imp := range sortedSet(p.imports) {
-			addImport(p, pid, imp, packages, mods, byModulePath, entities, relations)
+			addImport(p, pid, imp, packages, byModulePath, entities, relations)
 		}
-		if len(p.testImports) > 0 {
-			for _, imp := range sortedSet(p.testImports) {
-				addImport(p, tid, imp, packages, mods, byModulePath, entities, relations)
-			}
+		for _, imp := range sortedSet(p.testImports) {
+			addImport(p, tid, imp, packages, byModulePath, entities, relations)
 		}
 	}
 	el := make([]graph.Entity, 0, len(entities))
@@ -123,8 +166,8 @@ func Graph(repo *attegit.Repo) (*graph.Graph, error) {
 }
 
 func scan(repo *attegit.Repo) ([]*module, []goFile, error) {
-	mods := make([]*module, 0)
-	files := make([]goFile, 0)
+	mods := make([]*module, 0, len(repo.ObjKeys))
+	files := make([]goFile, 0, len(repo.ObjKeys))
 	for _, p := range repo.ObjKeys {
 		if repo.Obj[p].Kind != attegit.Blob {
 			continue
@@ -177,6 +220,7 @@ func owner(mods []*module, dir string) *module {
 	}
 	return nil
 }
+
 func sortedSet(m map[string]struct{}) []string {
 	out := make([]string, 0, len(m))
 	for s := range m {
@@ -185,7 +229,8 @@ func sortedSet(m map[string]struct{}) []string {
 	sort.Strings(out)
 	return out
 }
-func addImport(p *packageInfo, from graph.EntityID, imp string, packages map[string]*packageInfo, mods []*module, byPath map[string][]*module, entities map[graph.EntityID]graph.Entity, relations map[graph.Relationship]struct{}) {
+
+func addImport(p *packageInfo, from graph.EntityID, imp string, packages map[string]*packageInfo, byPath map[string][]*module, entities map[graph.EntityID]graph.Entity, relations map[graph.Relationship]struct{}) {
 	var target graph.EntityID
 	if q := resolveLocal(p, imp, packages); q != nil {
 		target = EntityID(PackageKind, q.module.dir, q.importPath)
@@ -196,31 +241,31 @@ func addImport(p *packageInfo, from graph.EntityID, imp string, packages map[str
 		entities[target] = graph.Entity{ID: target, Kind: PackageKind}
 	}
 	relations[graph.Relationship{From: from, To: target, Kind: ImportsRelation}] = struct{}{}
-	_ = mods
 }
+
 func resolveLocal(p *packageInfo, imp string, packages map[string]*packageInfo) *packageInfo {
 	for _, r := range p.module.replaces {
 		if imp == r.old || strings.HasPrefix(imp, r.old+"/") {
 			suffix := strings.TrimPrefix(imp, r.old)
-			dir := path.Join(r.target, suffix)
-			if q := findPackageDir(dir, packages); q != nil {
+			if q := findPackageDir(path.Join(r.target, suffix), packages); q != nil {
 				return q
 			}
 		}
 	}
 	if imp == p.module.name || strings.HasPrefix(imp, p.module.name+"/") {
-		dir := strings.TrimPrefix(imp, p.module.name)
-		dir = strings.TrimPrefix(dir, "/")
+		dir := strings.TrimPrefix(strings.TrimPrefix(imp, p.module.name), "/")
 		return findPackage(p.module.dir, path.Join(string(p.module.dir), dir), packages)
 	}
 	return nil
 }
+
 func findPackage(modDir attegit.Path, dir string, packages map[string]*packageInfo) *packageInfo {
 	if dir == "." {
 		dir = ""
 	}
 	return packages[string(modDir)+"\x00"+dir]
 }
+
 func findPackageDir(dir string, packages map[string]*packageInfo) *packageInfo {
 	for _, q := range packages {
 		if string(q.dir) == dir {
@@ -229,6 +274,7 @@ func findPackageDir(dir string, packages map[string]*packageInfo) *packageInfo {
 	}
 	return nil
 }
+
 func resolveModuleImport(imp string, byPath map[string][]*module, packages map[string]*packageInfo) *packageInfo {
 	var best *module
 	bestLen := -1

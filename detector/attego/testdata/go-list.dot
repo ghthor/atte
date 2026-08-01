@@ -1,0 +1,45 @@
+digraph "" {
+	graph [bb="0,0,637.72,353.37"];
+	node [label="\N"];
+	edge [label="\E"];
+	n_YXR0ZWdvOnBhY2thZ2UtdGVzdDpnby5tb2Q6WlhoaGJYQnNaUzVqYjIwdmNtOXZkQzl3	[height=1.1471,
+		label="package-test\nmodule=go.mod\nimport=example.com/root/p",
+		pos="344.16,312.08",
+		width=3.4095];
+	n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOloybDBhSFZpTG1OdmJTOXphRzlsYm1sbkwzUmxjM1F2YlhWemRB	[height=1.1471,
+		label="package\nmodule=go.mod\nimport=github.com/shoenig/test/must",
+		pos="160.16,41.295",
+		width=4.4489];
+	n_YXR0ZWdvOnBhY2thZ2UtdGVzdDpnby5tb2Q6WlhoaGJYQnNaUzVqYjIwdmNtOXZkQzl3 -> n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOloybDBhSFZpTG1OdmJTOXphRzlsYm1sbkwzUmxjM1F2YlhWemRB	[key=n_YXR0ZWdvOnBhY2thZ2UtdGVzdDpnby5tb2Q6WlhoaGJYQnNaUzVqYjIwdmNtOXZkQzl3_n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOloybDBhSFZpTG1OdmJTOXphRzlsYm1sbkwzUmxjM1F2YlhWemRB,
+		label=imports,
+		lp="190.77,176.69",
+		pos="e,151.62,83.01 253.7,283.9 221.65,269.56 188.77,248.43 169.38,217.98 146.12,181.44 145.8,131.46 150.14,94.153"];
+	n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOlpYaGhiWEJzWlM1amIyMHZjbTl2ZEM5dw	[height=1.1471,
+		label="package\nmodule=go.mod\nimport=example.com/root/p",
+		pos="344.16,176.69",
+		width=3.4095];
+	n_YXR0ZWdvOnBhY2thZ2UtdGVzdDpnby5tb2Q6WlhoaGJYQnNaUzVqYjIwdmNtOXZkQzl3 -> n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOlpYaGhiWEJzWlM1amIyMHZjbTl2ZEM5dw	[key=n_YXR0ZWdvOnBhY2thZ2UtdGVzdDpnby5tb2Q6WlhoaGJYQnNaUzVqYjIwdmNtOXZkQzl3_n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOlpYaGhiWEJzWlM1amIyMHZjbTl2ZEM5dw,
+		label=imports,
+		lp="365.55,244.38",
+		pos="e,344.16,218.18 344.16,270.33 344.16,257.4 344.16,242.93 344.16,229.34"];
+	n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOmRHVnpkR2x1Wnc	[height=1.1471,
+		label="package\nmodule=go.mod\nimport=testing",
+		pos="561.16,176.69",
+		width=2.1268];
+	n_YXR0ZWdvOnBhY2thZ2UtdGVzdDpnby5tb2Q6WlhoaGJYQnNaUzVqYjIwdmNtOXZkQzl3 -> n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOmRHVnpkR2x1Wnc	[key=n_YXR0ZWdvOnBhY2thZ2UtdGVzdDpnby5tb2Q6WlhoaGJYQnNaUzVqYjIwdmNtOXZkQzl3_n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOmRHVnpkR2x1Wnc,
+		label=imports,
+		lp="487.04,244.38",
+		pos="e,511.32,208.32 402.31,275.33 433.01,256.46 470.62,233.34 501.54,214.34"];
+	n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOlpYaGhiWEJzWlM1amIyMHZjbTl2ZEM5dw -> n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOloybDBhSFZpTG1OdmJTOXphRzlsYm1sbkwzUmxjM1F2YlhWemRB	[key=n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOlpYaGhiWEJzWlM1amIyMHZjbTl2ZEM5dw_n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOloybDBhSFZpTG1OdmJTOXphRzlsYm1sbkwzUmxjM1F2YlhWemRB,
+		label=imports,
+		lp="284.57,108.99",
+		pos="e,213,80.605 293.39,138.88 271.32,122.88 245.27,103.99 222.07,87.179"];
+	n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOlptMTA	[height=1.1471,
+		label="package\nmodule=go.mod\nimport=fmt",
+		pos="415.16,41.295",
+		width=2.1268];
+	n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOlpYaGhiWEJzWlM1amIyMHZjbTl2ZEM5dw -> n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOlptMTA	[key=n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOlpYaGhiWEJzWlM1amIyMHZjbTl2ZEM5dw_n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOlptMTA,
+		label=imports,
+		lp="405.3,108.99",
+		pos="e,394.36,81.37 365.46,135.66 372.9,121.7 381.32,105.86 389.1,91.251"];
+}

@@ -11,14 +11,96 @@ import (
 	"github.com/shoenig/test/must"
 )
 
-func TestGraphPackagesAndTests(t *testing.T) {
+// newBasicFixture creates a temporary Git repository with a root module
+// containing package p, whose tests exercise both an internal ("p") and an
+// external ("p_test") import.
+func newBasicFixture(t *testing.T) string {
+	t.Helper()
 	dir := t.TempDir()
 	attegittest.InitGitRepo(t, dir)
-	must.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/root\n\ngo 1.20\n"), 0o644))
+	must.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte(`module example.com/root
+
+go 1.24
+
+require github.com/shoenig/test v1.13.2
+
+require github.com/google/go-cmp v0.7.0 // indirect
+`), 0o644))
+	must.NoError(t, os.WriteFile(filepath.Join(dir, "go.sum"), []byte(`github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
+github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
+github.com/shoenig/test v1.13.2 h1:SaGxHxg7xkRuKuNtuFmHf0LgNGaAgcBT7HN4WHCKfqU=
+github.com/shoenig/test v1.13.2/go.mod h1:MKmiRyEeuFl8y9PCoThaRDgYQZeWBhRQlH99poXz5LI=
+`), 0o644))
+
 	must.NoError(t, os.MkdirAll(filepath.Join(dir, "p"), 0o755))
-	must.NoError(t, os.WriteFile(filepath.Join(dir, "p", "p.go"), []byte("package p\nimport \"fmt\"\nvar _ = fmt.Println\n"), 0o644))
-	must.NoError(t, os.WriteFile(filepath.Join(dir, "p", "p_test.go"), []byte("package p_test\nimport (\"example.com/root/p\"; \"testing\")\nvar _ = p.X\nvar _ *testing.T\n"), 0o644))
+	must.NoError(t, os.WriteFile(filepath.Join(dir, "p", "p.go"), []byte(`package p
+import (
+	"fmt"
+
+	"github.com/shoenig/test/must"
+)
+var _ = fmt.Println
+var _ = must.NoError
+`), 0o644))
+
+	must.NoError(t, os.WriteFile(filepath.Join(dir, "p", "p_test.go"), []byte(`package p_test
+import (
+	"testing"
+
+	"github.com/shoenig/test/must"
+
+	"example.com/root/p"
+)
+var _ = p.X
+var _ *testing.T
+var _ = must.NoError
+`), 0o644))
 	attegittest.RunGitScript(t, dir, "git add . && git commit -qm init")
+	return dir
+}
+
+func TestEntityIDRoundTrip(t *testing.T) {
+	cases := []struct {
+		name       string
+		moduleDir  attegit.Path
+		importPath string
+	}{
+		{name: "root module", moduleDir: "", importPath: "example.com/root/p"},
+		{name: "nested module", moduleDir: "sub", importPath: "example.com/sub/p"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			id := EntityID(PackageKind, c.moduleDir, c.importPath)
+			kind, moduleDir, importPath, err := DecodeEntityID(id)
+			must.NoError(t, err)
+			must.EqOp(t, PackageKind, kind)
+			must.EqOp(t, c.moduleDir, moduleDir)
+			must.EqOp(t, c.importPath, importPath)
+		})
+	}
+}
+
+func TestEntityIDContainsGoModPath(t *testing.T) {
+	must.EqOp(t, graph.EntityID("attego:package:go.mod:ZXhhbXBsZS5jb20vcm9vdC9w"), EntityID(PackageKind, "", "example.com/root/p"))
+	must.EqOp(t, graph.EntityID("attego:package:sub/go.mod:ZXhhbXBsZS5jb20vcm9vdC9w"), EntityID(PackageKind, "sub", "example.com/root/p"))
+}
+
+func TestDecodeEntityIDRejectsMalformed(t *testing.T) {
+	_, _, _, err := DecodeEntityID(graph.EntityID("attego:package:not-a-gomod-path:ZXhhbXBsZS5jb20vcm9vdC9w"))
+	must.Error(t, err)
+}
+
+func TestGraphMatchesGoList(t *testing.T) {
+	dir := newBasicFixture(t)
+	r, e := attegit.Open(dir, "HEAD")
+	must.NoError(t, e)
+	got, e := Graph(r)
+	must.NoError(t, e)
+	assertGraphsEqual(t, goListGraph(t, dir), got)
+}
+
+func TestGraphPackagesAndTests(t *testing.T) {
+	dir := newBasicFixture(t)
 	r, e := attegit.Open(dir, "HEAD")
 	must.NoError(t, e)
 	g, e := Graph(r)
@@ -34,5 +116,5 @@ func TestGraphPackagesAndTests(t *testing.T) {
 	}
 	must.NotEq(t, graph.EntityID(""), normal, must.Sprintf("missing normal node: %#v", g.EntityKeys))
 	must.NotEq(t, graph.EntityID(""), test, must.Sprintf("missing test node: %#v", g.EntityKeys))
-	must.Len(t, 2, g.Out(test))
+	must.Len(t, 3, g.Out(test))
 }

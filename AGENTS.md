@@ -22,6 +22,10 @@ Use `github.com/shoenig/test/must` for all assertions in Go tests. Do not use ad
 
 Keep setup operations that can fail under `must.NoError` as well.
 
+## Go style
+
+Prefer `make([]T, 0, <len>)` over a `[]T{}` literal when building up a slice by appending. Use a known or estimated length for the capacity hint.
+
 ## Go dependencies
 
 When a Go package is needed as a dependency or for documentation, use `go get` to fetch it and add it to `go.mod`. Do not manually edit dependency entries or fetch packages through another method.
