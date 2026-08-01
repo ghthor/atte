@@ -2,9 +2,6 @@ package cmd
 
 import (
 	"bytes"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/ghthor/atte/detector/attegit"
@@ -13,44 +10,53 @@ import (
 )
 
 func TestPrintGraphUsesGoPerspective(t *testing.T) {
-	dir := t.TempDir()
-	attegittest.InitGitRepo(t, dir)
-	must.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/root\n\ngo 1.20\n"), 0o644))
-	must.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"hello\") }\n"), 0o644))
-	attegittest.RunGitScript(t, dir, "git add . && git commit -qm init")
+	git := attegittest.NewGitRepo(t)
+	git.WriteFile("go.mod", []byte(`module example.com/root
 
-	repo, err := openTestRepo(dir)
+go 1.20
+`), 0o644)
+	git.WriteFile("main.go", []byte(`package main
+
+import "fmt"
+
+func main() { fmt.Println("hello") }
+`), 0o644)
+	git.RunGitScript("git add . && git commit -qm init")
+
+	repo, err := openTestRepo(git.Dir())
 	must.NoError(t, err)
 	var got bytes.Buffer
 	must.NoError(t, printGraph(&got, repo, ""))
-	must.True(t, strings.Contains(got.String(), "go package"))
-	must.True(t, strings.Contains(got.String(), "go.mod"))
-	must.True(t, strings.Contains(got.String(), "main.go"))
-	must.True(t, strings.Contains(got.String(), "go package"))
+	must.StrContains(t, got.String(), "go package")
+	must.StrContains(t, got.String(), "go.mod")
+	must.StrContains(t, got.String(), "main.go")
 }
 
 func TestPrintGraphFallsBackToGitPerspective(t *testing.T) {
-	dir := t.TempDir()
-	attegittest.InitGitRepo(t, dir)
-	must.NoError(t, os.WriteFile(filepath.Join(dir, "root.txt"), []byte("root"), 0o644))
-	attegittest.RunGitScript(t, dir, "git add . && git commit -qm init")
+	git := attegittest.NewGitRepo(t)
+	git.WriteFile("root.txt", []byte("root"), 0o644)
+	git.RunGitScript("git add . && git commit -qm init")
 
-	repo, err := openTestRepo(dir)
+	repo, err := openTestRepo(git.Dir())
 	must.NoError(t, err)
 	var got bytes.Buffer
 	must.NoError(t, printGraph(&got, repo, ""))
-	must.True(t, strings.Contains(got.String(), "root.txt"))
-	must.False(t, strings.Contains(got.String(), "attego:"))
+	must.StrContains(t, got.String(), "root.txt")
+	must.StrNotContains(t, got.String(), "attego:")
 }
 
 func TestPrintGraphReportsGoParseError(t *testing.T) {
-	dir := t.TempDir()
-	attegittest.InitGitRepo(t, dir)
-	must.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/root\n\ngo 1.20\n"), 0o644))
-	must.NoError(t, os.WriteFile(filepath.Join(dir, "broken.go"), []byte("package main\nimport \"unterminated\n"), 0o644))
-	attegittest.RunGitScript(t, dir, "git add . && git commit -qm init")
+	git := attegittest.NewGitRepo(t)
+	git.WriteFile("go.mod", []byte(`module example.com/root
 
-	repo, err := openTestRepo(dir)
+go 1.20
+`), 0o644)
+	git.WriteFile("broken.go", []byte(`package main
+import "unterminated
+`), 0o644)
+	git.RunGitScript("git add . && git commit -qm init")
+
+	repo, err := openTestRepo(git.Dir())
 	must.NoError(t, err)
 	var got bytes.Buffer
 	err = printGraph(&got, repo, "")
@@ -58,29 +64,46 @@ func TestPrintGraphReportsGoParseError(t *testing.T) {
 }
 
 func TestPrintGraphLocalImports(t *testing.T) {
-	dir := t.TempDir()
-	attegittest.InitGitRepo(t, dir)
-	must.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/root\n\ngo 1.20\n"), 0o644))
-	must.NoError(t, os.MkdirAll(filepath.Join(dir, "cmd"), 0o755))
-	must.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nimport \"example.com/root/cmd\"\n\nvar _ = cmd.Run\n"), 0o644))
-	must.NoError(t, os.WriteFile(filepath.Join(dir, "cmd", "cmd.go"), []byte("package cmd\n\nimport (\n\t\"example.com/root/detector\"\n)\n\nvar _ = detector.Value\n"), 0o644))
-	must.NoError(t, os.MkdirAll(filepath.Join(dir, "detector"), 0o755))
-	must.NoError(t, os.WriteFile(filepath.Join(dir, "detector", "detector.go"), []byte("package detector\n\nvar Value = 1\n"), 0o644))
-	attegittest.RunGitScript(t, dir, "git add . && git commit -qm init")
+	git := attegittest.NewGitRepo(t)
+	git.WriteFile("go.mod", []byte(`module example.com/root
 
-	repo, err := openTestRepo(dir)
+go 1.20
+`), 0o644)
+	git.WriteFile("main.go", []byte(`package main
+
+import "example.com/root/cmd"
+
+var _ = cmd.Run
+`), 0o644)
+	git.WriteFile("cmd/cmd.go", []byte(`package cmd
+
+import (
+	"example.com/root/detector"
+)
+
+var _ = detector.Value
+`), 0o644)
+	git.WriteFile("detector/detector.go", []byte(`package detector
+
+var Value = 1
+`), 0o644)
+	git.RunGitScript("git add . && git commit -qm init")
+
+	repo, err := openTestRepo(git.Dir())
 	must.NoError(t, err)
 	var got bytes.Buffer
 	must.NoError(t, printGraph(&got, repo, ""))
-	must.True(t, strings.Contains(got.String(), "import example.com/root/detector"))
-	must.False(t, strings.Contains(got.String(), "attego:"))
+	must.StrContains(t, got.String(), "import example.com/root/detector")
+	must.StrNotContains(t, got.String(), "attego:")
 }
 
 func TestPrintGraphExternalImports(t *testing.T) {
-	dir := t.TempDir()
-	attegittest.InitGitRepo(t, dir)
-	must.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/root\n\ngo 1.20\n"), 0o644))
-	must.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"), []byte(`package main
+	git := attegittest.NewGitRepo(t)
+	git.WriteFile("go.mod", []byte(`module example.com/root
+
+go 1.20
+`), 0o644)
+	git.WriteFile("main.go", []byte(`package main
 
 import (
 	"fmt"
@@ -89,20 +112,20 @@ import (
 )
 
 func main() { fmt.Println(must.NoError) }
-`), 0o644))
-	attegittest.RunGitScript(t, dir, "git add . && git commit -qm init")
+`), 0o644)
+	git.RunGitScript("git add . && git commit -qm init")
 
-	repo, err := openTestRepo(dir)
+	repo, err := openTestRepo(git.Dir())
 	must.NoError(t, err)
 	var without bytes.Buffer
 	must.NoError(t, printGraph(&without, repo, ""))
-	must.False(t, strings.Contains(without.String(), "external import fmt"))
+	must.StrNotContains(t, without.String(), "external import fmt")
 
 	var with bytes.Buffer
 	must.NoError(t, printGraph(&with, repo, "", PrintGraphOptions{IncludeExternalImports: true}))
-	must.True(t, strings.Contains(with.String(), "go package example.com/root"))
-	must.True(t, strings.Contains(with.String(), "std import fmt"))
-	must.False(t, strings.Contains(with.String(), "external import fmt"))
+	must.StrContains(t, with.String(), "go package example.com/root")
+	must.StrContains(t, with.String(), "std import fmt")
+	must.StrNotContains(t, with.String(), "external import fmt")
 }
 
 func openTestRepo(dir string) (*attegit.Repo, error) {

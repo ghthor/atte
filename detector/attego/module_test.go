@@ -1,8 +1,6 @@
 package attego
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/ghthor/atte/detector/attegit"
@@ -16,24 +14,22 @@ import (
 // external ("p_test") import.
 func newBasicFixture(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
-	attegittest.InitGitRepo(t, dir)
-	must.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte(`module example.com/root
+	git := attegittest.NewGitRepo(t)
+	git.WriteFile("go.mod", []byte(`module example.com/root
 
 go 1.24
 
 require github.com/shoenig/test v1.13.2
 
 require github.com/google/go-cmp v0.7.0 // indirect
-`), 0o644))
-	must.NoError(t, os.WriteFile(filepath.Join(dir, "go.sum"), []byte(`github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
+`), 0o644)
+	git.WriteFile("go.sum", []byte(`github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
 github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
 github.com/shoenig/test v1.13.2 h1:SaGxHxg7xkRuKuNtuFmHf0LgNGaAgcBT7HN4WHCKfqU=
 github.com/shoenig/test v1.13.2/go.mod h1:MKmiRyEeuFl8y9PCoThaRDgYQZeWBhRQlH99poXz5LI=
-`), 0o644))
+`), 0o644)
 
-	must.NoError(t, os.MkdirAll(filepath.Join(dir, "p"), 0o755))
-	must.NoError(t, os.WriteFile(filepath.Join(dir, "p", "p.go"), []byte(`package p
+	git.WriteFile("p/p.go", []byte(`package p
 import (
 	"fmt"
 
@@ -41,9 +37,9 @@ import (
 )
 var _ = fmt.Println
 var _ = must.NoError
-`), 0o644))
+`), 0o644)
 
-	must.NoError(t, os.WriteFile(filepath.Join(dir, "p", "p_test.go"), []byte(`package p_test
+	git.WriteFile("p/p_test.go", []byte(`package p_test
 import (
 	"testing"
 
@@ -54,9 +50,9 @@ import (
 var _ = p.X
 var _ *testing.T
 var _ = must.NoError
-`), 0o644))
-	attegittest.RunGitScript(t, dir, "git add . && git commit -qm init")
-	return dir
+`), 0o644)
+	git.RunGitScript("git add . && git commit -qm init")
+	return git.Dir()
 }
 
 func TestEntityIDRoundTrip(t *testing.T) {
