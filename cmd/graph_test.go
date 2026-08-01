@@ -82,9 +82,13 @@ func TestPrintGraphExternalImports(t *testing.T) {
 	must.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/root\n\ngo 1.20\n"), 0o644))
 	must.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"), []byte(`package main
 
-import "fmt"
+import (
+	"fmt"
 
-func main() { fmt.Println("hello") }
+	"github.com/shoenig/test/must"
+)
+
+func main() { fmt.Println(must.NoError) }
 `), 0o644))
 	attegittest.RunGitScript(t, dir, "git add . && git commit -qm init")
 
@@ -97,7 +101,8 @@ func main() { fmt.Println("hello") }
 	var with bytes.Buffer
 	must.NoError(t, printGraph(&with, repo, "", PrintGraphOptions{IncludeExternalImports: true}))
 	must.True(t, strings.Contains(with.String(), "go package example.com/root"))
-	must.True(t, strings.Contains(with.String(), "external import fmt"))
+	must.True(t, strings.Contains(with.String(), "std import fmt"))
+	must.False(t, strings.Contains(with.String(), "external import fmt"))
 }
 
 func openTestRepo(dir string) (*attegit.Repo, error) {

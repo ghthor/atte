@@ -1,5 +1,5 @@
 ┌────────────────┐            ┌─────────────────────────────────────┐
-│    package     │            │            package-test             │
+│ package-stdlib │            │            package-test             │
 │ module=go.mod  │  imports   │            module=go.mod            │
 │ import=testing │ ◀───────── │      import=example.com/root/p      │ ─┐
 └────────────────┘            └─────────────────────────────────────┘  │
@@ -7,7 +7,7 @@
                                 │ imports                              │
                                 ▼                                      │
 ┌────────────────┐            ┌─────────────────────────────────────┐  │
-│    package     │            │               package               │  │
+│ package-stdlib │            │               package               │  │
 │ module=go.mod  │  imports   │            module=go.mod            │  │ imports
 │   import=fmt   │ ◀───────── │      import=example.com/root/p      │  │
 └────────────────┘            └─────────────────────────────────────┘  │
@@ -15,7 +15,7 @@
                                 │ imports                              │
                                 ▼                                      │
                               ┌─────────────────────────────────────┐  │
-                              │               package               │  │
+                              │          package-external           │  │
                               │            module=go.mod            │  │
                               │ import=github.com/shoenig/test/must │ ◀┘
                               └─────────────────────────────────────┘

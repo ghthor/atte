@@ -142,11 +142,12 @@ func addGraphChildren(parent treeprint.Tree, g *graph.Graph, parentID graph.Enti
 			if err != nil {
 				return fmt.Errorf("decode Go package %q: %w", id, err)
 			}
-			localImports, external := packageImports(g, id)
+			localImports, stdlibImports, externalImports := packageImports(g, id)
 			if !options.IncludeExternalImports {
-				external = nil
+				stdlibImports = nil
+					externalImports = nil
 			}
-			if len(localImports) == 0 && len(external) == 0 {
+			if len(localImports) == 0 && len(stdlibImports) == 0 && len(externalImports) == 0 {
 				parent.AddNode(fmt.Sprintf("%s %s", label, importPath))
 				continue
 			}
@@ -154,7 +155,10 @@ func addGraphChildren(parent treeprint.Tree, g *graph.Graph, parentID graph.Enti
 			for _, imported := range localImports {
 				branch.AddNode("import " + imported)
 			}
-			for _, imported := range external {
+			for _, imported := range stdlibImports {
+				branch.AddNode("std import " + imported)
+			}
+			for _, imported := range externalImports {
 				branch.AddNode("external import " + imported)
 			}
 		default:
@@ -164,28 +168,31 @@ func addGraphChildren(parent treeprint.Tree, g *graph.Graph, parentID graph.Enti
 	return nil
 }
 
-func packageImports(g *graph.Graph, source graph.EntityID) ([]string, []string) {
+func packageImports(g *graph.Graph, source graph.EntityID) ([]string, []string, []string) {
 	local := make(map[string]struct{})
+	stdlib := make(map[string]struct{})
 	external := make(map[string]struct{})
 	for _, relation := range g.Out(source) {
 		if relation.Kind != attego.ImportsRelation || !g.Has(relation.To) {
 			continue
 		}
 		entity := g.Entities[relation.To]
-		if entity.Kind != attego.PackageKind {
-			continue
-		}
 		_, _, importPath, err := attego.DecodeEntityID(relation.To)
 		if err != nil {
 			continue
 		}
-		if hasContainment(g, relation.To) {
-			local[importPath] = struct{}{}
-		} else {
+		switch entity.Kind {
+		case attego.PackageKind:
+			if hasContainment(g, relation.To) {
+				local[importPath] = struct{}{}
+			}
+		case attego.PackageStdlibKind:
+			stdlib[importPath] = struct{}{}
+		case attego.PackageExternalKind:
 			external[importPath] = struct{}{}
 		}
 	}
-	return sortedStrings(local), sortedStrings(external)
+	return sortedStrings(local), sortedStrings(stdlib), sortedStrings(external)
 }
 
 func sortedStrings(values map[string]struct{}) []string {
@@ -195,29 +202,6 @@ func sortedStrings(values map[string]struct{}) []string {
 	}
 	sort.Strings(result)
 	return result
-}
-
-func externalImports(g *graph.Graph, source graph.EntityID) []string {
-	seen := map[string]struct{}{}
-	for _, relation := range g.Out(source) {
-		if relation.Kind != attego.ImportsRelation || !g.Has(relation.To) {
-			continue
-		}
-		entity := g.Entities[relation.To]
-		if entity.Kind != attego.PackageKind || hasContainment(g, relation.To) {
-			continue
-		}
-		_, _, importPath, err := attego.DecodeEntityID(relation.To)
-		if err == nil {
-			seen[importPath] = struct{}{}
-		}
-	}
-	imports := make([]string, 0, len(seen))
-	for importPath := range seen {
-		imports = append(imports, importPath)
-	}
-	sort.Strings(imports)
-	return imports
 }
 
 func hasContainment(g *graph.Graph, id graph.EntityID) bool {

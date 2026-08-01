@@ -23,6 +23,8 @@ const (
 	Namespace                          = "attego"
 	PackageKind                        = Namespace + ":package"
 	PackageTestKind                    = Namespace + ":package-test"
+	PackageStdlibKind                  = Namespace + ":package-stdlib"
+	PackageExternalKind                = Namespace + ":package-external"
 	ImportsRelation graph.RelationKind = "imports"
 )
 
@@ -72,7 +74,7 @@ func DecodeEntityID(id graph.EntityID) (string, attegit.Path, string, error) {
 	importPath := string(decoded)
 
 	kind := Namespace + ":" + parts[1]
-	if kind != PackageKind && kind != PackageTestKind {
+	if kind != PackageKind && kind != PackageTestKind && kind != PackageStdlibKind && kind != PackageExternalKind {
 		return "", "", "", fmt.Errorf("invalid attego entity kind %q", kind)
 	}
 	return kind, attegit.Path(moduleDir), importPath, nil
@@ -237,10 +239,19 @@ func addImport(p *packageInfo, from graph.EntityID, imp string, packages map[str
 	} else if q := resolveModuleImport(imp, byPath, packages); q != nil {
 		target = EntityID(PackageKind, q.module.dir, q.importPath)
 	} else {
-		target = EntityID(PackageKind, p.module.dir, imp)
-		entities[target] = graph.Entity{ID: target, Kind: PackageKind}
+		kind := PackageExternalKind
+		if isStdlibImport(imp) {
+			kind = PackageStdlibKind
+		}
+		target = EntityID(kind, p.module.dir, imp)
+		entities[target] = graph.Entity{ID: target, Kind: kind}
 	}
 	relations[graph.Relationship{From: from, To: target, Kind: ImportsRelation}] = struct{}{}
+}
+
+func isStdlibImport(importPath string) bool {
+	first, _, _ := strings.Cut(importPath, "/")
+	return !strings.Contains(first, ".")
 }
 
 func resolveLocal(p *packageInfo, imp string, packages map[string]*packageInfo) *packageInfo {

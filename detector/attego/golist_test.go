@@ -133,11 +133,19 @@ func addGoListPackages(t *testing.T, repositoryDir string, listed []goListPackag
 
 func addGoListImport(repositoryDir string, pkg goListPackage, from graph.EntityID, imported string, packages map[string]goListPackage, entities map[graph.EntityID]graph.Entity, relations map[graph.Relationship]struct{}) {
 	moduleDir := relativeModuleDir(repositoryDir, pkg.Module.Dir)
-	target := EntityID(PackageKind, attegit.Path(moduleDir), imported)
-	if importedPkg, ok := packages[imported]; ok {
-		target = EntityID(PackageKind, attegit.Path(relativeModuleDir(repositoryDir, importedPkg.Module.Dir)), imported)
+	kind := PackageExternalKind
+	if isStdlibImport(imported) {
+		kind = PackageStdlibKind
 	}
-	entities[target] = graph.Entity{ID: target, Kind: PackageKind}
+	target := EntityID(kind, attegit.Path(moduleDir), imported)
+	if importedPkg, ok := packages[imported]; ok {
+		moduleDir := relativeModuleDir(repositoryDir, importedPkg.Module.Dir)
+		if moduleDir == "" || (moduleDir != ".." && !strings.HasPrefix(moduleDir, "../")) {
+			target = EntityID(PackageKind, attegit.Path(moduleDir), imported)
+			kind = PackageKind
+		}
+	}
+	entities[target] = graph.Entity{ID: target, Kind: kind}
 	relations[graph.Relationship{From: from, To: target, Kind: ImportsRelation}] = struct{}{}
 }
 
@@ -180,10 +188,10 @@ func graphvizSnapshot(t *testing.T, g *graph.Graph) string {
 	ctx := context.Background()
 	viz, err := graphviz.New(ctx)
 	must.NoError(t, err)
-	defer viz.Close()
+	defer func() { must.NoError(t, viz.Close()) }()
 	dot, err := viz.Graph()
 	must.NoError(t, err)
-	defer dot.Close()
+	defer func() { must.NoError(t, dot.Close()) }()
 
 	nodes := make(map[graph.EntityID]*graphviz.Node, len(g.EntityKeys))
 	for _, id := range g.EntityKeys {

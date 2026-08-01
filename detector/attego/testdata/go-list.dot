@@ -1,45 +1,45 @@
 digraph "" {
-	graph [bb="0,0,637.72,353.37"];
+	graph [bb="0,0,586.9,353.37"];
 	node [label="\N"];
 	edge [label="\E"];
-	n_YXR0ZWdvOnBhY2thZ2UtdGVzdDpnby5tb2Q6WlhoaGJYQnNaUzVqYjIwdmNtOXZkQzl3	[height=1.1471,
-		label="package-test\nmodule=go.mod\nimport=example.com/root/p",
-		pos="344.16,312.08",
-		width=3.4095];
-	n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOloybDBhSFZpTG1OdmJTOXphRzlsYm1sbkwzUmxjM1F2YlhWemRB	[height=1.1471,
-		label="package\nmodule=go.mod\nimport=github.com/shoenig/test/must",
+	n_YXR0ZWdvOnBhY2thZ2UtZXh0ZXJuYWw6Z28ubW9kOloybDBhSFZpTG1OdmJTOXphRzlsYm1sbkwzUmxjM1F2YlhWemRB	[height=1.1471,
+		label="package-external\nmodule=go.mod\nimport=github.com/shoenig/test/must",
 		pos="160.16,41.295",
 		width=4.4489];
-	n_YXR0ZWdvOnBhY2thZ2UtdGVzdDpnby5tb2Q6WlhoaGJYQnNaUzVqYjIwdmNtOXZkQzl3 -> n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOloybDBhSFZpTG1OdmJTOXphRzlsYm1sbkwzUmxjM1F2YlhWemRB	[key=n_YXR0ZWdvOnBhY2thZ2UtdGVzdDpnby5tb2Q6WlhoaGJYQnNaUzVqYjIwdmNtOXZkQzl3_n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOloybDBhSFZpTG1OdmJTOXphRzlsYm1sbkwzUmxjM1F2YlhWemRB,
+	n_YXR0ZWdvOnBhY2thZ2Utc3RkbGliOmdvLm1vZDpabTEw	[height=1.1471,
+		label="package-stdlib\nmodule=go.mod\nimport=fmt",
+		pos="464.16,41.295",
+		width=2.1268];
+	n_YXR0ZWdvOnBhY2thZ2Utc3RkbGliOmdvLm1vZDpkR1Z6ZEdsdVp3	[height=1.1471,
+		label="package-stdlib\nmodule=go.mod\nimport=testing",
+		pos="247.16,176.69",
+		width=2.1268];
+	n_YXR0ZWdvOnBhY2thZ2UtdGVzdDpnby5tb2Q6WlhoaGJYQnNaUzVqYjIwdmNtOXZkQzl3	[height=1.1471,
+		label="package-test\nmodule=go.mod\nimport=example.com/root/p",
+		pos="247.16,312.08",
+		width=3.4095];
+	n_YXR0ZWdvOnBhY2thZ2UtdGVzdDpnby5tb2Q6WlhoaGJYQnNaUzVqYjIwdmNtOXZkQzl3 -> n_YXR0ZWdvOnBhY2thZ2UtZXh0ZXJuYWw6Z28ubW9kOloybDBhSFZpTG1OdmJTOXphRzlsYm1sbkwzUmxjM1F2YlhWemRB	[key=n_YXR0ZWdvOnBhY2thZ2UtdGVzdDpnby5tb2Q6WlhoaGJYQnNaUzVqYjIwdmNtOXZkQzl3_n_YXR0ZWdvOnBhY2thZ2UtZXh0ZXJuYWw6Z28ubW9kOloybDBhSFZpTG1OdmJTOXphRzlsYm1sbkwzUmxjM1F2YlhWemRB,
 		label=imports,
-		lp="190.77,176.69",
-		pos="e,151.62,83.01 253.7,283.9 221.65,269.56 188.77,248.43 169.38,217.98 146.12,181.44 145.8,131.46 150.14,94.153"];
+		lp="139.77,176.69",
+		pos="e,135.45,82.549 177.32,277.74 154.23,262.91 131.18,243.04 118.38,217.98 98.167,178.43 113.12,128.84 130.51,92.446"];
+	n_YXR0ZWdvOnBhY2thZ2UtdGVzdDpnby5tb2Q6WlhoaGJYQnNaUzVqYjIwdmNtOXZkQzl3 -> n_YXR0ZWdvOnBhY2thZ2Utc3RkbGliOmdvLm1vZDpkR1Z6ZEdsdVp3	[key=n_YXR0ZWdvOnBhY2thZ2UtdGVzdDpnby5tb2Q6WlhoaGJYQnNaUzVqYjIwdmNtOXZkQzl3_n_YXR0ZWdvOnBhY2thZ2Utc3RkbGliOmdvLm1vZDpkR1Z6ZEdsdVp3,
+		label=imports,
+		lp="268.55,244.38",
+		pos="e,247.16,218.18 247.16,270.33 247.16,257.4 247.16,242.93 247.16,229.34"];
 	n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOlpYaGhiWEJzWlM1amIyMHZjbTl2ZEM5dw	[height=1.1471,
 		label="package\nmodule=go.mod\nimport=example.com/root/p",
-		pos="344.16,176.69",
+		pos="464.16,176.69",
 		width=3.4095];
 	n_YXR0ZWdvOnBhY2thZ2UtdGVzdDpnby5tb2Q6WlhoaGJYQnNaUzVqYjIwdmNtOXZkQzl3 -> n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOlpYaGhiWEJzWlM1amIyMHZjbTl2ZEM5dw	[key=n_YXR0ZWdvOnBhY2thZ2UtdGVzdDpnby5tb2Q6WlhoaGJYQnNaUzVqYjIwdmNtOXZkQzl3_n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOlpYaGhiWEJzWlM1amIyMHZjbTl2ZEM5dw,
 		label=imports,
-		lp="365.55,244.38",
-		pos="e,344.16,218.18 344.16,270.33 344.16,257.4 344.16,242.93 344.16,229.34"];
-	n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOmRHVnpkR2x1Wnc	[height=1.1471,
-		label="package\nmodule=go.mod\nimport=testing",
-		pos="561.16,176.69",
-		width=2.1268];
-	n_YXR0ZWdvOnBhY2thZ2UtdGVzdDpnby5tb2Q6WlhoaGJYQnNaUzVqYjIwdmNtOXZkQzl3 -> n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOmRHVnpkR2x1Wnc	[key=n_YXR0ZWdvOnBhY2thZ2UtdGVzdDpnby5tb2Q6WlhoaGJYQnNaUzVqYjIwdmNtOXZkQzl3_n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOmRHVnpkR2x1Wnc,
+		lp="390.04,244.38",
+		pos="e,406.22,213.3 305.31,275.33 333.4,258.07 367.26,237.25 396.5,219.27"];
+	n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOlpYaGhiWEJzWlM1amIyMHZjbTl2ZEM5dw -> n_YXR0ZWdvOnBhY2thZ2UtZXh0ZXJuYWw6Z28ubW9kOloybDBhSFZpTG1OdmJTOXphRzlsYm1sbkwzUmxjM1F2YlhWemRB	[key=n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOlpYaGhiWEJzWlM1amIyMHZjbTl2ZEM5dw_n_YXR0ZWdvOnBhY2thZ2UtZXh0ZXJuYWw6Z28ubW9kOloybDBhSFZpTG1OdmJTOXphRzlsYm1sbkwzUmxjM1F2YlhWemRB,
 		label=imports,
-		lp="487.04,244.38",
-		pos="e,511.32,208.32 402.31,275.33 433.01,256.46 470.62,233.34 501.54,214.34"];
-	n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOlpYaGhiWEJzWlM1amIyMHZjbTl2ZEM5dw -> n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOloybDBhSFZpTG1OdmJTOXphRzlsYm1sbkwzUmxjM1F2YlhWemRB	[key=n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOlpYaGhiWEJzWlM1amIyMHZjbTl2ZEM5dw_n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOloybDBhSFZpTG1OdmJTOXphRzlsYm1sbkwzUmxjM1F2YlhWemRB,
+		lp="351.75,108.99",
+		pos="e,240.27,77.447 390.57,143.4 348.43,124.9 295.21,101.55 250.54,81.955"];
+	n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOlpYaGhiWEJzWlM1amIyMHZjbTl2ZEM5dw -> n_YXR0ZWdvOnBhY2thZ2Utc3RkbGliOmdvLm1vZDpabTEw	[key=n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOlpYaGhiWEJzWlM1amIyMHZjbTl2ZEM5dw_n_YXR0ZWdvOnBhY2thZ2Utc3RkbGliOmdvLm1vZDpabTEw,
 		label=imports,
-		lp="284.57,108.99",
-		pos="e,213,80.605 293.39,138.88 271.32,122.88 245.27,103.99 222.07,87.179"];
-	n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOlptMTA	[height=1.1471,
-		label="package\nmodule=go.mod\nimport=fmt",
-		pos="415.16,41.295",
-		width=2.1268];
-	n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOlpYaGhiWEJzWlM1amIyMHZjbTl2ZEM5dw -> n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOlptMTA	[key=n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOlpYaGhiWEJzWlM1amIyMHZjbTl2ZEM5dw_n_YXR0ZWdvOnBhY2thZ2U6Z28ubW9kOlptMTA,
-		label=imports,
-		lp="405.3,108.99",
-		pos="e,394.36,81.37 365.46,135.66 372.9,121.7 381.32,105.86 389.1,91.251"];
+		lp="485.55,108.99",
+		pos="e,464.16,82.792 464.16,134.94 464.16,122.01 464.16,107.54 464.16,93.948"];
 }
