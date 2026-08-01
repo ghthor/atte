@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"charm.land/lipgloss/v2"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/graph"
@@ -94,19 +95,25 @@ func printGraph(w io.Writer, repo *attegit.Repo, relativePath string, options ..
 	if err := gitGraph.Absorb(goGraph); err != nil {
 		return fmt.Errorf("merge Go graph: %w", err)
 	}
-	return printGitGraph(w, gitGraph, relativePath, printOptions)
+	return printGitGraph(w, repo, gitGraph, relativePath, printOptions)
 }
 
-func printGitGraph(w io.Writer, g *graph.Graph, relativePath string, options PrintGraphOptions) error {
+var (
+	workingTreeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	goPackageStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ADD8"))
+	stdlibStyle      = lipgloss.NewStyle().Faint(true)
+)
+
+func printGitGraph(w io.Writer, repo *attegit.Repo, g *graph.Graph, relativePath string, options PrintGraphOptions) error {
 	tree := treeprint.New()
-	if err := addGraphChildren(tree, g, attegit.EntityID(attegit.Path(relativePath)), options); err != nil {
+	if err := addGraphChildren(tree, repo, g, attegit.EntityID(attegit.Path(relativePath)), options); err != nil {
 		return err
 	}
 	_, err := fmt.Fprint(w, tree.String())
 	return err
 }
 
-func addGraphChildren(parent treeprint.Tree, g *graph.Graph, parentID graph.EntityID, options PrintGraphOptions) error {
+func addGraphChildren(parent treeprint.Tree, repo *attegit.Repo, g *graph.Graph, parentID graph.EntityID, options PrintGraphOptions) error {
 	if g == nil {
 		return fmt.Errorf("graph is nil")
 	}
@@ -128,11 +135,15 @@ func addGraphChildren(parent treeprint.Tree, g *graph.Graph, parentID graph.Enti
 		switch entity.Kind {
 		case attegit.TreeKind:
 			branch := parent.AddBranch(path.Base(string(attegit.EntityPath(id))) + "/")
-			if err := addGraphChildren(branch, g, id, options); err != nil {
+			if err := addGraphChildren(branch, repo, g, id, options); err != nil {
 				return err
 			}
 		case attegit.BlobKind:
-			parent.AddNode(path.Base(string(attegit.EntityPath(id))))
+			label := path.Base(string(attegit.EntityPath(id)))
+				if obj, ok := repo.Obj[attegit.EntityPath(id)]; ok && obj.Source == attegit.WorkingTreeSource {
+					label = workingTreeStyle.Render(label)
+				}
+				parent.AddNode(label)
 		case attego.PackageKind, attego.PackageTestKind:
 			label := "go package"
 			if entity.Kind == attego.PackageTestKind {
@@ -145,18 +156,18 @@ func addGraphChildren(parent treeprint.Tree, g *graph.Graph, parentID graph.Enti
 			localImports, stdlibImports, externalImports := packageImports(g, id)
 			if !options.IncludeExternalImports {
 				stdlibImports = nil
-					externalImports = nil
+				externalImports = nil
 			}
 			if len(localImports) == 0 && len(stdlibImports) == 0 && len(externalImports) == 0 {
-				parent.AddNode(fmt.Sprintf("%s %s", label, importPath))
+				parent.AddNode(goPackageStyle.Render(fmt.Sprintf("%s %s", label, importPath)))
 				continue
 			}
-			branch := parent.AddBranch(fmt.Sprintf("%s %s", label, importPath))
+			branch := parent.AddBranch(goPackageStyle.Render(fmt.Sprintf("%s %s", label, importPath)))
 			for _, imported := range localImports {
 				branch.AddNode("import " + imported)
 			}
 			for _, imported := range stdlibImports {
-				branch.AddNode("std import " + imported)
+				branch.AddNode(stdlibStyle.Render("std import " + imported))
 			}
 			for _, imported := range externalImports {
 				branch.AddNode("external import " + imported)
