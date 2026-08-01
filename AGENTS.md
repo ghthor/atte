@@ -38,6 +38,12 @@ When tests create multiline strings, use raw string literals. Start the string o
 
 Prefer `make([]T, 0, <len>)` over a `[]T{}` literal when building up a slice by appending. Use a known or estimated length for the capacity hint.
 
+## Code navigation
+
+When working with Go code, always try using the LSP to obtain structural information about the code before editing, such as definitions, references, symbols, types, and call hierarchies.
+
+The LSP is read-only; use the repository editing tools to make changes.
+
 ## Go dependencies
 
 When a Go package is needed as a dependency or for documentation, use `go get` to fetch it and add it to `go.mod`. Do not manually edit dependency entries or fetch packages through another method.
