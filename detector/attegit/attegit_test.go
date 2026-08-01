@@ -5,9 +5,19 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/ghthor/atte/reference"
+
 	"github.com/ghthor/atte/detector/attegittest"
 	"github.com/shoenig/test/must"
 )
+
+func testPath(raw string) reference.Path {
+	p, err := reference.ParseBlob(raw)
+	if err != nil {
+		panic(err)
+	}
+	return p
+}
 
 func committedRepo(t *testing.T, files map[string]string) *attegittest.GitRepo {
 	t.Helper()
@@ -32,16 +42,16 @@ func TestOpenAndShow(t *testing.T) {
 
 	nested := repo.Tree["nested"]
 	must.Len(t, 1, nested)
-	must.EqOp(t, Path("nested/child.txt"), nested[0].Path)
+	must.True(t, nested[0].Path == reference.Blob("nested/child.txt"))
 
-	got, err := repo.Show("nested/child.txt")
+	got, err := repo.Show(testPath("nested/child.txt"))
 	must.NoError(t, err)
 	must.EqOp(t, "child\n", string(got))
 
-	_, err = repo.Show("nested")
+	_, err = repo.Show(testPath("nested"))
 	must.Error(t, err)
 
-	_, err = repo.Show("missing")
+	_, err = repo.Show(testPath("missing"))
 	must.Error(t, err)
 }
 
@@ -57,24 +67,24 @@ func TestWorkingTree(t *testing.T) {
 
 	committed, err := Open(dir, "HEAD")
 	must.NoError(t, err)
-	got, err := committed.Show("tracked.txt")
+	got, err := committed.Show(testPath("tracked.txt"))
 	must.NoError(t, err)
 	must.EqOp(t, "committed\n", string(got))
-	must.MapNotContainsKey(t, committed.Obj, "nested/untracked.txt")
+	must.MapNotContainsKey(t, committed.Obj, testPath("nested/untracked.txt"))
 
 	repo, err := Open(dir, "HEAD", WithWorkingTree())
 	must.NoError(t, err)
-	got, err = repo.Show("staged.txt")
+	got, err = repo.Show(testPath("staged.txt"))
 	must.NoError(t, err)
 	must.EqOp(t, "staged", string(got))
-	must.EqOp(t, WorkingTreeSource, repo.Obj["staged.txt"].Source)
-	got, err = repo.Show("tracked.txt")
+	must.EqOp(t, WorkingTreeSource, repo.Obj[testPath("staged.txt")].Source)
+	got, err = repo.Show(testPath("tracked.txt"))
 	must.NoError(t, err)
 	must.EqOp(t, "modified", string(got))
-	got, err = repo.Show("nested/untracked.txt")
+	got, err = repo.Show(testPath("nested/untracked.txt"))
 	must.NoError(t, err)
 	must.EqOp(t, "new", string(got))
-	must.EqOp(t, Blob, repo.Obj["nested/untracked.txt"].Kind)
+	must.EqOp(t, Blob, repo.Obj[testPath("nested/untracked.txt")].Kind)
 }
 
 func TestWorkingTreeRejectsSymlink(t *testing.T) {
@@ -107,7 +117,7 @@ set -eux
 
 	repo, err := Open(dir, "HEAD")
 	must.NoError(t, err)
-	got, err := repo.Show("alternate.txt")
+	got, err := repo.Show(testPath("alternate.txt"))
 	must.NoError(t, err)
 	must.EqOp(t, "from alternate", string(got))
 }
@@ -122,24 +132,24 @@ func TestTreeIndex(t *testing.T) {
 	repo, err := Open(git.Dir(), "HEAD")
 	must.NoError(t, err)
 
-	assertTreeChildren(t, repo.Tree[""], map[Path]Kind{
-		"root.txt": Blob,
-		"nested":   Tree,
+	assertTreeChildren(t, repo.Tree[""], map[reference.Path]Kind{
+		testPath("root.txt"):     Blob,
+		reference.Tree("nested"): Tree,
 	})
-	assertTreeChildren(t, repo.Tree["nested"], map[Path]Kind{
-		"nested/child.txt": Blob,
-		"nested/deeper":    Tree,
+	assertTreeChildren(t, repo.Tree["nested"], map[reference.Path]Kind{
+		testPath("nested/child.txt"):    Blob,
+		reference.Tree("nested/deeper"): Tree,
 	})
-	assertTreeChildren(t, repo.Tree["nested/deeper"], map[Path]Kind{
-		"nested/deeper/leaf.txt": Blob,
+	assertTreeChildren(t, repo.Tree["nested/deeper"], map[reference.Path]Kind{
+		testPath("nested/deeper/leaf.txt"): Blob,
 	})
 
 	must.MapLen(t, 0, sliceToMap(repo.Tree["nested/child.txt"]))
-	must.SliceEqOp(t, []Path{"nested", "nested/child.txt", "nested/deeper", "nested/deeper/leaf.txt", "root.txt"}, repo.ObjKeys)
-	must.SliceEqOp(t, []Path{"", "nested", "nested/deeper"}, repo.TreeKeys)
+	must.SliceEqOp(t, []reference.Path{reference.Tree("nested"), reference.Blob("nested/child.txt"), reference.Tree("nested/deeper"), reference.Blob("nested/deeper/leaf.txt"), reference.Blob("root.txt")}, repo.ObjKeys)
+	must.SliceEqOp(t, []reference.Tree{reference.Root, reference.Tree("nested"), reference.Tree("nested/deeper")}, repo.TreeKeys)
 }
 
-func assertTreeChildren(t *testing.T, got []Obj, want map[Path]Kind) {
+func assertTreeChildren(t *testing.T, got []Obj, want map[reference.Path]Kind) {
 	t.Helper()
 	must.MapLen(t, len(want), sliceToMap(got))
 	for _, obj := range got {
@@ -148,8 +158,8 @@ func assertTreeChildren(t *testing.T, got []Obj, want map[Path]Kind) {
 	}
 }
 
-func sliceToMap(objs []Obj) map[Path]Obj {
-	m := make(map[Path]Obj, len(objs))
+func sliceToMap(objs []Obj) map[reference.Path]Obj {
+	m := make(map[reference.Path]Obj, len(objs))
 	for _, obj := range objs {
 		m[obj.Path] = obj
 	}

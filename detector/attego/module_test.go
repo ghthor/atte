@@ -6,12 +6,21 @@ import (
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attegittest"
 	"github.com/ghthor/atte/graph"
+	"github.com/ghthor/atte/reference"
 	"github.com/shoenig/test/must"
 )
 
 // newBasicFixture creates a temporary Git repository with a root module
 // containing package p, whose tests exercise both an internal ("p") and an
 // external ("p_test") import.
+func testPath(raw string) reference.Path {
+	p, err := reference.ParsePath(raw)
+	if err != nil {
+		panic(err)
+	}
+	return p
+}
+
 func newBasicFixture(t *testing.T) string {
 	t.Helper()
 	git := attegittest.NewGitRepo(t)
@@ -62,7 +71,7 @@ var _ = must.NoError
 func TestEntityIDRoundTrip(t *testing.T) {
 	cases := []struct {
 		name       string
-		moduleDir  attegit.Path
+		moduleDir  reference.Tree
 		importPath string
 	}{
 		{name: "root module", moduleDir: "", importPath: "example.com/root/p"},
@@ -128,14 +137,14 @@ func TestGraphPackagesAndTests(t *testing.T) {
 	must.NotEq(t, graph.EntityID(""), normal, must.Sprintf("missing normal node: %#v", g.EntityKeys))
 	must.NotEq(t, graph.EntityID(""), test, must.Sprintf("missing test node: %#v", g.EntityKeys))
 	packageID := EntityID(PackageKind, "", "example.com/root/p")
-	normalFile := attegit.EntityID("p/p.go")
-	testFile := attegit.EntityID("p/p_test.go")
+	normalFile := attegit.EntityID(testPath("p/p.go"))
+	testFile := attegit.EntityID(testPath("p/p_test.go"))
 	must.True(t, hasRelation(g, test, packageID, attegit.ContainsRelation))
 	must.True(t, hasRelation(g, normal, normalFile, SourceFileRelation))
 	must.False(t, hasRelation(g, normal, testFile, SourceFileRelation))
 	must.True(t, hasRelation(g, test, testFile, SourceFileRelation))
 	must.False(t, hasRelation(g, test, normalFile, SourceFileRelation))
-	treeID := attegit.EntityID("p")
+	treeID := attegit.EntityID(testPath("p"))
 	must.True(t, hasRelation(g, treeID, normal, attegit.ContainsRelation))
 	must.True(t, hasRelation(g, treeID, test, attegit.ContainsRelation))
 	must.False(t, hasRelation(g, normal, treeID, attegit.ContainsRelation))

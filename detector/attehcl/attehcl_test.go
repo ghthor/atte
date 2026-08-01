@@ -7,8 +7,20 @@ import (
 	"github.com/ghthor/atte/detector/attegittest"
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/graph"
+	"github.com/ghthor/atte/reference"
 	"github.com/shoenig/test/must"
 )
+
+func testPath(raw string) reference.Path {
+	if raw == "" {
+		return reference.Root
+	}
+	p, err := reference.ParsePath(raw)
+	if err != nil {
+		panic(err)
+	}
+	return p
+}
 
 func TestGraphLabeledAndUnlabeledTests(t *testing.T) {
 	repo := newHCLFixture(t, map[string]string{
@@ -37,13 +49,13 @@ test "unit" {
 	unit := EntityID("atte.hcl", "unit")
 	must.EqOp(t, TestKind, got.Entities[first].Kind)
 	must.EqOp(t, TestKind, got.Entities[unit].Kind)
-	must.True(t, hasRelation(got, first, attegit.EntityID("atte.hcl"), SourceFileRelation))
-	must.True(t, hasRelation(got, first, attegit.EntityID("first.sh"), ScriptRelation))
-	must.True(t, hasRelation(got, first, attegit.EntityID("config.yaml"), DependsOnRelation))
-	must.True(t, hasRelation(got, unit, attegit.EntityID("unit.sh"), ScriptRelation))
-	must.True(t, hasRelation(got, unit, attegit.EntityID("trigger.yaml"), DependsOnRelation))
-	must.True(t, hasRelation(got, attegit.EntityID(""), first, attegit.ContainsRelation))
-	must.True(t, hasRelation(got, attegit.EntityID(""), unit, attegit.ContainsRelation))
+	must.True(t, hasRelation(got, first, attegit.EntityID(testPath("atte.hcl")), SourceFileRelation))
+	must.True(t, hasRelation(got, first, attegit.EntityID(testPath("first.sh")), ScriptRelation))
+	must.True(t, hasRelation(got, first, attegit.EntityID(testPath("config.yaml")), DependsOnRelation))
+	must.True(t, hasRelation(got, unit, attegit.EntityID(testPath("unit.sh")), ScriptRelation))
+	must.True(t, hasRelation(got, unit, attegit.EntityID(testPath("trigger.yaml")), DependsOnRelation))
+	must.True(t, hasRelation(got, attegit.EntityID(reference.Root), first, attegit.ContainsRelation))
+	must.True(t, hasRelation(got, attegit.EntityID(reference.Root), unit, attegit.ContainsRelation))
 }
 
 func TestGraphGopkgTestDependency(t *testing.T) {
@@ -120,7 +132,7 @@ func TestEntityIDRoundTrip(t *testing.T) {
 	id := EntityID("nested/atte.hcl", "unit")
 	file, name, err := DecodeEntityID(id)
 	must.NoError(t, err)
-	must.EqOp(t, attegit.Path("nested/atte.hcl"), file)
+	must.EqOp(t, reference.Blob("nested/atte.hcl"), file)
 	must.EqOp(t, "unit", name)
 }
 

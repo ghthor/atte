@@ -3,26 +3,25 @@ package reference
 import (
 	"testing"
 
-	"github.com/ghthor/atte/detector/attegit"
 	"github.com/shoenig/test/must"
 )
 
 func TestResolveFromBlobRelative(t *testing.T) {
 	got, err := ResolveFromBlob("pkg/atte.hcl", "./script.sh")
 	must.NoError(t, err)
-	must.EqOp(t, attegit.Path("pkg/script.sh"), got)
+	must.EqOp(t, Blob("pkg/script.sh"), got)
 }
 
 func TestResolveFromBlobParentRelative(t *testing.T) {
 	got, err := ResolveFromBlob("pkg/sub/atte.hcl", "../script.sh")
 	must.NoError(t, err)
-	must.EqOp(t, attegit.Path("pkg/script.sh"), got)
+	must.EqOp(t, Blob("pkg/script.sh"), got)
 }
 
 func TestResolveFromBlobRepoRoot(t *testing.T) {
 	got, err := ResolveFromBlob("pkg/sub/atte.hcl", "//config.yaml")
 	must.NoError(t, err)
-	must.EqOp(t, attegit.Path("config.yaml"), got)
+	must.EqOp(t, Blob("config.yaml"), got)
 }
 
 func TestResolveFromBlobEmptyIsInvalid(t *testing.T) {
@@ -48,19 +47,34 @@ func TestResolveFromBlobEscapingRepoRootExactlyIsRejected(t *testing.T) {
 func TestResolveFromDirRelative(t *testing.T) {
 	got, err := ResolveFromDir("pkg", "./script.sh")
 	must.NoError(t, err)
-	must.EqOp(t, attegit.Path("pkg/script.sh"), got)
+	must.EqOp(t, Blob("pkg/script.sh"), got)
 }
 
 func TestResolveFromDirParentRelative(t *testing.T) {
 	got, err := ResolveFromDir("pkg/sub", "../script.sh")
 	must.NoError(t, err)
-	must.EqOp(t, attegit.Path("pkg/script.sh"), got)
+	must.EqOp(t, Blob("pkg/script.sh"), got)
 }
 
 func TestResolveFromDirRepoRoot(t *testing.T) {
 	got, err := ResolveFromDir("pkg/sub", "//config.yaml")
 	must.NoError(t, err)
-	must.EqOp(t, attegit.Path("config.yaml"), got)
+	must.EqOp(t, Blob("config.yaml"), got)
+}
+
+func TestTreeParent(t *testing.T) {
+	tests := map[string]struct {
+		path Tree
+		want Tree
+	}{
+		"nested":    {path: Tree("pkg/sub"), want: Tree("pkg")},
+		"top-level": {path: Tree("pkg"), want: Tree("")},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			must.EqOp(t, tt.want, tt.path.Parent())
+		})
+	}
 }
 
 func TestResolveFromDirEscapingRepoRootIsRejected(t *testing.T) {
@@ -69,79 +83,79 @@ func TestResolveFromDirEscapingRepoRootIsRejected(t *testing.T) {
 }
 
 func TestMatchFromBlobLiteralReference(t *testing.T) {
-	candidates := []attegit.Path{"pkg/other.go", "pkg/script.sh", "pkg/sub/script.sh"}
+	candidates := []Blob{"pkg/other.go", "pkg/script.sh", "pkg/sub/script.sh"}
 	got, err := MatchFromBlob("pkg/atte.hcl", "./script.sh", candidates)
 	must.NoError(t, err)
-	must.Eq(t, []attegit.Path{"pkg/script.sh"}, got)
+	must.Eq(t, []Blob{"pkg/script.sh"}, got)
 }
 
 func TestMatchFromBlobLiteralReferenceWithoutCandidateIsEmpty(t *testing.T) {
-	candidates := []attegit.Path{"pkg/other.go"}
+	candidates := []Blob{"pkg/other.go"}
 	got, err := MatchFromBlob("pkg/atte.hcl", "./script.sh", candidates)
 	must.NoError(t, err)
 	must.SliceEmpty(t, got)
 }
 
 func TestMatchFromBlobSingleStarWithinDirectory(t *testing.T) {
-	candidates := []attegit.Path{"pkg/a.go", "pkg/b.go", "pkg/sub/c.go", "other/d.go"}
+	candidates := []Blob{"pkg/a.go", "pkg/b.go", "pkg/sub/c.go", "other/d.go"}
 	got, err := MatchFromBlob("pkg/atte.hcl", "./*.go", candidates)
 	must.NoError(t, err)
-	must.Eq(t, []attegit.Path{"pkg/a.go", "pkg/b.go"}, got)
+	must.Eq(t, []Blob{"pkg/a.go", "pkg/b.go"}, got)
 }
 
 func TestMatchFromBlobDoubleStarIsRecursive(t *testing.T) {
-	candidates := []attegit.Path{"pkg/a.go", "pkg/sub/b.go", "pkg/sub/deep/c.go", "other/d.go"}
+	candidates := []Blob{"pkg/a.go", "pkg/sub/b.go", "pkg/sub/deep/c.go", "other/d.go"}
 	got, err := MatchFromBlob("pkg/atte.hcl", "./**/*.go", candidates)
 	must.NoError(t, err)
-	must.Eq(t, []attegit.Path{"pkg/a.go", "pkg/sub/b.go", "pkg/sub/deep/c.go"}, got)
+	must.Eq(t, []Blob{"pkg/a.go", "pkg/sub/b.go", "pkg/sub/deep/c.go"}, got)
 }
 
 func TestMatchFromBlobRepoRootGlob(t *testing.T) {
-	candidates := []attegit.Path{"cmd/main.go", "pkg/a.go", "pkg/sub/b.go"}
+	candidates := []Blob{"cmd/main.go", "pkg/a.go", "pkg/sub/b.go"}
 	got, err := MatchFromBlob("pkg/atte.hcl", "//pkg/**/*.go", candidates)
 	must.NoError(t, err)
-	must.Eq(t, []attegit.Path{"pkg/a.go", "pkg/sub/b.go"}, got)
+	must.Eq(t, []Blob{"pkg/a.go", "pkg/sub/b.go"}, got)
 }
 
 func TestMatchFromBlobPreservesCandidateOrder(t *testing.T) {
-	candidates := []attegit.Path{"pkg/b.go", "pkg/a.go"}
+	candidates := []Blob{"pkg/b.go", "pkg/a.go"}
 	got, err := MatchFromBlob("pkg/atte.hcl", "./*.go", candidates)
 	must.NoError(t, err)
-	must.Eq(t, []attegit.Path{"pkg/b.go", "pkg/a.go"}, got)
+	must.Eq(t, []Blob{"pkg/b.go", "pkg/a.go"}, got)
 }
 
 func TestMatchFromBlobInvalidReferenceIsRejected(t *testing.T) {
-	_, err := MatchFromBlob("pkg/atte.hcl", "", []attegit.Path{"pkg/a.go"})
+	_, err := MatchFromBlob("pkg/atte.hcl", "", []Blob{"pkg/a.go"})
 	must.ErrorContains(t, err, "invalid repository reference")
 }
 
 func TestMatchFromBlobEscapingRepoRootIsRejected(t *testing.T) {
-	_, err := MatchFromBlob("atte.hcl", "../*.go", []attegit.Path{"a.go"})
+	_, err := MatchFromBlob("atte.hcl", "../*.go", []Blob{"a.go"})
 	must.ErrorContains(t, err, "escapes repository root")
 }
 
 func TestMatchFromBlobBadPatternIsRejected(t *testing.T) {
-	_, err := MatchFromBlob("pkg/atte.hcl", "./[.go", []attegit.Path{"pkg/a.go"})
+	_, err := MatchFromBlob("pkg/atte.hcl", "./[.go", []Blob{"pkg/a.go"})
 	must.ErrorContains(t, err, "invalid repository reference")
 }
 
 func TestMatchFromDirSingleStarWithinDirectory(t *testing.T) {
-	candidates := []attegit.Path{"pkg/a.go", "pkg/b.go", "pkg/sub/c.go", "other/d.go"}
+	candidates := []Blob{"pkg/a.go", "pkg/b.go", "pkg/sub/c.go", "other/d.go"}
 	got, err := MatchFromDir("pkg", "./*.go", candidates)
 	must.NoError(t, err)
-	must.Eq(t, []attegit.Path{"pkg/a.go", "pkg/b.go"}, got)
+	must.Eq(t, []Blob{"pkg/a.go", "pkg/b.go"}, got)
 }
 
 func TestMatchFromDirDoubleStarIsRecursive(t *testing.T) {
-	candidates := []attegit.Path{"pkg/a.go", "pkg/sub/b.go", "pkg/sub/deep/c.go", "other/d.go"}
+	candidates := []Blob{"pkg/a.go", "pkg/sub/b.go", "pkg/sub/deep/c.go", "other/d.go"}
 	got, err := MatchFromDir("pkg", "./**/*.go", candidates)
 	must.NoError(t, err)
-	must.Eq(t, []attegit.Path{"pkg/a.go", "pkg/sub/b.go", "pkg/sub/deep/c.go"}, got)
+	must.Eq(t, []Blob{"pkg/a.go", "pkg/sub/b.go", "pkg/sub/deep/c.go"}, got)
 }
 
 func TestMatchFromDirRepoRootGlob(t *testing.T) {
-	candidates := []attegit.Path{"cmd/main.go", "pkg/a.go", "pkg/sub/b.go"}
+	candidates := []Blob{"cmd/main.go", "pkg/a.go", "pkg/sub/b.go"}
 	got, err := MatchFromDir("pkg", "//pkg/**/*.go", candidates)
 	must.NoError(t, err)
-	must.Eq(t, []attegit.Path{"pkg/a.go", "pkg/sub/b.go"}, got)
+	must.Eq(t, []Blob{"pkg/a.go", "pkg/sub/b.go"}, got)
 }

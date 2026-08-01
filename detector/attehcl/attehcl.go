@@ -42,15 +42,19 @@ type dependency struct {
 	entity graph.EntityID
 }
 
-func EntityID(file attegit.Path, name string) graph.EntityID {
+func EntityID(file reference.Blob, name string) graph.EntityID {
 	return graph.EntityID(fmt.Sprintf("%s:test:%s:%s", Namespace, file, name))
 }
-func DecodeEntityID(id graph.EntityID) (attegit.Path, string, error) {
+func DecodeEntityID(id graph.EntityID) (reference.Blob, string, error) {
 	parts := strings.SplitN(string(id), ":", 4)
 	if len(parts) != 4 || parts[0] != Namespace || parts[1] != "test" {
 		return "", "", fmt.Errorf("invalid attehcl entity ID %q", id)
 	}
-	return attegit.Path(parts[2]), parts[3], nil
+	file, err := reference.ParseBlob(parts[2])
+	if err != nil {
+		return "", "", fmt.Errorf("invalid HCL file path %q: %w", parts[2], err)
+	}
+	return file, parts[3], nil
 }
 func Graph(repo *attegit.Repo) (*graph.Graph, error)                { return graphFor(repo, false) }
 func GraphWithContainment(repo *attegit.Repo) (*graph.Graph, error) { return graphFor(repo, true) }
@@ -71,14 +75,18 @@ func graphFor(repo *attegit.Repo, containment bool) (*graph.Graph, error) {
 	}
 	for _, file := range repo.ObjKeys {
 		obj := repo.Obj[file]
-		if obj.Kind != attegit.Blob || path.Base(string(file)) != "atte.hcl" {
+		if obj.Kind != attegit.Blob || path.Base(file.String()) != "atte.hcl" {
 			continue
 		}
 		contents, err := repo.Show(file)
 		if err != nil {
 			return nil, fmt.Errorf("read %q: %w", file, err)
 		}
-		blocks, err := parse(file, contents)
+		fileBlob, err := reference.ParseBlob(file.String())
+		if err != nil {
+			return nil, fmt.Errorf("invalid HCL file path %q: %w", file, err)
+		}
+		blocks, err := parse(fileBlob, contents)
 		if err != nil {
 			return nil, err
 		}
@@ -92,32 +100,37 @@ func graphFor(repo *attegit.Repo, containment bool) (*graph.Graph, error) {
 				}
 				labels[name] = struct{}{}
 			}
-			id := EntityID(file, name)
+			id := EntityID(fileBlob, name)
 			addEntity(graph.Entity{ID: id, Kind: TestKind})
 			if containment {
-				parent := attegit.Path(path.Dir(string(file)))
-				if parent == "." {
-					parent = ""
+				fileBlob, err := reference.ParseBlob(file.String())
+				if err != nil {
+					return nil, fmt.Errorf("invalid HCL file path %q: %w", file, err)
 				}
-				addEntity(graph.Entity{ID: attegit.EntityID(parent), Kind: attegit.TreeKind})
-				addEntity(graph.Entity{ID: attegit.EntityID(file), Kind: attegit.BlobKind})
-				relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(file), Kind: SourceFileRelation})
-				relations = append(relations, graph.Relationship{From: attegit.EntityID(parent), To: id, Kind: attegit.ContainsRelation})
+				addEntity(graph.Entity{ID: attegit.EntityID(fileBlob.Tree()), Kind: attegit.TreeKind})
+				addEntity(graph.Entity{ID: attegit.EntityID(fileBlob), Kind: attegit.BlobKind})
+				relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(fileBlob), Kind: SourceFileRelation})
+				relations = append(relations, graph.Relationship{From: attegit.EntityID(fileBlob.Tree()), To: id, Kind: attegit.ContainsRelation})
 			}
-			cfg, deps, err := decodeTest(repo, file, block)
+			cfg, deps, err := decodeTest(repo, fileBlob, block)
 			if err != nil {
 				return nil, err
 			}
 			if cfg.Script != "" {
-				target, err := reference.ResolveFromBlob(file, cfg.Script)
+				source, err := reference.ParseBlob(file.String())
+				targetBlob, typedErr := reference.ResolveBlobFromBlob(source, reference.SomePath(cfg.Script))
+				target := string(targetBlob)
+				if err == nil {
+					err = typedErr
+				}
 				if err != nil {
 					return nil, fmt.Errorf("%q: %w", file, err)
 				}
-				if obj, ok := repo.Obj[target]; !ok || obj.Kind != attegit.Blob {
+				if obj, ok := repo.Obj[targetBlob]; !ok || obj.Kind != attegit.Blob {
 					return nil, fmt.Errorf("%q: script %q not found", file, target)
 				}
-				addEntity(graph.Entity{ID: attegit.EntityID(target), Kind: attegit.BlobKind})
-				relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(target), Kind: ScriptRelation})
+				addEntity(graph.Entity{ID: attegit.EntityID(targetBlob), Kind: attegit.BlobKind})
+				relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(targetBlob), Kind: ScriptRelation})
 			}
 			for _, dep := range deps {
 				if dep.entity != "" {
@@ -125,16 +138,21 @@ func graphFor(repo *attegit.Repo, containment bool) (*graph.Graph, error) {
 					relations = append(relations, graph.Relationship{From: id, To: dep.entity, Kind: DependsOnRelation})
 					continue
 				}
-				target, err := reference.ResolveFromBlob(file, dep.value)
+				source, err := reference.ParseBlob(file.String())
+				targetBlob, typedErr := reference.ResolveBlobFromBlob(source, reference.SomePath(dep.value))
+				target := string(targetBlob)
+				if err == nil {
+					err = typedErr
+				}
 				if err != nil {
 					return nil, fmt.Errorf("%q: %w", file, err)
 				}
-				obj, ok := repo.Obj[target]
+				obj, ok := repo.Obj[targetBlob]
 				if !ok || obj.Kind != attegit.Blob {
 					return nil, fmt.Errorf("%q: dependency %q not found", file, target)
 				}
-				addEntity(graph.Entity{ID: attegit.EntityID(target), Kind: attegit.BlobKind})
-				relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(target), Kind: DependsOnRelation})
+				addEntity(graph.Entity{ID: attegit.EntityID(targetBlob), Kind: attegit.BlobKind})
+				relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(targetBlob), Kind: DependsOnRelation})
 			}
 		}
 	}
@@ -150,8 +168,8 @@ func dependencyKind(repo *attegit.Repo, id graph.EntityID) string {
 	return attego.PackageTestKind
 }
 
-func parse(file attegit.Path, contents []byte) ([]testBlock, error) {
-	f, diags := hclparse.NewParser().ParseHCL(contents, string(file))
+func parse(file reference.Blob, contents []byte) ([]testBlock, error) {
+	f, diags := hclparse.NewParser().ParseHCL(contents, file.String())
 	if diags.HasErrors() {
 		return nil, fmt.Errorf("parse HCL %q: %s", file, diags.Error())
 	}
@@ -171,7 +189,7 @@ func parse(file attegit.Path, contents []byte) ([]testBlock, error) {
 	}
 	return blocks, nil
 }
-func decodeTest(repo *attegit.Repo, file attegit.Path, block testBlock) (testConfig, []dependency, error) {
+func decodeTest(repo *attegit.Repo, file reference.Blob, block testBlock) (testConfig, []dependency, error) {
 	cfg := testConfig{}
 	deps := make([]dependency, 0)
 	ctx := &hcl.EvalContext{Variables: map[string]cty.Value{}, Functions: map[string]function.Function{

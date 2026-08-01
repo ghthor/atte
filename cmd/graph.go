@@ -16,6 +16,7 @@ import (
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/graph"
+	"github.com/ghthor/atte/reference"
 	"github.com/spf13/cobra"
 	"github.com/xlab/treeprint"
 )
@@ -87,6 +88,11 @@ func repositoryContext(cwd string) (string, string, error) {
 }
 
 func printGraph(w io.Writer, repo *attegit.Repo, relativePath string, options ...PrintGraphOptions) error {
+	if relativePath != "" {
+		if _, err := reference.ParseTree(relativePath); err != nil {
+			return fmt.Errorf("invalid repository working directory %q: %w", relativePath, err)
+		}
+	}
 	var printOptions PrintGraphOptions
 	if len(options) > 0 {
 		printOptions = options[0]
@@ -120,7 +126,13 @@ var (
 
 func printGitGraph(w io.Writer, repo *attegit.Repo, g *graph.Graph, relativePath string, options PrintGraphOptions) error {
 	tree := treeprint.New()
-	if err := addGraphChildren(tree, repo, g, attegit.EntityID(attegit.Path(relativePath)), options); err != nil {
+	if err := addGraphChildren(tree, repo, g, func() graph.EntityID {
+		if relativePath == "" {
+			return attegit.EntityID(reference.Root)
+		}
+		tree, _ := reference.ParseTree(relativePath)
+		return attegit.EntityID(tree)
+	}(), options); err != nil {
 		return err
 	}
 	_, err := fmt.Fprint(w, tree.String())
@@ -161,12 +173,18 @@ func addGraphChildren(parent treeprint.Tree, repo *attegit.Repo, g *graph.Graph,
 		entity := g.Entities[id]
 		switch entity.Kind {
 		case attegit.TreeKind:
-			branch := parent.AddBranch(path.Base(string(attegit.EntityPath(id))) + "/")
+			entityPath, err := attegit.EntityPath(id)
+			if err != nil {
+				return fmt.Errorf("decode Git entity %q: %w", id, err)
+			}
+			branch := parent.AddBranch(path.Base(entityPath.String()) + "/")
 			if err := addGraphChildren(branch, repo, g, id, options); err != nil {
 				return err
 			}
 		case attegit.BlobKind:
-			addBlobNode(parent, repo, id)
+			if err := addBlobNode(parent, repo, id); err != nil {
+				return err
+			}
 		case attego.PackageKind, attego.PackageTestKind:
 			if err := addPackageNode(parent, repo, g, id, options); err != nil {
 				return err
@@ -180,12 +198,33 @@ func addGraphChildren(parent treeprint.Tree, repo *attegit.Repo, g *graph.Graph,
 	return nil
 }
 
-func addBlobNode(parent treeprint.Tree, repo *attegit.Repo, id graph.EntityID) {
-	label := path.Base(string(attegit.EntityPath(id)))
-	if obj, ok := repo.Obj[attegit.EntityPath(id)]; ok && obj.Source == attegit.WorkingTreeSource {
+func entityPath(id graph.EntityID) (reference.Path, error) {
+	return attegit.EntityPath(id)
+}
+
+func entityPathString(id graph.EntityID) (string, error) {
+	p, err := entityPath(id)
+	if err != nil {
+		return "", err
+	}
+	return p.String(), nil
+}
+
+func addBlobNode(parent treeprint.Tree, repo *attegit.Repo, id graph.EntityID) error {
+	p, err := entityPath(id)
+	if err != nil {
+		return fmt.Errorf("decode Git blob %q: %w", id, err)
+	}
+	blob, err := reference.ParseBlob(p.String())
+	if err != nil {
+		return fmt.Errorf("decode Git blob path %q: %w", id, err)
+	}
+	label := path.Base(blob.String())
+	if obj, ok := repo.Obj[blob]; ok && obj.Source == attegit.WorkingTreeSource {
 		label = workingTreeStyle.Render(label)
 	}
 	parent.AddNode(label)
+	return nil
 }
 
 func addPackageNode(parent treeprint.Tree, repo *attegit.Repo, g *graph.Graph, id graph.EntityID, options PrintGraphOptions) error {
@@ -259,7 +298,11 @@ func packageFiles(g *graph.Graph, source graph.EntityID, enabled bool) []string 
 		if relation.Kind != attego.SourceFileRelation || !g.Has(relation.To) || g.Entities[relation.To].Kind != attegit.BlobKind {
 			continue
 		}
-		files = append(files, path.Base(string(attegit.EntityPath(relation.To))))
+		filePath, err := entityPathString(relation.To)
+		if err != nil {
+			continue
+		}
+		files = append(files, path.Base(filePath))
 	}
 	sort.Strings(files)
 	return files

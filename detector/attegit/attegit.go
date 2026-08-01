@@ -8,15 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 
+	"github.com/ghthor/atte/reference"
 	"github.com/go-git/go-billy/v5"
 	"github.com/go-git/go-billy/v5/osfs"
 	"github.com/go-git/go-git/v5"
@@ -26,10 +25,6 @@ import (
 	"github.com/go-git/go-git/v5/storage/filesystem"
 	"github.com/go-git/go-git/v5/storage/filesystem/dotgit"
 )
-
-// Path is a slash-separated path relative to the repository root. The root
-// tree is represented by the empty Path.
-type Path string
 
 // Kind identifies the Git object represented by an Obj.
 type Kind uint8
@@ -53,7 +48,7 @@ const (
 
 // Obj is an object discovered in a Git tree.
 type Obj struct {
-	Path   Path
+	Path   reference.Path
 	Hash   plumbing.Hash
 	Kind   Kind
 	Source Source
@@ -74,11 +69,11 @@ func WithWorkingTree() OpenOption {
 // Repo contains the objects and direct-child index for one Git revision.
 // Show returns a new byte slice, so callers may safely modify its result.
 type Repo struct {
-	Obj      map[Path]Obj
-	ObjKeys  []Path
-	Tree     map[Path][]Obj
-	TreeKeys []Path
-	blobs    map[Path][]byte
+	Obj      map[reference.Path]Obj
+	ObjKeys  []reference.Path
+	Tree     map[reference.Tree][]Obj
+	TreeKeys []reference.Tree
+	blobs    map[reference.Blob][]byte
 
 	gitRepo  *git.Repository
 	gitRepos []*git.Repository
@@ -105,9 +100,9 @@ func Open(repositoryPath, ref string, options ...OpenOption) (*Repo, error) {
 	}
 	d := &Repo{
 		gitRepos: repos,
-		Obj:      make(map[Path]Obj),
-		Tree:     make(map[Path][]Obj),
-		blobs:    make(map[Path][]byte),
+		Obj:      make(map[reference.Path]Obj),
+		Tree:     make(map[reference.Tree][]Obj),
+		blobs:    make(map[reference.Blob][]byte),
 		gitRepo:  gr,
 	}
 	if err := d.readTree(repositoryPath, ref); err != nil {
@@ -238,7 +233,7 @@ func (r *Repo) overlayWorkingTree() error {
 	}
 
 	for _, raw := range tracked {
-		p, err := validatePath(string(raw))
+		p, err := reference.ParseBlob(string(raw))
 		if err != nil {
 			return err
 		}
@@ -288,9 +283,9 @@ func gitCommand(repositoryPath string, args ...string) *exec.Cmd {
 	return exec.Command("git", args...)
 }
 
-func (r *Repo) removePath(p Path) {
+func (r *Repo) removePath(p reference.Path) {
 	for candidate := range r.Obj {
-		if candidate == p || strings.HasPrefix(string(candidate), string(p)+"/") {
+		if candidate == p || strings.HasPrefix(candidate.String(), p.String()+"/") {
 			delete(r.Obj, candidate)
 		}
 	}
@@ -301,31 +296,33 @@ func (r *Repo) rebuildIndexes() {
 		if obj.Kind != Blob {
 			continue
 		}
-		for dir := parentPath(p); dir != ""; dir = parentPath(dir) {
+		for dir := parentTree(p, obj.Kind); dir != ""; dir = dir.Parent() {
 			if _, ok := r.Obj[dir]; !ok {
 				r.Obj[dir] = Obj{Path: dir, Kind: Tree, Source: GitSource}
 			}
 		}
 	}
-	r.Tree = make(map[Path][]Obj)
+	r.Tree = make(map[reference.Tree][]Obj)
 	for p, obj := range r.Obj {
-		r.Tree[parentPath(p)] = append(r.Tree[parentPath(p)], obj)
+		tree := parentTree(p, obj.Kind)
+		r.Tree[tree] = append(r.Tree[tree], obj)
 		if obj.Kind == Tree {
-			if _, ok := r.Tree[p]; !ok {
-				r.Tree[p] = nil
+			pathTree := p.(reference.Tree)
+			if _, exists := r.Tree[pathTree]; !exists {
+				r.Tree[pathTree] = nil
 			}
 		}
 	}
-	r.ObjKeys = slices.Sorted(maps.Keys(r.Obj))
-	r.TreeKeys = slices.Sorted(maps.Keys(r.Tree))
-}
-
-func validatePath(raw string) (Path, error) {
-	p := path.Clean(strings.ReplaceAll(raw, "\\", "/"))
-	if p == "." || p == "" || path.IsAbs(p) || p == ".." || strings.HasPrefix(p, "../") {
-		return "", fmt.Errorf("invalid repository-relative path %q", raw)
+	r.ObjKeys = make([]reference.Path, 0, len(r.Obj))
+	for p := range r.Obj {
+		r.ObjKeys = append(r.ObjKeys, p)
 	}
-	return Path(p), nil
+	slices.SortFunc(r.ObjKeys, func(a, b reference.Path) int { return strings.Compare(a.String(), b.String()) })
+	r.TreeKeys = make([]reference.Tree, 0, len(r.Tree))
+	for tree := range r.Tree {
+		r.TreeKeys = append(r.TreeKeys, tree)
+	}
+	slices.Sort(r.TreeKeys)
 }
 
 func parseLine(line string) (Obj, error) {
@@ -348,25 +345,29 @@ func parseLine(line string) (Obj, error) {
 	if obj.Hash.IsZero() {
 		return Obj{}, fmt.Errorf("invalid object id %q", fields[2])
 	}
-	obj.Path = Path(line[i+1:])
-	if _, err := validatePath(string(obj.Path)); err != nil {
-		return Obj{}, err
-	}
 	if fields[1] == "blob" {
 		obj.Kind = Blob
+		blob, err := reference.ParseBlob(line[i+1:])
+		if err != nil {
+			return Obj{}, err
+		}
+		obj.Path = blob
 	} else {
 		obj.Kind = Tree
+		tree, err := reference.ParseTree(line[i+1:])
+		if err != nil {
+			return Obj{}, err
+		}
+		obj.Path = tree
 	}
 	return obj, nil
 }
 
-func parentPath(p Path) Path {
-	s := string(p)
-	i := strings.LastIndexByte(s, '/')
-	if i < 0 {
-		return ""
+func parentTree(p reference.Path, kind Kind) reference.Tree {
+	if kind == Tree {
+		return p.(reference.Tree).Parent()
 	}
-	return Path(path.Dir(s))
+	return p.Tree()
 }
 
 func (r *Repo) blobObject(hash plumbing.Hash) (*object.Blob, error) {
@@ -382,8 +383,9 @@ func (r *Repo) blobObject(hash plumbing.Hash) (*object.Blob, error) {
 }
 
 // Show lazily reads a blob's contents from the repository or working tree.
-func (r *Repo) Show(relativePath Path) ([]byte, error) {
+func (r *Repo) Show(relativePath reference.Path) ([]byte, error) {
 	obj, ok := r.Obj[relativePath]
+	blob, _ := relativePath.(reference.Blob)
 	if !ok {
 		return nil, fmt.Errorf("path %q not found", relativePath)
 	}
@@ -391,7 +393,7 @@ func (r *Repo) Show(relativePath Path) ([]byte, error) {
 		return nil, fmt.Errorf("path %q is not a blob", relativePath)
 	}
 	r.mu.RLock()
-	cached, ok := r.blobs[relativePath]
+	cached, ok := r.blobs[blob]
 	if ok {
 		result := append([]byte(nil), cached...)
 		r.mu.RUnlock()
@@ -402,7 +404,7 @@ func (r *Repo) Show(relativePath Path) ([]byte, error) {
 	var data []byte
 	var err error
 	if obj.Source == WorkingTreeSource {
-		file, openErr := r.worktree.Open(string(relativePath))
+		file, openErr := r.worktree.Open(blob.String())
 		if openErr == nil {
 			data, err = io.ReadAll(file)
 			_ = file.Close()
@@ -427,10 +429,10 @@ func (r *Repo) Show(relativePath Path) ([]byte, error) {
 		return nil, fmt.Errorf("read blob %q: %w", relativePath, err)
 	}
 	r.mu.Lock()
-	if cached, ok := r.blobs[relativePath]; ok {
+	if cached, ok := r.blobs[blob]; ok {
 		data = cached
 	} else {
-		r.blobs[relativePath] = append([]byte(nil), data...)
+		r.blobs[blob] = append([]byte(nil), data...)
 	}
 	result := append([]byte(nil), data...)
 	r.mu.Unlock()
@@ -438,7 +440,7 @@ func (r *Repo) Show(relativePath Path) ([]byte, error) {
 }
 
 // ShowContext is the context-aware form of Show.
-func (r *Repo) ShowContext(ctx context.Context, relativePath Path) ([]byte, error) {
+func (r *Repo) ShowContext(ctx context.Context, relativePath reference.Path) ([]byte, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()

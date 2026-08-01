@@ -14,8 +14,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/graph"
+	"github.com/ghthor/atte/reference"
 	"github.com/goccy/go-graphviz"
 	"github.com/shoenig/test/must"
 )
@@ -113,10 +113,16 @@ func addGoListPackages(t *testing.T, repositoryDir string, listed []goListPackag
 	}
 	for _, pkg := range packages {
 		moduleDir := relativeModuleDir(repositoryDir, pkg.Module.Dir)
-		packageID := EntityID(PackageKind, attegit.Path(moduleDir), pkg.ImportPath)
+		moduleTree := reference.Tree(moduleDir)
+		if moduleDir != "" {
+			var err error
+			moduleTree, err = reference.ParseTree(moduleDir)
+			must.NoError(t, err)
+		}
+		packageID := EntityID(PackageKind, moduleTree, pkg.ImportPath)
 		entities[packageID] = graph.Entity{ID: packageID, Kind: PackageKind}
 		if len(pkg.TestImports)+len(pkg.XTestImports) > 0 {
-			testID := EntityID(PackageTestKind, attegit.Path(moduleDir), pkg.ImportPath)
+			testID := EntityID(PackageTestKind, moduleTree, pkg.ImportPath)
 			entities[testID] = graph.Entity{ID: testID, Kind: PackageTestKind}
 			imports := make([]string, 0, len(pkg.TestImports)+len(pkg.XTestImports))
 			imports = append(imports, pkg.TestImports...)
@@ -133,15 +139,27 @@ func addGoListPackages(t *testing.T, repositoryDir string, listed []goListPackag
 
 func addGoListImport(repositoryDir string, pkg goListPackage, from graph.EntityID, imported string, packages map[string]goListPackage, entities map[graph.EntityID]graph.Entity, relations map[graph.Relationship]struct{}) {
 	moduleDir := relativeModuleDir(repositoryDir, pkg.Module.Dir)
+	moduleTree := reference.Tree(moduleDir)
+	if moduleDir != "" {
+		var err error
+		moduleTree, err = reference.ParseTree(moduleDir)
+		must.NoError(nil, err)
+	}
 	kind := PackageExternalKind
 	if isStdlibImport(imported) {
 		kind = PackageStdlibKind
 	}
-	target := EntityID(kind, attegit.Path(moduleDir), imported)
+	target := EntityID(kind, moduleTree, imported)
 	if importedPkg, ok := packages[imported]; ok {
 		moduleDir := relativeModuleDir(repositoryDir, importedPkg.Module.Dir)
 		if moduleDir == "" || (moduleDir != ".." && !strings.HasPrefix(moduleDir, "../")) {
-			target = EntityID(PackageKind, attegit.Path(moduleDir), imported)
+			importedTree := reference.Tree(moduleDir)
+			if moduleDir != "" {
+				var parseErr error
+				importedTree, parseErr = reference.ParseTree(moduleDir)
+				must.NoError(nil, parseErr)
+			}
+			target = EntityID(PackageKind, importedTree, imported)
 			kind = PackageKind
 		}
 	}

@@ -16,6 +16,7 @@ import (
 
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/graph"
+	"github.com/ghthor/atte/reference"
 	"golang.org/x/mod/modfile"
 )
 
@@ -34,7 +35,7 @@ const (
 )
 
 type module struct {
-	dir      attegit.Path
+	dir      reference.Tree
 	name     string
 	replaces []replace
 }
@@ -49,20 +50,20 @@ type packageInfo struct {
 	module               *module
 	dir, importPath      string
 	imports, testImports map[string]struct{}
-	goFiles, testFiles   []attegit.Path
+	goFiles, testFiles   []reference.Blob
 	hasTests             bool
 }
 
 // EntityID encodes kind, moduleDir, and importPath into an attego graph.EntityID.
 // It is the inverse of DecodeEntityID.
-func EntityID(kind string, moduleDir attegit.Path, importPath string) graph.EntityID {
+func EntityID(kind string, moduleDir reference.Tree, importPath string) graph.EntityID {
 	enc := func(s string) string { return base64.RawURLEncoding.EncodeToString([]byte(s)) }
 	goModPath := path.Join(string(moduleDir), "go.mod")
 	return graph.EntityID(fmt.Sprintf("%s:%s:%s:%s", Namespace, kind[len(Namespace)+1:], goModPath, enc(importPath)))
 }
 
 // DecodeEntityID returns the kind, module directory, and import path encoded in an attego entity ID.
-func DecodeEntityID(id graph.EntityID) (string, attegit.Path, string, error) {
+func DecodeEntityID(id graph.EntityID) (string, reference.Tree, string, error) {
 	parts := strings.Split(string(id), ":")
 	if len(parts) != 4 || parts[0] != Namespace {
 		return "", "", "", fmt.Errorf("invalid attego entity ID %q", id)
@@ -83,7 +84,11 @@ func DecodeEntityID(id graph.EntityID) (string, attegit.Path, string, error) {
 	if kind != PackageKind && kind != PackageTestKind && kind != PackageStdlibKind && kind != PackageExternalKind {
 		return "", "", "", fmt.Errorf("invalid attego entity kind %q", kind)
 	}
-	return kind, attegit.Path(moduleDir), importPath, nil
+	tree, err := reference.ParseTree(moduleDir)
+	if err != nil && moduleDir != "" {
+		return "", "", "", fmt.Errorf("invalid attego module directory %q: %w", moduleDir, err)
+	}
+	return kind, tree, importPath, nil
 }
 
 // Graph builds the dependency graph of Go packages and package tests found in
@@ -124,12 +129,20 @@ func graphFor(repo *attegit.Repo, containment bool) (*graph.Graph, error) {
 		}
 		if f.test {
 			p.hasTests = true
-			p.testFiles = append(p.testFiles, attegit.Path(f.name))
+			file, err := reference.ParseBlob(f.name)
+			if err != nil {
+				return nil, err
+			}
+			p.testFiles = append(p.testFiles, file)
 			for _, imp := range f.imports {
 				p.testImports[imp] = struct{}{}
 			}
 		} else {
-			p.goFiles = append(p.goFiles, attegit.Path(f.name))
+			file, err := reference.ParseBlob(f.name)
+			if err != nil {
+				return nil, err
+			}
+			p.goFiles = append(p.goFiles, file)
 			for _, imp := range f.imports {
 				p.imports[imp] = struct{}{}
 			}
@@ -146,10 +159,14 @@ func graphFor(repo *attegit.Repo, containment bool) (*graph.Graph, error) {
 		entities[pid] = graph.Entity{ID: pid, Kind: PackageKind}
 		var treeID graph.EntityID
 		if containment {
-			treeID = attegit.EntityID(attegit.Path(p.dir))
+			tree, err := reference.ParseTree(p.dir)
+			if err != nil {
+				return nil, err
+			}
+			treeID = attegit.EntityID(tree)
 			entities[treeID] = graph.Entity{ID: treeID, Kind: attegit.TreeKind}
 			relations[graph.Relationship{From: treeID, To: pid, Kind: attegit.ContainsRelation}] = struct{}{}
-			addFileLinks := func(from graph.EntityID, files []attegit.Path) {
+			addFileLinks := func(from graph.EntityID, files []reference.Blob) {
 				for _, file := range files {
 					fileID := attegit.EntityID(file)
 					obj, ok := repo.Obj[file]
@@ -204,7 +221,7 @@ func scan(repo *attegit.Repo) ([]*module, []goFile, error) {
 		if repo.Obj[p].Kind != attegit.Blob {
 			continue
 		}
-		name := string(p)
+		name := p.String()
 		if path.Base(name) != "go.mod" && !strings.HasSuffix(name, ".go") {
 			continue
 		}
@@ -221,7 +238,14 @@ func scan(repo *attegit.Repo) ([]*module, []goFile, error) {
 			if err != nil {
 				return nil, nil, fmt.Errorf("parse go.mod %q: %w", p, err)
 			}
-			m := &module{dir: attegit.Path(dir), name: f.Module.Mod.Path}
+			var moduleDir reference.Tree
+			if dir != "" {
+				moduleDir, err = reference.ParseTree(dir)
+				if err != nil {
+					return nil, nil, fmt.Errorf("invalid Go module directory %q: %w", dir, err)
+				}
+			}
+			m := &module{dir: moduleDir, name: f.Module.Mod.Path}
 			for _, r := range f.Replace {
 				if r.New.Version == "" {
 					m.replaces = append(m.replaces, replace{old: r.Old.Path, target: path.Clean(path.Join(dir, r.New.Path))})
@@ -300,7 +324,7 @@ func resolveLocal(p *packageInfo, imp string, packages map[string]*packageInfo) 
 	return nil
 }
 
-func findPackage(modDir attegit.Path, dir string, packages map[string]*packageInfo) *packageInfo {
+func findPackage(modDir reference.Tree, dir string, packages map[string]*packageInfo) *packageInfo {
 	if dir == "." {
 		dir = ""
 	}
