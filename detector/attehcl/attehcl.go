@@ -84,6 +84,73 @@ func DecodeEntityID(id graph.EntityID) (string, reference.Blob, string, error) {
 	}
 	return kind, file, parts[3], nil
 }
+
+// Target describes an executable HCL block and its resolved script.
+type Target struct {
+	ID     graph.EntityID
+	Kind   string
+	File   reference.Blob
+	Name   string
+	Index  int
+	Script reference.Blob
+}
+
+// Targets returns executable test, codegen, and lint blocks in repository order.
+func Targets(repo *attegit.Repo) ([]Target, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("repository is nil")
+	}
+	targets := make([]Target, 0)
+	for _, file := range repo.ObjKeys {
+		obj := repo.Obj[file]
+		if obj.Kind != attegit.Blob || path.Base(file.String()) != "atte.hcl" {
+			continue
+		}
+		contents, err := repo.Show(file)
+		if err != nil {
+			return nil, fmt.Errorf("read %q: %w", file, err)
+		}
+		fileBlob, err := reference.ParseBlob(file.String())
+		if err != nil {
+			return nil, fmt.Errorf("invalid HCL file path %q: %w", file, err)
+		}
+		body, err := parseFile(fileBlob, contents)
+		if err != nil {
+			return nil, err
+		}
+		for _, spec := range []struct{ blockType, kind string }{{"test", TestKind}, {"codegen", CodegenKind}, {"lint", LintKind}} {
+			blocks, err := blocksOfType(fileBlob, body, spec.blockType)
+			if err != nil {
+				return nil, err
+			}
+			labels := make(map[string]struct{}, len(blocks))
+			for index, block := range blocks {
+				name := fmt.Sprintf("%d", index)
+				if len(block.labels) == 1 {
+					name = block.labels[0]
+					if _, exists := labels[name]; exists {
+						return nil, fmt.Errorf("parse HCL %q: duplicate %s label %q", file, spec.blockType, name)
+					}
+					labels[name] = struct{}{}
+				}
+				script, _, err := decodeScriptAndDeps(repo, fileBlob, block.body)
+				if err != nil {
+					return nil, err
+				}
+				scriptBlob := reference.Blob("")
+				if script != "" {
+					scriptBlob, err = reference.ResolveBlobFromBlob(fileBlob, reference.SomePath(script))
+					if err != nil {
+						return nil, fmt.Errorf("%q: %w", file, err)
+					}
+				}
+				targets = append(targets, Target{ID: EntityID(spec.kind, fileBlob, name), Kind: spec.kind, File: fileBlob, Name: name, Index: index, Script: scriptBlob})
+			}
+		}
+	}
+	return targets, nil
+}
+
 func Graph(repo *attegit.Repo) (*graph.Graph, error)                { return graphFor(repo, false) }
 func GraphWithContainment(repo *attegit.Repo) (*graph.Graph, error) { return graphFor(repo, true) }
 

@@ -91,6 +91,58 @@ func DecodeEntityID(id graph.EntityID) (string, reference.Tree, string, error) {
 	return kind, tree, importPath, nil
 }
 
+// Target describes a runnable Go package test.
+type Target struct {
+	ID         graph.EntityID
+	Kind       string
+	ModuleDir  reference.Tree
+	PackageDir reference.Tree
+	ImportPath string
+}
+
+// Targets returns runnable Go package tests with their repository directories.
+func Targets(repo *attegit.Repo) ([]Target, error) {
+	g, err := GraphWithContainment(repo)
+	if err != nil {
+		return nil, err
+	}
+	targets := make([]Target, 0)
+	for _, id := range g.EntityKeys {
+		entity := g.Entities[id]
+		if entity.Kind != PackageTestKind {
+			continue
+		}
+		_, moduleDir, importPath, err := DecodeEntityID(id)
+		if err != nil {
+			return nil, err
+		}
+		var packageDir reference.Tree
+		for _, parentID := range g.EntityKeys {
+			for _, relation := range g.Out(parentID) {
+				if relation.Kind != attegit.ContainsRelation || relation.To != id {
+					continue
+				}
+				if g.Entities[parentID].Kind != attegit.TreeKind {
+					continue
+				}
+				decoded, err := attegit.EntityPath(parentID)
+				if err != nil {
+					return nil, err
+				}
+				packageDir, err = reference.ParseTree(decoded.String())
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
+		if packageDir == "" {
+			continue
+		}
+		targets = append(targets, Target{ID: id, Kind: entity.Kind, ModuleDir: moduleDir, PackageDir: packageDir, ImportPath: importPath})
+	}
+	return targets, nil
+}
+
 // Graph builds the dependency graph of Go packages and package tests found in
 // repo, related by ImportsRelation. Package entities are not related to the
 // repository's filesystem tree; use GraphWithContainment for that.
