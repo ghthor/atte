@@ -92,6 +92,7 @@ type Target struct {
 	Kind   string
 	File   reference.Blob
 	Name   string
+	Label  string
 	Index  int
 	Script reference.Blob
 }
@@ -137,8 +138,10 @@ func Targets(repo *attegit.Repo) ([]Target, error) {
 			labels := make(map[string]struct{}, len(blocks))
 			for index, block := range blocks {
 				name := fmt.Sprintf("%d", index)
+				label := ""
 				if len(block.labels) == 1 {
-					name = block.labels[0]
+					label = block.labels[0]
+					name = label
 					if _, exists := labels[name]; exists {
 						return nil, fmt.Errorf("parse HCL %q: duplicate %s label %q", file, spec.blockType, name)
 					}
@@ -155,7 +158,7 @@ func Targets(repo *attegit.Repo) ([]Target, error) {
 						return nil, fmt.Errorf("%q: %w", file, err)
 					}
 				}
-				targets = append(targets, Target{ID: EntityID(spec.kind, fileBlob, name), Kind: spec.kind, File: fileBlob, Name: name, Index: index, Script: scriptBlob})
+				targets = append(targets, Target{ID: EntityID(spec.kind, fileBlob, name), Kind: spec.kind, File: fileBlob, Name: name, Label: label, Index: index, Script: scriptBlob})
 			}
 		}
 	}

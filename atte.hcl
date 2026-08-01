@@ -1,12 +1,21 @@
 test "go" {
-  script     = "./test.sh"
+  script     = "./atte_test.sh"
   depends_on = ["//go.mod"]
 }
 
+test "build" {
+  script     = "./atte_build.sh"
+  depends_on = ["//go.mod"]
+}
+
+codegen "fmt" {
+  script = "./atte_fmt.sh"
+}
+
 codegen "go" {
-  script = "./codegen.sh"
+  script = "./atte_codegen.sh"
 }
 
 lint "go" {
-  script = "./lint.sh"
+  script = "./atte_lint.sh"
 }

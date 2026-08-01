@@ -1,31 +1,5 @@
 # Repository instructions
 
-## Formatting
-
-Use `treefmt` for all formatting and formatting verification in this repository. Run it through the Nix development shell so the repository's `treefmt.toml` configuration is applied:
-
-```bash
-nix develop --command treefmt
-```
-
-Verify that files are formatted with:
-
-```bash
-nix develop --command treefmt --ci
-```
-
-Prefer these commands over invoking `gofmt`, `nixfmt`, or other formatters directly.
-
-## Go linting
-
-Run `golangci-lint` through the Nix development shell so the repository's pinned tool version is used:
-
-```bash
-nix develop --command golangci-lint run
-```
-
-Use the repository's root `.golangci.yml` configuration. Do not invoke a host-installed `golangci-lint` when validating changes. `treefmt` remains the canonical formatter and formatting verifier.
-
 ## Go tests
 
 Use `github.com/shoenig/test/must` for all assertions in Go tests. Prefer the most specific `must` assertion available; use `must.True` or `must.False` only when no specific assertion function expresses the check. Every `must.True` and `must.False` call must include a concise failure description as its final argument, wrapped with `must.Sprint`, for example:
@@ -64,11 +38,11 @@ When a Go package is needed as a dependency or for documentation, use `go get` t
 Before treating a change as complete, run:
 
 ```bash
-go build ./...
-go test ./...
-ATTE_CODEGEN=1 go test -count=1 ./...
-nix develop --command treefmt --ci
-nix develop --command golangci-lint run
+nix develop --command atte run test.build
+nix develop --command atte run test.go
+nix develop --command atte run codegen.go
+nix develop --command atte run codegen.fmt
+nix develop --command atte run lint.go
 ```
 
-If a test fails and it is not obviously related to the change being made, check whether it also fails on the unmodified branch (e.g. `git stash` and rerun) before attributing the failure to the change.
+Use `nix develop --command atte run --help` for selector and target-discovery details.

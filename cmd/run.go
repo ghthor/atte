@@ -28,6 +28,7 @@ type runTarget struct {
 	path     string
 	name     string
 	index    int
+	label    string
 	dir      string
 	argv     []string
 }
@@ -266,6 +267,7 @@ func runTargets(repo *attegit.Repo, root, cwd, relative string) ([]runTarget, er
 			path:     filePath,
 			name:     target.Name,
 			index:    target.Index,
+			label:    target.Label,
 			dir:      dir,
 			argv:     []string{"/usr/bin/env", "bash", file},
 		})
@@ -343,6 +345,13 @@ func resolveRunTargetAt(selector string, targets []runTarget, relative string) (
 	for _, target := range targets {
 		if matchesRunTargetAt(selector, target, relative) {
 			candidates = append(candidates, target)
+		}
+	}
+	if len(candidates) == 0 {
+		for _, target := range targets {
+			if matchesRunTargetLabel(selector, target) {
+				candidates = append(candidates, target)
+			}
 		}
 	}
 	if len(candidates) == 1 {
@@ -428,6 +437,10 @@ func matchesRunTargetAt(selector string, target runTarget, relative string) bool
 		return false
 	}
 	return block == kindAlias || block == blockName || block == indexedName || block == strings.TrimPrefix(target.kind, attehcl.Namespace+":")
+}
+
+func matchesRunTargetLabel(selector string, target runTarget) bool {
+	return target.label != "" && !strings.Contains(selector, "#") && selector == target.label
 }
 
 func matchesSelector(selector, canonical string) bool {
