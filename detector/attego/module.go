@@ -29,7 +29,8 @@ const (
 	PackageExternalKind = Namespace + ":package-external"
 
 	// ImportsRelation relates a package to an imported package entity.
-	ImportsRelation graph.RelationKind = "imports"
+	ImportsRelation   graph.RelationKind = "imports"
+	SourceFileRelation graph.RelationKind = "source-file"
 )
 
 type module struct {
@@ -48,6 +49,7 @@ type packageInfo struct {
 	module               *module
 	dir, importPath      string
 	imports, testImports map[string]struct{}
+	goFiles, testFiles   []attegit.Path
 	hasTests             bool
 }
 
@@ -122,10 +124,12 @@ func graphFor(repo *attegit.Repo, containment bool) (*graph.Graph, error) {
 		}
 		if f.test {
 			p.hasTests = true
+			p.testFiles = append(p.testFiles, attegit.Path(f.name))
 			for _, imp := range f.imports {
 				p.testImports[imp] = struct{}{}
 			}
 		} else {
+			p.goFiles = append(p.goFiles, attegit.Path(f.name))
 			for _, imp := range f.imports {
 				p.imports[imp] = struct{}{}
 			}
@@ -144,13 +148,34 @@ func graphFor(repo *attegit.Repo, containment bool) (*graph.Graph, error) {
 		if containment {
 			treeID = attegit.EntityID(attegit.Path(p.dir))
 			entities[treeID] = graph.Entity{ID: treeID, Kind: attegit.TreeKind}
-			relations[graph.Relationship{From: pid, To: treeID, Kind: attegit.ContainsRelation}] = struct{}{}
+			relations[graph.Relationship{From: treeID, To: pid, Kind: attegit.ContainsRelation}] = struct{}{}
+			addFileLinks := func(from graph.EntityID, files []attegit.Path) {
+				for _, file := range files {
+					fileID := attegit.EntityID(file)
+					obj, ok := repo.Obj[file]
+					if !ok || obj.Kind != attegit.Blob {
+						continue
+					}
+					entities[fileID] = graph.Entity{ID: fileID, Kind: attegit.BlobKind}
+					relations[graph.Relationship{From: from, To: fileID, Kind: SourceFileRelation}] = struct{}{}
+				}
+			}
+			addFileLinks(pid, p.goFiles)
 		}
 		tid := EntityID(PackageTestKind, p.module.dir, p.importPath)
 		if p.hasTests {
 			entities[tid] = graph.Entity{ID: tid, Kind: PackageTestKind}
 			if containment {
-				relations[graph.Relationship{From: tid, To: treeID, Kind: attegit.ContainsRelation}] = struct{}{}
+				relations[graph.Relationship{From: tid, To: pid, Kind: attegit.ContainsRelation}] = struct{}{}
+				for _, file := range p.testFiles {
+					fileID := attegit.EntityID(file)
+					obj, ok := repo.Obj[file]
+					if !ok || obj.Kind != attegit.Blob {
+						continue
+					}
+					entities[fileID] = graph.Entity{ID: fileID, Kind: attegit.BlobKind}
+					relations[graph.Relationship{From: tid, To: fileID, Kind: SourceFileRelation}] = struct{}{}
+				}
 			}
 		}
 		for _, imp := range sortedSet(p.imports) {

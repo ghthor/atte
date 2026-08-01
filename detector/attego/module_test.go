@@ -99,13 +99,23 @@ func openTestGraph(t *testing.T, dir string) *graph.Graph {
 	return got
 }
 
+func openTestGraphWithContainment(t *testing.T, dir string) *graph.Graph {
+	t.Helper()
+	repo, err := attegit.Open(dir, "HEAD")
+	must.NoError(t, err)
+	got, err := GraphWithContainment(repo)
+	must.NoError(t, err)
+	return got
+}
+
 func TestGraphMatchesGoList(t *testing.T) {
 	dir := newBasicFixture(t)
 	assertGraphsEqual(t, goListGraph(t, dir), openTestGraph(t, dir))
 }
 
 func TestGraphPackagesAndTests(t *testing.T) {
-	g := openTestGraph(t, newBasicFixture(t))
+	repo := newBasicFixture(t)
+	g := openTestGraphWithContainment(t, repo)
 	var normal, test graph.EntityID
 	for _, id := range g.EntityKeys {
 		if g.Entities[id].Kind == PackageKind && string(id) != "" {
@@ -117,5 +127,24 @@ func TestGraphPackagesAndTests(t *testing.T) {
 	}
 	must.NotEq(t, graph.EntityID(""), normal, must.Sprintf("missing normal node: %#v", g.EntityKeys))
 	must.NotEq(t, graph.EntityID(""), test, must.Sprintf("missing test node: %#v", g.EntityKeys))
-	must.Len(t, 3, g.Out(test))
+	packageID := EntityID(PackageKind, "", "example.com/root/p")
+	normalFile := attegit.EntityID("p/p.go")
+	testFile := attegit.EntityID("p/p_test.go")
+	must.True(t, hasRelation(g, test, packageID, attegit.ContainsRelation))
+	must.True(t, hasRelation(g, normal, normalFile, SourceFileRelation))
+	must.False(t, hasRelation(g, normal, testFile, SourceFileRelation))
+	must.True(t, hasRelation(g, test, testFile, SourceFileRelation))
+	must.False(t, hasRelation(g, test, normalFile, SourceFileRelation))
+	treeID := attegit.EntityID("p")
+	must.True(t, hasRelation(g, treeID, normal, attegit.ContainsRelation))
+	must.False(t, hasRelation(g, normal, treeID, attegit.ContainsRelation))
+}
+
+func hasRelation(g *graph.Graph, from, to graph.EntityID, kind graph.RelationKind) bool {
+	for _, relation := range g.Out(from) {
+		if relation.To == to && relation.Kind == kind {
+			return true
+		}
+	}
+	return false
 }

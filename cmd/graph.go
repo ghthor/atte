@@ -23,12 +23,15 @@ var (
 	graphRef             string
 	graphWorkingTree     bool
 	graphExternalImports bool
+	graphGoFiles         bool
 )
 
 // PrintGraphOptions controls the details included in graph output.
 type PrintGraphOptions struct {
 	// IncludeExternalImports includes imports that cannot be resolved inside the repository.
 	IncludeExternalImports bool
+	// IncludeGoFiles includes Go source files linked to packages and package tests.
+	IncludeGoFiles bool
 }
 
 var graphCmd = &cobra.Command{
@@ -52,7 +55,7 @@ var graphCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return printGraph(cmd.OutOrStdout(), repo, relative, PrintGraphOptions{IncludeExternalImports: graphExternalImports})
+		return printGraph(cmd.OutOrStdout(), repo, relative, PrintGraphOptions{IncludeExternalImports: graphExternalImports, IncludeGoFiles: graphGoFiles})
 	},
 }
 
@@ -61,6 +64,7 @@ func init() {
 	graphCmd.Flags().StringVarP(&graphRef, "ref", "r", "HEAD", "Git revision to print")
 	graphCmd.Flags().BoolVar(&graphWorkingTree, "working-tree", false, "Include modified and non-ignored untracked files")
 	graphCmd.Flags().BoolVar(&graphExternalImports, "external-imports", false, "Include external Go imports")
+	graphCmd.Flags().BoolVar(&graphGoFiles, "go-files", false, "Include Go source files")
 }
 
 func repositoryContext(cwd string) (string, string, error) {
@@ -123,11 +127,24 @@ func addGraphChildren(parent treeprint.Tree, repo *attegit.Repo, g *graph.Graph,
 		return fmt.Errorf("parent entity %q not found", parentID)
 	}
 	children := make([]graph.EntityID, 0)
+	seen := make(map[graph.EntityID]struct{})
 	for _, id := range g.EntityKeys {
 		for _, relation := range g.Out(id) {
-			if relation.Kind == attegit.ContainsRelation && relation.To == parentID {
-				children = append(children, id)
-				break
+			if relation.Kind != attegit.ContainsRelation {
+				continue
+			}
+			var child graph.EntityID
+			switch {
+			case relation.To == parentID:
+				child = id
+			case id == parentID && (g.Entities[relation.To].Kind == attego.PackageKind || g.Entities[relation.To].Kind == attego.PackageTestKind):
+				child = relation.To
+			default:
+				continue
+			}
+			if _, ok := seen[child]; !ok {
+				children = append(children, child)
+				seen[child] = struct{}{}
 			}
 		}
 	}
@@ -141,42 +158,57 @@ func addGraphChildren(parent treeprint.Tree, repo *attegit.Repo, g *graph.Graph,
 				return err
 			}
 		case attegit.BlobKind:
-			label := path.Base(string(attegit.EntityPath(id)))
-			if obj, ok := repo.Obj[attegit.EntityPath(id)]; ok && obj.Source == attegit.WorkingTreeSource {
-				label = workingTreeStyle.Render(label)
-			}
-			parent.AddNode(label)
+			addBlobNode(parent, repo, id)
 		case attego.PackageKind, attego.PackageTestKind:
-			label := "go package"
-			if entity.Kind == attego.PackageTestKind {
-				label = "go package-test"
-			}
-			_, _, importPath, err := attego.DecodeEntityID(id)
-			if err != nil {
-				return fmt.Errorf("decode Go package %q: %w", id, err)
-			}
-			localImports, stdlibImports, externalImports := packageImports(g, id)
-			if !options.IncludeExternalImports {
-				stdlibImports = nil
-				externalImports = nil
-			}
-			if len(localImports) == 0 && len(stdlibImports) == 0 && len(externalImports) == 0 {
-				parent.AddNode(goPackageStyle.Render(fmt.Sprintf("%s %s", label, importPath)))
-				continue
-			}
-			branch := parent.AddBranch(goPackageStyle.Render(fmt.Sprintf("%s %s", label, importPath)))
-			for _, imported := range localImports {
-				branch.AddNode("import " + imported)
-			}
-			for _, imported := range stdlibImports {
-				branch.AddNode(stdlibStyle.Render("std import " + imported))
-			}
-			for _, imported := range externalImports {
-				branch.AddNode("external import " + imported)
+			if err := addPackageNode(parent, repo, g, id, options); err != nil {
+				return err
 			}
 		default:
 			return fmt.Errorf("unsupported entity kind %q for %q", entity.Kind, id)
 		}
+	}
+	return nil
+}
+
+func addBlobNode(parent treeprint.Tree, repo *attegit.Repo, id graph.EntityID) {
+	label := path.Base(string(attegit.EntityPath(id)))
+	if obj, ok := repo.Obj[attegit.EntityPath(id)]; ok && obj.Source == attegit.WorkingTreeSource {
+		label = workingTreeStyle.Render(label)
+	}
+	parent.AddNode(label)
+}
+
+func addPackageNode(parent treeprint.Tree, repo *attegit.Repo, g *graph.Graph, id graph.EntityID, options PrintGraphOptions) error {
+	label := "go package"
+	if g.Entities[id].Kind == attego.PackageTestKind {
+		label = "go package-test"
+	}
+	_, _, importPath, err := attego.DecodeEntityID(id)
+	if err != nil {
+		return fmt.Errorf("decode Go package %q: %w", id, err)
+	}
+	localImports, stdlibImports, externalImports := packageImports(g, id)
+	if !options.IncludeExternalImports {
+		stdlibImports = nil
+		externalImports = nil
+	}
+	files := packageFiles(g, id, options.IncludeGoFiles)
+	if len(localImports) == 0 && len(stdlibImports) == 0 && len(externalImports) == 0 && len(files) == 0 {
+		parent.AddNode(goPackageStyle.Render(fmt.Sprintf("%s %s", label, importPath)))
+		return nil
+	}
+	branch := parent.AddBranch(goPackageStyle.Render(fmt.Sprintf("%s %s", label, importPath)))
+	for _, file := range files {
+		branch.AddNode("file " + file)
+	}
+	for _, imported := range localImports {
+		branch.AddNode("import " + imported)
+	}
+	for _, imported := range stdlibImports {
+		branch.AddNode(stdlibStyle.Render("std import " + imported))
+	}
+	for _, imported := range externalImports {
+		branch.AddNode("external import " + imported)
 	}
 	return nil
 }
@@ -208,6 +240,21 @@ func packageImports(g *graph.Graph, source graph.EntityID) ([]string, []string, 
 	return sortedStrings(local), sortedStrings(stdlib), sortedStrings(external)
 }
 
+func packageFiles(g *graph.Graph, source graph.EntityID, enabled bool) []string {
+	if !enabled {
+		return nil
+	}
+	files := make([]string, 0)
+	for _, relation := range g.Out(source) {
+		if relation.Kind != attego.SourceFileRelation || !g.Has(relation.To) || g.Entities[relation.To].Kind != attegit.BlobKind {
+			continue
+		}
+		files = append(files, path.Base(string(attegit.EntityPath(relation.To))))
+	}
+	sort.Strings(files)
+	return files
+}
+
 func sortedStrings(values map[string]struct{}) []string {
 	result := make([]string, 0, len(values))
 	for value := range values {
@@ -219,7 +266,7 @@ func sortedStrings(values map[string]struct{}) []string {
 
 func hasContainment(g *graph.Graph, id graph.EntityID) bool {
 	for _, relation := range g.Out(id) {
-		if relation.Kind == attegit.ContainsRelation {
+		if relation.Kind == attegit.ContainsRelation || relation.Kind == attego.SourceFileRelation {
 			return true
 		}
 	}
