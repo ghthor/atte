@@ -9,6 +9,7 @@
 pkgs.mkShell {
   packages = [
     pkgs-unstable.go_1_26
+    pkgs-unstable.golangci-lint
     pkgs.treefmt
     pkgs.nixfmt
     pkgs.graph-easy

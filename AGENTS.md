@@ -16,6 +16,16 @@ nix develop --command treefmt --ci
 
 Prefer these commands over invoking `gofmt`, `nixfmt`, or other formatters directly.
 
+## Go linting
+
+Run `golangci-lint` through the Nix development shell so the repository's pinned tool version is used:
+
+```bash
+nix develop --command golangci-lint run
+```
+
+Use the repository's root `.golangci.yml` configuration. Do not invoke a host-installed `golangci-lint` when validating changes. `treefmt` remains the canonical formatter and formatting verifier.
+
 ## Go tests
 
 Use `github.com/shoenig/test/must` for all assertions in Go tests. Do not use ad hoc `if` checks, `t.Fatal`, `t.Error`, or other assertion libraries for test assertions.
