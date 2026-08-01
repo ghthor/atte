@@ -344,10 +344,20 @@ func blocksOfType(file reference.Blob, body *hclsyntax.Body, blockType string) (
 // shared by every attehcl block kind today. A kind whose schema diverges
 // calls this for the attributes it still has in common and layers its own
 // decoding on top for the rest.
-func decodeScriptAndDeps(repo *attegit.Repo, file reference.Blob, body *hclsyntax.Body) (string, []dependency, error) {
-	deps := make([]dependency, 0)
-	ctx := &hcl.EvalContext{Variables: map[string]cty.Value{}, Functions: map[string]function.Function{
-		"gopkg_test": function.New(&function.Spec{Params: []function.Parameter{{Name: "path", Type: cty.String}}, Type: function.StaticReturnType(cty.String), Impl: func(args []cty.Value, ret cty.Type) (cty.Value, error) {
+// hclFunctions returns the functions available to atte.hcl expressions.
+// Keep all registrations here so adding a function does not require changing
+// every expression decoder.
+func hclFunctions(repo *attegit.Repo) map[string]function.Function {
+	return map[string]function.Function{
+		"gopkg_test": gopkgTestFunction(repo),
+	}
+}
+
+func gopkgTestFunction(repo *attegit.Repo) function.Function {
+	return function.New(&function.Spec{
+		Params: []function.Parameter{{Name: "path", Type: cty.String}},
+		Type:   function.StaticReturnType(cty.String),
+		Impl: func(args []cty.Value, ret cty.Type) (cty.Value, error) {
 			g, err := attego.Graph(repo)
 			if err != nil {
 				return cty.NilVal, err
@@ -361,8 +371,13 @@ func decodeScriptAndDeps(repo *attegit.Repo, file reference.Blob, body *hclsynta
 				}
 			}
 			return cty.NilVal, fmt.Errorf("go package-test %q not found", args[0].AsString())
-		}}),
-	}}
+		},
+	})
+}
+
+func decodeScriptAndDeps(repo *attegit.Repo, file reference.Blob, body *hclsyntax.Body) (string, []dependency, error) {
+	deps := make([]dependency, 0)
+	ctx := &hcl.EvalContext{Variables: map[string]cty.Value{}, Functions: hclFunctions(repo)}
 	content, diags := body.Content(&hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "script", Required: true}, {Name: "depends_on"}, {Name: "triggered_by"}}})
 	if diags.HasErrors() {
 		return "", nil, fmt.Errorf("decode HCL %q: %s", file, diags.Error())
