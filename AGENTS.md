@@ -32,6 +32,8 @@ Use `github.com/shoenig/test/must` for all assertions in Go tests. Do not use ad
 
 Keep setup operations that can fail under `must.NoError` as well.
 
+When tests create multiline strings, use raw string literals. Start the string on the following line and use `strings.TrimLeft` to remove the leading whitespace added for readability.
+
 ## Go style
 
 Prefer `make([]T, 0, <len>)` over a `[]T{}` literal when building up a slice by appending. Use a known or estimated length for the capacity hint.
