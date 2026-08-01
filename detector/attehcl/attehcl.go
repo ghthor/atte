@@ -165,11 +165,21 @@ func evaluateDeclarations(repo *attegit.Repo, file *hclFile, expressions map[str
 func scopeFor(repo *attegit.Repo, files map[reference.Blob]*hclFile, current *hclFile) (hclScope, error) {
 	ancestors := make([]*hclFile, 0)
 	dir := current.file.Tree()
+	// TODO: this could be much simpler if we just evaluated this in the correct order to start
+	// We should always start at the repo root and then decend from there, that
+	// way whenever we need the global context from our parent we already have
+	// computed it. If we fix the scopeFor function to walk a graph, we can
+	// perform the evaluateGlobals in the correct order, so it will just be a
+	// lookup to the parent and overlay, instead of this accumulator thing we
+	// have going on here
+	// TODO: factor this into func evaluateGlobals
 	for {
 		candidate, err := dir.Blob(Filename)
 		if err != nil {
 			return hclScope{}, err
 		}
+		// If we fix scopeFor we can stop at the first matching canidate as
+		// we'll have already evaluated it before
 		if file, ok := files[candidate]; ok {
 			ancestors = append(ancestors, file)
 		}
@@ -180,8 +190,8 @@ func scopeFor(repo *attegit.Repo, files map[reference.Blob]*hclFile, current *hc
 	}
 	globals := make(map[string]cty.Value)
 	for index := len(ancestors) - 1; index >= 0; index-- {
-		file := ancestors[index]
-		values, err := evaluateDeclarations(repo, file, file.globals, globals, "global")
+		ancestor := ancestors[index]
+		values, err := evaluateDeclarations(repo, ancestor, ancestor.globals, globals, "global")
 		if err != nil {
 			return hclScope{}, err
 		}
@@ -189,6 +199,8 @@ func scopeFor(repo *attegit.Repo, files map[reference.Blob]*hclFile, current *hc
 			globals[name] = value
 		}
 	}
+	// TODO: factor this into func evaluateGlobals : end
+
 	locals, err := evaluateDeclarations(repo, current, current.locals, globals, "local")
 	if err != nil {
 		return hclScope{}, err
@@ -278,24 +290,16 @@ func Targets(repo *attegit.Repo) ([]Target, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, file := range repo.ObjKeys {
-		obj := repo.Obj[file]
-		if obj.Kind != attegit.Blob || path.Base(file.String()) != Filename {
-			continue
-		}
-		fileBlob, err := reference.ParseBlob(file.String())
-		if err != nil {
-			return nil, fmt.Errorf("invalid HCL file path %q: %w", file, err)
-		}
-		hclConfig := files[fileBlob]
+	for blob, hclConfig := range files {
+		// TODO: scope for should take a tree only graph from repo and start at the root and visit every node breadth / depth doesn't matter
 		scope, err := scopeFor(repo, files, hclConfig)
 		if err != nil {
 			return nil, err
 		}
 		body := hclConfig.body
-		ctx := evalContext(repo, fileBlob, scope)
+		ctx := evalContext(repo, blob, scope)
 		for _, spec := range []struct{ blockType, kind string }{{"test", TestKind}, {"codegen", CodegenKind}, {"lint", LintKind}} {
-			blocks, err := blocksOfType(fileBlob, body, spec.blockType)
+			blocks, err := blocksOfType(blob, body, spec.blockType)
 			if err != nil {
 				return nil, err
 			}
@@ -307,11 +311,11 @@ func Targets(repo *attegit.Repo) ([]Target, error) {
 					label = block.labels[0]
 					name = label
 					if _, exists := labels[name]; exists {
-						return nil, fmt.Errorf("parse HCL %q: duplicate %s label %q", file, spec.blockType, name)
+						return nil, fmt.Errorf("parse HCL %q: duplicate %s label %q", blob, spec.blockType, name)
 					}
 					labels[name] = struct{}{}
 				}
-				script, _, err := decodeScriptAndDeps(repo, fileBlob, block.body, ctx)
+				script, _, err := decodeScriptAndDeps(repo, blob, block.body, ctx)
 				if err != nil {
 					return nil, err
 				}
@@ -322,11 +326,20 @@ func Targets(repo *attegit.Repo) ([]Target, error) {
 				} else if script != "" {
 					trimmed := strings.TrimSpace(script)
 					if object, ok := repo.Obj[reference.Blob(trimmed)]; ok && (object.Kind == attegit.Blob || object.Kind == attegit.Tree) {
-						return nil, fmt.Errorf("decode HCL %q: script string resolves to repository %q %q; use path(%q) for an external script", file, object.Kind, trimmed, trimmed)
+						return nil, fmt.Errorf("decode HCL %q: script string resolves to repository %q %q; use path(%q) for an external script", blob, object.Kind, trimmed, trimmed)
 					}
 					inline = script
 				}
-				targets = append(targets, Target{ID: EntityID(spec.kind, fileBlob, name), Kind: spec.kind, File: fileBlob, Name: name, Label: label, Index: index, Script: scriptBlob, Inline: inline})
+				targets = append(targets, Target{
+					ID:     EntityID(spec.kind, blob, name),
+					Kind:   spec.kind,
+					File:   blob,
+					Name:   name,
+					Label:  label,
+					Index:  index,
+					Script: scriptBlob,
+					Inline: inline,
+				})
 			}
 		}
 	}
@@ -363,6 +376,7 @@ func ConfigFor(repo *attegit.Repo, relativePath string) (Config, error) {
 	if !ok {
 		current = &hclFile{file: currentBlob, globals: make(map[string]hcl.Expression), locals: make(map[string]hcl.Expression)}
 	}
+	// TODO: scope for should take a graph from // => //dir => //dir/target and walk up from the root towards the target
 	scope, err := scopeFor(repo, files, current)
 	if err != nil {
 		return Config{}, err
@@ -419,6 +433,8 @@ func graphFor(repo *attegit.Repo, containment bool) (*graph.Graph, error) {
 			return nil, fmt.Errorf("invalid HCL file path %q: %w", file, err)
 		}
 		config := files[fileBlob]
+		// TODO: scopeFor should take a tree only graph from repo and start at the root and visit every node breadth / depth doesn't matter
+		// scopeAll
 		scope, err := scopeFor(repo, files, config)
 		if err != nil {
 			return nil, err

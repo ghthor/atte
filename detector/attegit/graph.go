@@ -38,42 +38,79 @@ func EntityPath(id graph.EntityID) (reference.Path, error) {
 	return reference.ParsePath(value)
 }
 
+type Graphs struct {
+	Full *graph.Graph
+	Tree *graph.Graph
+}
+
 // Graph converts the repository tree into the language-agnostic propagation
 // graph. Containment relationships point from a child to its containing tree.
 func (r *Repo) Graph() (*graph.Graph, error) {
-	entities := make([]graph.Entity, 0, len(r.Obj)+len(r.Tree))
-	seen := make(map[reference.Path]struct{}, len(r.Obj)+len(r.Tree))
-	for _, p := range r.TreeKeys {
-		entities = append(entities, graph.Entity{ID: EntityID(p), Kind: TreeKind})
-		seen[p] = struct{}{}
-	}
-	for _, p := range r.ObjKeys {
-		if _, ok := seen[p]; ok {
-			continue
-		}
-		obj := r.Obj[p]
-		kind := BlobKind
-		if obj.Kind == Tree {
-			kind = TreeKind
-		}
-		entities = append(entities, graph.Entity{ID: EntityID(p), Kind: kind})
-		seen[p] = struct{}{}
+	if r.fullGraph != nil {
+		return r.fullGraph, nil
 	}
 
-	relations := make([]graph.Relationship, 0, len(r.Obj)+len(r.Tree))
-	for _, p := range r.ObjKeys {
-		parent := p.Tree()
-		if r.Obj[p].Kind == Tree {
-			parent = p.(reference.Tree).Parent()
+	type g struct {
+		nodes []graph.Entity
+		edges []graph.Relationship
+	}
+	var (
+		l1   = len(r.Obj)
+		l2   = l1 + len(r.Tree)
+		full = g{
+			nodes: make([]graph.Entity, 0, l1),
+			edges: make([]graph.Relationship, 0, l2),
 		}
+		tree = g{
+			nodes: make([]graph.Entity, 0, l1),
+			edges: make([]graph.Relationship, 0, l2),
+		}
+	)
+
+	root := graph.Entity{ID: EntityID(reference.Root), Kind: TreeKind}
+	tree.nodes = append(tree.nodes, root)
+	full.nodes = append(full.nodes, root)
+
+	for _, p := range r.ObjKeys {
+		o := r.Obj[p]
+		parent := parentTree(p, o.Kind)
 		if _, ok := r.Tree[parent]; !ok {
 			return nil, fmt.Errorf("parent tree %q not found for %q", parent, p)
 		}
-		relations = append(relations, graph.Relationship{
+
+		rel := graph.Relationship{
 			From: EntityID(p),
 			To:   EntityID(parent),
 			Kind: ContainsRelation,
-		})
+		}
+		e := graph.Entity{ID: EntityID(p), Kind: BlobKind}
+		if o.Kind == Tree {
+			e.Kind = TreeKind
+			tree.nodes = append(tree.nodes, e)
+			tree.edges = append(tree.edges, rel)
+		}
+		full.nodes = append(full.nodes, e)
+		full.edges = append(full.edges, rel)
 	}
-	return graph.New(entities, relations)
+
+	var err error
+	r.treeGraph, err = graph.New(tree.nodes, tree.edges)
+	if err != nil {
+		return nil, err
+	}
+	r.fullGraph, err = graph.New(full.nodes, full.edges)
+	return r.fullGraph, nil
+}
+
+func (r *Repo) TreeGraph() (*graph.Graph, error) {
+	if r.treeGraph != nil {
+		return r.treeGraph, nil
+	}
+
+	_, err := r.Graph()
+	if err != nil {
+		return nil, err
+	}
+
+	return r.treeGraph, nil
 }

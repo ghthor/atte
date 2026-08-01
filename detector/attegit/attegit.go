@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ghthor/atte/graph"
 	"github.com/ghthor/atte/reference"
 	"github.com/go-git/go-billy/v5"
 	"github.com/go-git/go-billy/v5/osfs"
@@ -73,7 +74,13 @@ type Repo struct {
 	ObjKeys  []reference.Path
 	Tree     map[reference.Tree][]Obj
 	TreeKeys []reference.Tree
-	blobs    map[reference.Blob][]byte
+	BlobKeys []reference.Blob
+
+	// memoized graph values
+	fullGraph *graph.Graph
+	treeGraph *graph.Graph // tree => tree/sub => tree/sub/tree only
+
+	blobs map[reference.Blob][]byte
 
 	gitRepo  *git.Repository
 	gitRepos []*git.Repository
