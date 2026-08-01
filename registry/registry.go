@@ -4,6 +4,7 @@ package registry
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/ghthor/atte/detector/attegit"
@@ -23,10 +24,11 @@ type Target struct {
 
 // Detector contains capabilities supplied by a detector namespace.
 type Detector struct {
-	Namespace   string
-	Graph       func(*attegit.Repo) (*graph.Graph, error)
-	Targets     func(*attegit.Repo) ([]Target, error)
-	Selectorize func(Target) (selector.Target, bool)
+	Namespace       string
+	Graph           func(*attegit.Repo) (*graph.Graph, error)
+	Targets         func(*attegit.Repo) ([]Target, error)
+	Selectorize     func(Target) (selector.Target, bool)
+	MatchIdentifier func(Target, string) bool
 }
 
 // Registry stores runtime detector registrations.
@@ -110,6 +112,48 @@ func (r *Registry) Selector(target Target) (selector.Target, bool) {
 		return selector.Target{}, false
 	}
 	return detector.Selectorize(target)
+}
+
+// Matches reports whether input selects target from a repository-relative directory.
+// Path resolution is handled by the selector package; identifier interpretation is
+// delegated to the detector registered for target.Namespace.
+func (r *Registry) Matches(target Target, input, relative string) bool {
+	canonical, ok := r.Selector(target)
+	if !ok {
+		return false
+	}
+	parsed, err := selector.Resolve(input, relative)
+	if err != nil {
+		if !strings.Contains(input, "#") {
+			parsed, err = selector.Resolve("#"+input, relative)
+		}
+		if err != nil {
+			return false
+		}
+	}
+	candidateDir := strings.TrimSuffix(canonical.Path, "/atte.hcl")
+	pathless := strings.HasPrefix(strings.TrimSpace(input), "#") || !strings.Contains(input, "#")
+	if parsed.Path == "" && !pathless && candidateDir != "" {
+		return false
+	}
+	if !selector.PathMatches(parsed.Path, relative, canonical.Path, candidateDir) {
+		return false
+	}
+	if detector, ok := r.detector(target.Namespace); ok && detector.MatchIdentifier != nil {
+		return detector.MatchIdentifier(target, parsed.Identifier)
+	}
+	canonicalSelector, err := selector.Parse(canonical.String())
+	if err != nil {
+		return false
+	}
+	return parsed.Identifier == canonicalSelector.Identifier
+}
+
+func (r *Registry) detector(namespace string) (Detector, bool) {
+	r.mu.RLock()
+	detector, ok := r.detectors[namespace]
+	r.mu.RUnlock()
+	return detector, ok
 }
 
 func (r *Registry) snapshot() []Detector {

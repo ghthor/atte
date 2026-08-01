@@ -28,7 +28,14 @@ Use the repository's root `.golangci.yml` configuration. Do not invoke a host-in
 
 ## Go tests
 
-Use `github.com/shoenig/test/must` for all assertions in Go tests. Prefer the most specific `must` assertion available; use `must.True` or `must.False` only when no specific assertion function expresses the check. Do not use ad hoc `if` checks, `t.Fatal`, `t.Error`, or other assertion libraries for test assertions.
+Use `github.com/shoenig/test/must` for all assertions in Go tests. Prefer the most specific `must` assertion available; use `must.True` or `must.False` only when no specific assertion function expresses the check. Every `must.True` and `must.False` call must include a concise failure description as its final argument, wrapped with `must.Sprint`, for example:
+
+```go
+must.True(t, got.Valid(), must.Sprint("resolved selector should be valid"))
+must.False(t, got.EscapesRoot(), must.Sprint("selector should remain inside the repository"))
+```
+
+Do not pass a raw string as the description: the `must` package expects a `must.Setting`. Do not use ad hoc `if` checks, `t.Fatal`, `t.Error`, or other assertion libraries for test assertions.
 
 Keep setup operations that can fail under `must.NoError` as well.
 

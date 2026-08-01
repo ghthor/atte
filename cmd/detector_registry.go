@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"strconv"
+	"strings"
+
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/attehcl"
@@ -28,6 +31,9 @@ func builtInDetectorRegistry() (*registry.Registry, error) {
 		Selectorize: func(target registry.Target) (selector.Target, bool) {
 			return attego.Selector(attego.Target{PackageDir: reference.Tree(target.Path)}), true
 		},
+		MatchIdentifier: func(target registry.Target, identifier string) bool {
+			return identifier == "go_test"
+		},
 	}); err != nil {
 		return nil, err
 	}
@@ -50,6 +56,10 @@ func builtInDetectorRegistry() (*registry.Registry, error) {
 		},
 		Selectorize: func(target registry.Target) (selector.Target, bool) {
 			return attehcl.Selector(attehcl.Target{Kind: target.Kind, File: reference.Blob(target.Path), Name: target.Name, Index: target.Index}), true
+		},
+		MatchIdentifier: func(target registry.Target, identifier string) bool {
+			kind := strings.TrimPrefix(target.Kind, attehcl.Namespace+":")
+			return identifier == kind || identifier == kind+"."+target.Name || identifier == kind+"."+strconv.Itoa(target.Index)
 		},
 	}); err != nil {
 		return nil, err

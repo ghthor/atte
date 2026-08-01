@@ -2,12 +2,102 @@
 package selector
 
 import (
-	"path/filepath"
+	"fmt"
+	"path"
 	"strconv"
 	"strings"
 )
 
 // Target describes the selector-facing identity of a runnable target.
+// Selector is the formal repository selector syntax: <path>#<identifier>.
+//
+// Path is stored without the canonical // repository-root prefix. The path is
+// repository-relative; Identifier is opaque and is interpreted by a detector.
+type Selector struct {
+	Path       string
+	Identifier string
+}
+
+// Parse parses a formal selector. The optional // prefix means repository root.
+// Identifier syntax is intentionally opaque to this package.
+func Parse(raw string) (Selector, error) {
+	value := strings.TrimPrefix(raw, "//")
+	parts := strings.SplitN(value, "#", 2)
+	if len(parts) != 2 || parts[1] == "" {
+		return Selector{}, fmt.Errorf("invalid selector %q: expected <path>#<identifier>", raw)
+	}
+	clean, err := normalizePath(parts[0])
+	if err != nil {
+		return Selector{}, err
+	}
+	return Selector{Path: clean, Identifier: parts[1]}, nil
+}
+
+// Resolve resolves a selector path against a repository-relative directory.
+// A // path is rooted at the repository; other paths are relative to relative.
+func Resolve(raw, relative string) (Selector, error) {
+	value := strings.TrimPrefix(raw, "//")
+	parts := strings.SplitN(value, "#", 2)
+	if len(parts) != 2 || parts[1] == "" {
+		return Selector{}, fmt.Errorf("invalid selector %q: expected <path>#<identifier>", raw)
+	}
+	if strings.HasPrefix(raw, "//") {
+		clean, err := normalizePath(parts[0])
+		if err != nil {
+			return Selector{}, err
+		}
+		return Selector{Path: clean, Identifier: parts[1]}, nil
+	}
+	resolved, err := ResolvePath(parts[0], relative)
+	if err != nil {
+		return Selector{}, err
+	}
+	return Selector{Path: resolved, Identifier: parts[1]}, nil
+}
+
+// ResolvePath resolves a repository-relative path and rejects root escapes.
+func ResolvePath(value, relative string) (string, error) {
+	if strings.HasPrefix(value, "/") && !strings.HasPrefix(value, "//") {
+		return "", fmt.Errorf("invalid selector path %q", value)
+	}
+	value = strings.TrimPrefix(value, "//")
+	resolved := path.Clean(path.Join(relative, strings.ReplaceAll(value, "\\", "/")))
+	if resolved == "." {
+		resolved = ""
+	}
+	if resolved == ".." || strings.HasPrefix(resolved, "../") {
+		return "", fmt.Errorf("selector path %q escapes repository root", value)
+	}
+	return resolved, nil
+}
+
+// PathMatches reports whether inputPath addresses candidatePath. candidateDir
+// may provide an equivalent containing-directory spelling for file targets.
+func PathMatches(inputPath, relative, candidatePath, candidateDir string) bool {
+	if inputPath == "" || inputPath == "." || inputPath == candidatePath || inputPath == candidateDir {
+		return true
+	}
+	resolved, err := ResolvePath(inputPath, relative)
+	if err != nil {
+		return false
+	}
+	return resolved == candidatePath || resolved == candidateDir
+}
+
+// String returns the canonical repository-root-qualified selector.
+func (s Selector) String() string { return "//" + s.Path + "#" + s.Identifier }
+
+func normalizePath(raw string) (string, error) {
+	clean := path.Clean(strings.ReplaceAll(raw, "\\", "/"))
+	if clean == "." {
+		clean = ""
+	}
+	if path.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, "../") {
+		return "", fmt.Errorf("invalid selector path %q", raw)
+	}
+	return clean, nil
+}
+
 type Target struct {
 	// Path is the canonical repository path, including atte.hcl for HCL targets.
 	Path  string
@@ -72,7 +162,7 @@ func (t Target) Matches(input, relative string) bool {
 		if relative == "" {
 			return false
 		}
-		resolved := filepath.ToSlash(filepath.Clean(filepath.Join(relative, filepath.FromSlash(pathPart))))
+		resolved := path.Clean(path.Join(relative, strings.ReplaceAll(pathPart, "\\\\", "/")))
 		if resolved == "." {
 			resolved = ""
 		}
