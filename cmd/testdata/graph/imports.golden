@@ -1,0 +1,12 @@
+.
+├── go.mod
+├── internal/
+│   └── value/
+│       ├── value.go
+│       └── go package example.com/root/internal/value
+├── main.go
+├── main_test.go
+└── go package example.com/root
+    ├── import example.com/root/internal/value
+    ├── std import fmt
+    └── external import github.com/shoenig/test/must

@@ -3,5 +3,7 @@
 fmt:
 	treefmt
 
+gen: export ATTE_CODEGEN=1
 gen:
-	UPDATE_GO_LIST_DOT=1 go test ./detector/attego/... -run TestGraphvizSnapshot
+	go test ./detector/attego/... -run TestGraphvizSnapshot
+	go test ./cmd

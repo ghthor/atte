@@ -2,12 +2,102 @@ package cmd
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attegittest"
 	"github.com/shoenig/test/must"
 )
+
+func TestPrintGraphGolden(t *testing.T) {
+	repo := repoWithFiles(t, map[string]string{
+		"README.md": "read me",
+		"go.mod": `
+			module example.com/root
+
+			go 1.20
+		`,
+		"main.go": `
+			package main
+
+			import "example.com/root/cmd"
+
+			var _ = cmd.Run
+		`,
+		"cmd/cmd.go": `
+			package cmd
+
+			import "example.com/root/internal/value"
+
+			var Run = value.Value
+		`,
+		"internal/value/value.go": `
+			package value
+
+			const Value = 1
+		`,
+	})
+	assertGraphGolden(t, "default", renderTestGraph(t, repo))
+}
+
+func TestPrintGraphImportsGolden(t *testing.T) {
+	repo := repoWithFiles(t, map[string]string{
+		"go.mod": `
+			module example.com/root
+
+			go 1.20
+		`,
+		"main.go": `
+			package main
+
+			import (
+				"fmt"
+				"example.com/root/internal/value"
+				"github.com/shoenig/test/must"
+			)
+
+			var _ = fmt.Println
+			var _ = value.Value
+			var _ = must.NoError
+		`,
+		"main_test.go": `
+			package main_test
+
+			import "testing"
+
+			func TestMain(t *testing.T) {}
+		`,
+		"internal/value/value.go": `
+			package value
+
+			const Value = 1
+		`,
+	})
+	assertGraphGolden(t, "imports", renderTestGraph(t, repo, PrintGraphOptions{IncludeExternalImports: true}))
+}
+
+func assertGraphGolden(t *testing.T, name, got string) {
+	t.Helper()
+	goldenPath := filepath.Join(graphTestdataDir(), name+".golden")
+	must.NoError(t, os.MkdirAll(filepath.Dir(goldenPath), 0o755))
+	got = ansi.Strip(got)
+	if os.Getenv("ATTE_CODEGEN") != "" {
+		must.NoError(t, os.WriteFile(goldenPath, []byte(got), 0o644))
+		return
+	}
+	want, err := os.ReadFile(goldenPath)
+	must.NoError(t, err)
+	must.EqOp(t, string(want), got)
+}
+
+func graphTestdataDir() string {
+	_, filename, _, _ := runtime.Caller(0)
+	return filepath.Join(filepath.Dir(filename), "testdata", "graph")
+}
 
 func TestPrintGraphUsesGoPerspective(t *testing.T) {
 	repo := repoWithFiles(t, map[string]string{

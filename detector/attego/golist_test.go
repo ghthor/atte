@@ -236,7 +236,7 @@ func TestGraphvizSnapshot(t *testing.T) {
 	want := graphvizSnapshot(t, goListGraph(t, dir))
 	fixturePath := filepath.Join("testdata", "go-list.dot")
 	boxartPath := filepath.Join("testdata", "go-list.txt")
-	if os.Getenv("UPDATE_GO_LIST_DOT") != "" {
+	if os.Getenv("ATTE_CODEGEN") != "" {
 		must.NoError(t, os.MkdirAll(filepath.Dir(fixturePath), 0o755))
 		must.NoError(t, os.WriteFile(fixturePath, []byte(want), 0o644))
 		must.NoError(t, os.WriteFile(boxartPath, []byte(graphEasyBoxart(t, want)), 0o644))
