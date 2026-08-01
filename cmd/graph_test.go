@@ -10,6 +10,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attegittest"
+	"github.com/ghthor/atte/detector/attego"
+	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/shoenig/test/must"
 )
 
@@ -22,6 +24,16 @@ func TestPrintGraphGolden(t *testing.T) {
 			}
 		`,
 		"test.sh": "#!/bin/sh\n",
+		"pkg/pkg.go": `
+			package pkg
+		`,
+		"pkg/pkg_test.go": `
+			package pkg
+
+			import "testing"
+
+			func TestPackage(t *testing.T) {}
+		`,
 		"go.mod": `
 			module example.com/root
 
@@ -48,6 +60,7 @@ func TestPrintGraphGolden(t *testing.T) {
 		`,
 	})
 	assertGraphGolden(t, "default", renderTestGraph(t, repo))
+	assertGraphGolden(t, "run-targets", renderTestGraph(t, repo, PrintGraphOptions{IncludeRunTargets: true}))
 }
 
 func TestPrintGraphImportsGolden(t *testing.T) {
@@ -202,6 +215,22 @@ func main() { fmt.Println(must.NoError) }
 	must.StrContains(t, with, "go package example.com/root")
 	must.StrContains(t, with, "std import fmt")
 	must.StrNotContains(t, with, "external import fmt")
+}
+
+func TestIsGraphChildKind(t *testing.T) {
+	childKind := func(kind string, want bool) {
+		t.Helper()
+		must.EqOp(t, want, isGraphChildKind(kind))
+	}
+
+	childKind(attego.PackageKind, true)
+	childKind(attego.PackageTestKind, true)
+	childKind(attehcl.TestKind, true)
+	childKind(attehcl.CodegenKind, true)
+	childKind(attehcl.LintKind, true)
+	childKind(attegit.TreeKind, false)
+	childKind(attegit.BlobKind, false)
+	childKind("unknown", false)
 }
 
 func repoWithFiles(t *testing.T, files map[string]string) *attegit.Repo {

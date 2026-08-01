@@ -184,10 +184,7 @@ func formatRunTargetCompletion(prefix string, target runTarget, relative string)
 	if target.kind != attego.PackageTestKind && !strings.HasSuffix(canonicalPath, "/atte.hcl") && canonicalPath != "atte.hcl" {
 		canonicalPath += "/atte.hcl"
 	}
-	resolvedPrefix := filepath.ToSlash(filepath.Clean(filepath.Join(relative, filepath.FromSlash(pathPrefix))))
-	if resolvedPrefix == "." {
-		resolvedPrefix = ""
-	}
+	resolvedPrefix := resolveSelectorPath(pathPrefix, relative)
 	completionPath := canonicalPath
 	if resolvedPrefix != "" && strings.HasPrefix(canonicalPath, resolvedPrefix+"/") {
 		completionPath = strings.TrimPrefix(canonicalPath, resolvedPrefix+"/")
@@ -200,12 +197,7 @@ func formatRunTargetCompletion(prefix string, target runTarget, relative string)
 func matchesRunTargetCompletion(prefix string, target runTarget, relative string) bool {
 	if strings.Contains(prefix, "#") && relative != "" {
 		parts := strings.SplitN(prefix, "#", 2)
-		pathPart := strings.TrimPrefix(parts[0], "//")
-		resolved := filepath.ToSlash(filepath.Clean(filepath.Join(relative, filepath.FromSlash(pathPart))))
-		if resolved == "." {
-			resolved = ""
-		}
-		prefix = "//" + resolved + "#" + parts[1]
+		prefix = "//" + resolveSelectorPath(strings.TrimPrefix(parts[0], "//"), relative) + "#" + parts[1]
 	}
 	if strings.HasPrefix(target.selector, prefix) || matchesRunTargetAt(prefix, target, relative) {
 		return true
@@ -218,14 +210,8 @@ func matchesRunTargetCompletion(prefix string, target runTarget, relative string
 	if pathPart == "" {
 		return true
 	}
-	resolved := filepath.ToSlash(filepath.Clean(filepath.Join(relative, filepath.FromSlash(pathPart))))
-	if resolved == "." {
-		resolved = ""
-	}
-	canonicalPath := strings.TrimPrefix(target.selector, "//")
-	canonicalPath = strings.SplitN(canonicalPath, "#", 2)[0]
-	canonicalDir := strings.TrimSuffix(canonicalPath, "atte.hcl")
-	canonicalDir = strings.TrimSuffix(canonicalDir, "/")
+	resolved := resolveSelectorPath(pathPart, relative)
+	canonicalPath, canonicalDir := runTargetPaths(target)
 	if resolved == "" {
 		return canonicalDir == ""
 	}
@@ -237,19 +223,18 @@ func buildCompleteGraph(repo *attegit.Repo) (*graph.Graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build Git graph: %w", err)
 	}
-	goGraph, err := attego.GraphWithContainment(repo)
+	registry, err := builtInDetectorRegistry()
 	if err != nil {
-		return nil, fmt.Errorf("build Go graph: %w", err)
+		return nil, fmt.Errorf("register detectors: %w", err)
 	}
-	if err := g.Absorb(goGraph); err != nil {
-		return nil, fmt.Errorf("merge Go graph: %w", err)
-	}
-	hclGraph, err := attehcl.GraphWithContainment(repo)
+	detectorGraph, err := registry.Graph(repo)
 	if err != nil {
-		return nil, fmt.Errorf("build HCL graph: %w", err)
+		return nil, fmt.Errorf("build detector graph: %w", err)
 	}
-	if err := g.Absorb(hclGraph); err != nil {
-		return nil, fmt.Errorf("merge HCL graph: %w", err)
+	if detectorGraph != nil {
+		if err := g.Absorb(detectorGraph); err != nil {
+			return nil, fmt.Errorf("merge detector graph: %w", err)
+		}
 	}
 	return g, nil
 }
@@ -274,11 +259,9 @@ func runTargets(repo *attegit.Repo, root, cwd, relative string) ([]runTarget, er
 		file := filepath.Join(root, filepath.FromSlash(target.Script.String()))
 		dir := filepath.Dir(filepath.Join(root, filepath.FromSlash(target.File.String())))
 		filePath := target.File.String()
-		fileDir := strings.TrimSuffix(filePath, "/atte.hcl")
-		blockType := strings.TrimPrefix(target.Kind, attehcl.Namespace+":")
-		selector := "//" + fileDir + "#" + blockType + "." + target.Name
+		rendered := attehcl.Selector(target).String()
 		targets = append(targets, runTarget{
-			selector: selector,
+			selector: rendered,
 			kind:     target.Kind,
 			path:     filePath,
 			name:     target.Name,
@@ -296,7 +279,7 @@ func runTargets(repo *attegit.Repo, root, cwd, relative string) ([]runTarget, er
 			dir = cwd
 		}
 		targets = append(targets, runTarget{
-			selector: "//" + packageDir + "#go_test",
+			selector: attego.Selector(target).String(),
 			kind:     target.Kind,
 			path:     packageDir,
 			name:     "go_test",
@@ -380,19 +363,58 @@ func matchesRunTarget(selector string, target runTarget) bool {
 	return matchesRunTargetAt(selector, target, "")
 }
 
+func runTargetAliases(target runTarget) (string, string) {
+	kind := strings.TrimPrefix(target.kind, attehcl.Namespace+":")
+	kindAlias := kind
+	blockName := kind + "." + target.name
+	if target.kind == attego.PackageTestKind {
+		kindAlias = "go_test"
+		blockName = "go_test"
+	}
+	return kindAlias, blockName
+}
+
+func runTargetPaths(target runTarget) (string, string) {
+	canonicalPath := strings.TrimPrefix(target.selector, "//")
+	canonicalPath = strings.SplitN(canonicalPath, "#", 2)[0]
+	canonicalDir := strings.TrimSuffix(canonicalPath, "atte.hcl")
+	canonicalDir = strings.TrimSuffix(canonicalDir, "/")
+	return canonicalPath, canonicalDir
+}
+
+func resolveSelectorPath(pathPart, relative string) string {
+	resolved := filepath.ToSlash(filepath.Clean(filepath.Join(relative, filepath.FromSlash(pathPart))))
+	if resolved == "." {
+		return ""
+	}
+	return resolved
+}
+
+func matchesRunTargetPath(pathPart, canonicalPath, canonicalDir, relative string) bool {
+	if pathPart == "" || pathPart == "." || pathPart == canonicalPath || pathPart == canonicalDir {
+		return true
+	}
+	if relative == "" {
+		return false
+	}
+	resolved := resolveSelectorPath(pathPart, relative)
+	if strings.HasSuffix(pathPart, "/atte.hcl") || pathPart == "atte.hcl" {
+		if resolved != canonicalPath {
+			return false
+		}
+	} else if resolved != canonicalPath && resolved != canonicalDir {
+		return false
+	}
+	return !strings.HasPrefix(resolved, "../") && resolved != ".."
+}
+
 func matchesRunTargetAt(selector string, target runTarget, relative string) bool {
 	if matchesSelector(selector, target.selector) {
 		return true
 	}
-	kind := strings.TrimPrefix(target.kind, attehcl.Namespace+":")
-	name := kind + "." + target.name
-	blockName := name
-	kindAlias := kind
-	if target.kind == attego.PackageTestKind {
-		blockName = "go_test"
-		kindAlias = "go_test"
-	}
-	if selector == kindAlias || selector == blockName || selector == fmt.Sprintf("%s.%d", kindAlias, target.index) {
+	kindAlias, blockName := runTargetAliases(target)
+	indexedName := fmt.Sprintf("%s.%d", kindAlias, target.index)
+	if selector == kindAlias || selector == blockName || selector == indexedName {
 		return true
 	}
 	selector = strings.TrimPrefix(selector, "//")
@@ -401,33 +423,11 @@ func matchesRunTargetAt(selector string, target runTarget, relative string) bool
 		return false
 	}
 	pathPart, block := parts[0], parts[1]
-	canonicalPath := strings.TrimPrefix(target.selector, "//")
-	canonicalPath = strings.SplitN(canonicalPath, "#", 2)[0]
-	canonicalDir := strings.TrimSuffix(canonicalPath, "atte.hcl")
-	canonicalDir = strings.TrimSuffix(canonicalDir, "/")
-	if pathPart != "" && pathPart != "." && pathPart != canonicalPath && pathPart != canonicalDir {
-		if relative == "" {
-			return false
-		}
-		resolved := filepath.ToSlash(filepath.Clean(filepath.Join(relative, filepath.FromSlash(pathPart))))
-		if resolved == "." {
-			resolved = ""
-		}
-		if strings.HasSuffix(pathPart, "/atte.hcl") || pathPart == "atte.hcl" {
-			if resolved != canonicalPath {
-				return false
-			}
-		} else if resolved != canonicalPath && resolved != canonicalDir {
-			return false
-		}
-		if strings.HasPrefix(resolved, "../") || resolved == ".." {
-			return false
-		}
+	canonicalPath, canonicalDir := runTargetPaths(target)
+	if !matchesRunTargetPath(pathPart, canonicalPath, canonicalDir, relative) {
+		return false
 	}
-	if block == kindAlias || block == blockName || block == fmt.Sprintf("%s.%d", kindAlias, target.index) {
-		return true
-	}
-	return block == kind
+	return block == kindAlias || block == blockName || block == indexedName || block == strings.TrimPrefix(target.kind, attehcl.Namespace+":")
 }
 
 func matchesSelector(selector, canonical string) bool {

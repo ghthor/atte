@@ -14,9 +14,9 @@
 ├── pkg/
 │   ├── pkg.go
 │   ├── pkg_test.go
-│   ├── go package-test example.com/root/pkg
+│   ├── //pkg#go_test
 │   └── go package example.com/root/pkg
 ├── test.sh
 ├── go package example.com/root
 │   └── import example.com/root/cmd
-└── test attehcl:test:atte.hcl:default
+└── //atte.hcl#test.default

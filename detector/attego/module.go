@@ -17,6 +17,7 @@ import (
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/graph"
 	"github.com/ghthor/atte/reference"
+	"github.com/ghthor/atte/reference/selector"
 	"golang.org/x/mod/modfile"
 )
 
@@ -101,6 +102,11 @@ type Target struct {
 }
 
 // Targets returns runnable Go package tests with their repository directories.
+// Selector returns the canonical selector for a Go package-test target.
+func Selector(target Target) selector.Target {
+	return selector.Target{Path: target.PackageDir.String(), Kind: "go_test"}
+}
+
 func Targets(repo *attegit.Repo) ([]Target, error) {
 	g, err := GraphWithContainment(repo)
 	if err != nil {

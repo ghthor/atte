@@ -36,7 +36,7 @@ When tests create multiline strings, use raw string literals. Start the string o
 
 When several tests repeat the same multi-step setup (temp directory, file writes, git init/commit, etc.), introduce a small fixture type with methods rather than copy-pasting the boilerplate at each call site. Keep the fixture's low-level building blocks (e.g. running an arbitrary script) available so tests needing non-standard setup are not forced through a higher-level convenience method.
 
-For functional tests or repeated behavior checks, prefer a local `f` helper that calls `t.Helper()` and accepts the varying inputs and expected outputs. Invoke the helper directly for each case; use `t.Run` to group cases when they represent distinct error categories or behaviors.
+For functional tests or repeated behavior checks, prefer a local helper with a short, descriptive name (for example, `match`, `complete`, or `resolve`) that calls `t.Helper()` and accepts the varying inputs and expected outputs. Invoke the helper directly for each case; use `t.Run` to group cases when they represent distinct error categories or behaviors.
 
 ## Go style
 

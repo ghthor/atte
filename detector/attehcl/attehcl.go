@@ -10,6 +10,7 @@ import (
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/graph"
 	"github.com/ghthor/atte/reference"
+	"github.com/ghthor/atte/reference/selector"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclparse"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
@@ -96,6 +97,16 @@ type Target struct {
 }
 
 // Targets returns executable test, codegen, and lint blocks in repository order.
+// Selector returns the canonical selector for an HCL runnable target.
+func Selector(target Target) selector.Target {
+	return selector.Target{
+		Path:  target.File.String(),
+		Kind:  strings.TrimPrefix(target.Kind, Namespace+":"),
+		Name:  target.Name,
+		Index: target.Index,
+	}
+}
+
 func Targets(repo *attegit.Repo) ([]Target, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("repository is nil")

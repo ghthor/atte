@@ -26,6 +26,7 @@ var (
 	graphWorkingTree     bool
 	graphExternalImports bool
 	graphGoFiles         bool
+	graphRunTargets      bool
 )
 
 // PrintGraphOptions controls the details included in graph output.
@@ -34,6 +35,8 @@ type PrintGraphOptions struct {
 	IncludeExternalImports bool
 	// IncludeGoFiles includes Go source files linked to packages and package tests.
 	IncludeGoFiles bool
+	// IncludeRunTargets renders runnable entities using atte run selectors.
+	IncludeRunTargets bool
 }
 
 var graphCmd = &cobra.Command{
@@ -57,7 +60,7 @@ var graphCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return printGraph(cmd.OutOrStdout(), repo, relative, PrintGraphOptions{IncludeExternalImports: graphExternalImports, IncludeGoFiles: graphGoFiles})
+		return printGraph(cmd.OutOrStdout(), repo, relative, PrintGraphOptions{IncludeExternalImports: graphExternalImports, IncludeGoFiles: graphGoFiles, IncludeRunTargets: graphRunTargets})
 	},
 }
 
@@ -67,6 +70,7 @@ func init() {
 	graphCmd.Flags().BoolVar(&graphWorkingTree, "working-tree", false, "Include modified and non-ignored untracked files")
 	graphCmd.Flags().BoolVar(&graphExternalImports, "external-imports", false, "Include external Go imports")
 	graphCmd.Flags().BoolVar(&graphGoFiles, "go-files", false, "Include Go source files")
+	graphCmd.Flags().BoolVar(&graphRunTargets, "run-targets", false, "Render runnable entities as atte run selectors")
 }
 
 func repositoryContext(cwd string) (string, string, error) {
@@ -101,21 +105,46 @@ func printGraph(w io.Writer, repo *attegit.Repo, relativePath string, options ..
 	if err != nil {
 		return fmt.Errorf("build Git graph: %w", err)
 	}
-	goGraph, err := attego.GraphWithContainment(repo)
+	registry, err := builtInDetectorRegistry()
+	if err != nil {
+		return fmt.Errorf("register detectors: %w", err)
+	}
+	detectorGraph, err := registry.Graph(repo)
 	if err != nil {
 		return fmt.Errorf("build Go graph: %w", err)
 	}
-	if err := gitGraph.Absorb(goGraph); err != nil {
-		return fmt.Errorf("merge Go graph: %w", err)
+	if detectorGraph != nil {
+		if err := gitGraph.Absorb(detectorGraph); err != nil {
+			return fmt.Errorf("merge detector graph: %w", err)
+		}
 	}
-	hclGraph, err := attehcl.GraphWithContainment(repo)
+	var runSelectors map[graph.EntityID]string
+	if printOptions.IncludeRunTargets {
+		runSelectors, err = graphRunTargetSelectors(repo)
+		if err != nil {
+			return fmt.Errorf("discover run targets: %w", err)
+		}
+	}
+	return printGitGraph(w, repo, gitGraph, relativePath, printOptions, runSelectors)
+}
+
+func graphRunTargetSelectors(repo *attegit.Repo) (map[graph.EntityID]string, error) {
+	selectors := make(map[graph.EntityID]string)
+	registry, err := builtInDetectorRegistry()
 	if err != nil {
-		return fmt.Errorf("build HCL graph: %w", err)
+		return nil, err
 	}
-	if err := gitGraph.Absorb(hclGraph); err != nil {
-		return fmt.Errorf("merge HCL graph: %w", err)
+	targets, err := registry.Targets(repo)
+	if err != nil {
+		return nil, err
 	}
-	return printGitGraph(w, repo, gitGraph, relativePath, printOptions)
+	for _, target := range targets {
+		value, ok := registry.Selector(target)
+		if ok {
+			selectors[target.ID] = value.String()
+		}
+	}
+	return selectors, nil
 }
 
 var (
@@ -124,7 +153,11 @@ var (
 	stdlibStyle      = lipgloss.NewStyle().Faint(true)
 )
 
-func printGitGraph(w io.Writer, repo *attegit.Repo, g *graph.Graph, relativePath string, options PrintGraphOptions) error {
+func printGitGraph(w io.Writer, repo *attegit.Repo, g *graph.Graph, relativePath string, options PrintGraphOptions, runSelectors ...map[graph.EntityID]string) error {
+	var selectors map[graph.EntityID]string
+	if len(runSelectors) > 0 {
+		selectors = runSelectors[0]
+	}
 	tree := treeprint.New()
 	if err := addGraphChildren(tree, repo, g, func() graph.EntityID {
 		if relativePath == "" {
@@ -132,14 +165,27 @@ func printGitGraph(w io.Writer, repo *attegit.Repo, g *graph.Graph, relativePath
 		}
 		tree, _ := reference.ParseTree(relativePath)
 		return attegit.EntityID(tree)
-	}(), options); err != nil {
+	}(), options, selectors); err != nil {
 		return err
 	}
 	_, err := fmt.Fprint(w, tree.String())
 	return err
 }
 
-func addGraphChildren(parent treeprint.Tree, repo *attegit.Repo, g *graph.Graph, parentID graph.EntityID, options PrintGraphOptions) error {
+func isGraphChildKind(kind string) bool {
+	switch kind {
+	case attego.PackageKind, attego.PackageTestKind, attehcl.TestKind, attehcl.CodegenKind, attehcl.LintKind:
+		return true
+	default:
+		return false
+	}
+}
+
+func addGraphChildren(parent treeprint.Tree, repo *attegit.Repo, g *graph.Graph, parentID graph.EntityID, options PrintGraphOptions, runSelectors ...map[graph.EntityID]string) error {
+	var selectors map[graph.EntityID]string
+	if len(runSelectors) > 0 {
+		selectors = runSelectors[0]
+	}
 	if g == nil {
 		return fmt.Errorf("graph is nil")
 	}
@@ -157,7 +203,7 @@ func addGraphChildren(parent treeprint.Tree, repo *attegit.Repo, g *graph.Graph,
 			switch {
 			case relation.To == parentID:
 				child = id
-			case id == parentID && (g.Entities[relation.To].Kind == attego.PackageKind || g.Entities[relation.To].Kind == attego.PackageTestKind || g.Entities[relation.To].Kind == attehcl.TestKind || g.Entities[relation.To].Kind == attehcl.CodegenKind || g.Entities[relation.To].Kind == attehcl.LintKind):
+			case id == parentID && isGraphChildKind(g.Entities[relation.To].Kind):
 				child = relation.To
 			default:
 				continue
@@ -178,22 +224,50 @@ func addGraphChildren(parent treeprint.Tree, repo *attegit.Repo, g *graph.Graph,
 				return fmt.Errorf("decode Git entity %q: %w", id, err)
 			}
 			branch := parent.AddBranch(path.Base(entityPath.String()) + "/")
-			if err := addGraphChildren(branch, repo, g, id, options); err != nil {
+			if err := addGraphChildren(branch, repo, g, id, options, selectors); err != nil {
 				return err
 			}
 		case attegit.BlobKind:
 			if err := addBlobNode(parent, repo, id); err != nil {
 				return err
 			}
-		case attego.PackageKind, attego.PackageTestKind:
+		case attego.PackageKind:
+			if err := addPackageNode(parent, repo, g, id, options); err != nil {
+				return err
+			}
+		case attego.PackageTestKind:
+			if options.IncludeRunTargets {
+				if selector, ok := selectors[id]; ok {
+					parent.AddBranch(selector)
+					break
+				}
+			}
 			if err := addPackageNode(parent, repo, g, id, options); err != nil {
 				return err
 			}
 		case attehcl.TestKind:
+			if options.IncludeRunTargets {
+				if value, ok := selectors[id]; ok {
+					parent.AddBranch(value)
+					break
+				}
+			}
 			parent.AddBranch("test " + string(id))
 		case attehcl.CodegenKind:
+			if options.IncludeRunTargets {
+				if value, ok := selectors[id]; ok {
+					parent.AddBranch(value)
+					break
+				}
+			}
 			parent.AddBranch("codegen " + string(id))
 		case attehcl.LintKind:
+			if options.IncludeRunTargets {
+				if value, ok := selectors[id]; ok {
+					parent.AddBranch(value)
+					break
+				}
+			}
 			parent.AddBranch("lint " + string(id))
 		default:
 			return fmt.Errorf("unsupported entity kind %q for %q", entity.Kind, id)
