@@ -7,6 +7,7 @@ import (
 	"github.com/ghthor/atte/detector/attegittest"
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/graph"
+	"github.com/ghthor/atte/graph/graphtest"
 	"github.com/ghthor/atte/reference"
 	"github.com/shoenig/test/must"
 )
@@ -49,13 +50,13 @@ test "unit" {
 	unit := EntityID(TestKind, "atte.hcl", "unit")
 	must.EqOp(t, TestKind, got.Entities[first].Kind)
 	must.EqOp(t, TestKind, got.Entities[unit].Kind)
-	must.True(t, hasRelation(got, first, attegit.EntityID(testPath("atte.hcl")), SourceFileRelation))
-	must.True(t, hasRelation(got, first, attegit.EntityID(testPath("first.sh")), ScriptRelation))
-	must.True(t, hasRelation(got, first, attegit.EntityID(testPath("config.yaml")), DependsOnRelation))
-	must.True(t, hasRelation(got, unit, attegit.EntityID(testPath("unit.sh")), ScriptRelation))
-	must.True(t, hasRelation(got, unit, attegit.EntityID(testPath("trigger.yaml")), DependsOnRelation))
-	must.True(t, hasRelation(got, attegit.EntityID(reference.Root), first, attegit.ContainsRelation))
-	must.True(t, hasRelation(got, attegit.EntityID(reference.Root), unit, attegit.ContainsRelation))
+	graphtest.MustHaveRelation(t, got, first, attegit.EntityID(testPath("atte.hcl")), SourceFileRelation)
+	graphtest.MustHaveRelation(t, got, first, attegit.EntityID(testPath("first.sh")), ScriptRelation)
+	graphtest.MustHaveRelation(t, got, first, attegit.EntityID(testPath("config.yaml")), DependsOnRelation)
+	graphtest.MustHaveRelation(t, got, unit, attegit.EntityID(testPath("unit.sh")), ScriptRelation)
+	graphtest.MustHaveRelation(t, got, unit, attegit.EntityID(testPath("trigger.yaml")), DependsOnRelation)
+	graphtest.MustHaveRelation(t, got, attegit.EntityID(reference.Root), first, attegit.ContainsRelation)
+	graphtest.MustHaveRelation(t, got, attegit.EntityID(reference.Root), unit, attegit.ContainsRelation)
 }
 
 func TestGraphLabeledAndUnlabeledCodegenAndLintBlocks(t *testing.T) {
@@ -109,12 +110,12 @@ lint "vet" {
 	must.EqOp(t, LintKind, got.Entities[lintVet].Kind)
 
 	for _, id := range []graph.EntityID{test, testUnit, codegen, codegenProto, lint, lintVet} {
-		must.True(t, hasRelation(got, id, attegit.EntityID(testPath("atte.hcl")), SourceFileRelation))
-		must.True(t, hasRelation(got, attegit.EntityID(reference.Root), id, attegit.ContainsRelation))
+		graphtest.MustHaveRelation(t, got, id, attegit.EntityID(testPath("atte.hcl")), SourceFileRelation)
+		graphtest.MustHaveRelation(t, got, attegit.EntityID(reference.Root), id, attegit.ContainsRelation)
 	}
-	must.True(t, hasRelation(got, test, attegit.EntityID(testPath("test.sh")), ScriptRelation))
-	must.True(t, hasRelation(got, codegen, attegit.EntityID(testPath("codegen.sh")), ScriptRelation))
-	must.True(t, hasRelation(got, lint, attegit.EntityID(testPath("lint.sh")), ScriptRelation))
+	graphtest.MustHaveRelation(t, got, test, attegit.EntityID(testPath("test.sh")), ScriptRelation)
+	graphtest.MustHaveRelation(t, got, codegen, attegit.EntityID(testPath("codegen.sh")), ScriptRelation)
+	graphtest.MustHaveRelation(t, got, lint, attegit.EntityID(testPath("lint.sh")), ScriptRelation)
 }
 
 func TestGraphGopkgTestDependency(t *testing.T) {
@@ -150,7 +151,7 @@ test "go" {
 	testID := EntityID(TestKind, "atte.hcl", "go")
 	packageTestID := attego.EntityID(attego.PackageTestKind, "", "example.com/root/p")
 	must.EqOp(t, attego.PackageTestKind, got.Entities[packageTestID].Kind)
-	must.True(t, hasRelation(got, testID, packageTestID, DependsOnRelation))
+	graphtest.MustHaveRelation(t, got, testID, packageTestID, DependsOnRelation)
 }
 
 func TestGraphRejectsInvalidConfiguration(t *testing.T) {
@@ -208,13 +209,4 @@ func newHCLFixture(t *testing.T, files map[string]string) *attegit.Repo {
 	repo, err := attegit.Open(git.Dir(), "HEAD")
 	must.NoError(t, err)
 	return repo
-}
-
-func hasRelation(g *graph.Graph, from, to graph.EntityID, kind graph.RelationKind) bool {
-	for _, relation := range g.Out(from) {
-		if relation.To == to && relation.Kind == kind {
-			return true
-		}
-	}
-	return false
 }

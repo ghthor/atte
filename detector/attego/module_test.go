@@ -6,6 +6,7 @@ import (
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attegittest"
 	"github.com/ghthor/atte/graph"
+	"github.com/ghthor/atte/graph/graphtest"
 	"github.com/ghthor/atte/reference"
 	"github.com/shoenig/test/must"
 )
@@ -99,20 +100,23 @@ func TestDecodeEntityIDRejectsMalformed(t *testing.T) {
 	must.Error(t, err)
 }
 
-func openTestGraph(t *testing.T, dir string) *graph.Graph {
+func openTestRepo(t *testing.T, dir string) *attegit.Repo {
 	t.Helper()
 	repo, err := attegit.Open(dir, "HEAD")
 	must.NoError(t, err)
-	got, err := Graph(repo)
+	return repo
+}
+
+func openTestGraph(t *testing.T, dir string) *graph.Graph {
+	t.Helper()
+	got, err := Graph(openTestRepo(t, dir))
 	must.NoError(t, err)
 	return got
 }
 
 func openTestGraphWithContainment(t *testing.T, dir string) *graph.Graph {
 	t.Helper()
-	repo, err := attegit.Open(dir, "HEAD")
-	must.NoError(t, err)
-	got, err := GraphWithContainment(repo)
+	got, err := GraphWithContainment(openTestRepo(t, dir))
 	must.NoError(t, err)
 	return got
 }
@@ -139,22 +143,13 @@ func TestGraphPackagesAndTests(t *testing.T) {
 	packageID := EntityID(PackageKind, "", "example.com/root/p")
 	normalFile := attegit.EntityID(testPath("p/p.go"))
 	testFile := attegit.EntityID(testPath("p/p_test.go"))
-	must.True(t, hasRelation(g, test, packageID, attegit.ContainsRelation))
-	must.True(t, hasRelation(g, normal, normalFile, SourceFileRelation))
-	must.False(t, hasRelation(g, normal, testFile, SourceFileRelation))
-	must.True(t, hasRelation(g, test, testFile, SourceFileRelation))
-	must.False(t, hasRelation(g, test, normalFile, SourceFileRelation))
+	graphtest.MustHaveRelation(t, g, test, packageID, attegit.ContainsRelation)
+	graphtest.MustHaveRelation(t, g, normal, normalFile, SourceFileRelation)
+	graphtest.MustNotHaveRelation(t, g, normal, testFile, SourceFileRelation)
+	graphtest.MustHaveRelation(t, g, test, testFile, SourceFileRelation)
+	graphtest.MustNotHaveRelation(t, g, test, normalFile, SourceFileRelation)
 	treeID := attegit.EntityID(testPath("p"))
-	must.True(t, hasRelation(g, treeID, normal, attegit.ContainsRelation))
-	must.True(t, hasRelation(g, treeID, test, attegit.ContainsRelation))
-	must.False(t, hasRelation(g, normal, treeID, attegit.ContainsRelation))
-}
-
-func hasRelation(g *graph.Graph, from, to graph.EntityID, kind graph.RelationKind) bool {
-	for _, relation := range g.Out(from) {
-		if relation.To == to && relation.Kind == kind {
-			return true
-		}
-	}
-	return false
+	graphtest.MustHaveRelation(t, g, treeID, normal, attegit.ContainsRelation)
+	graphtest.MustHaveRelation(t, g, treeID, test, attegit.ContainsRelation)
+	graphtest.MustNotHaveRelation(t, g, normal, treeID, attegit.ContainsRelation)
 }
