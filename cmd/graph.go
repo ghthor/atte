@@ -157,7 +157,7 @@ func addGraphChildren(parent treeprint.Tree, repo *attegit.Repo, g *graph.Graph,
 			switch {
 			case relation.To == parentID:
 				child = id
-			case id == parentID && (g.Entities[relation.To].Kind == attego.PackageKind || g.Entities[relation.To].Kind == attego.PackageTestKind || g.Entities[relation.To].Kind == attehcl.TestKind):
+			case id == parentID && (g.Entities[relation.To].Kind == attego.PackageKind || g.Entities[relation.To].Kind == attego.PackageTestKind || g.Entities[relation.To].Kind == attehcl.TestKind || g.Entities[relation.To].Kind == attehcl.CodegenKind || g.Entities[relation.To].Kind == attehcl.LintKind):
 				child = relation.To
 			default:
 				continue
@@ -191,6 +191,10 @@ func addGraphChildren(parent treeprint.Tree, repo *attegit.Repo, g *graph.Graph,
 			}
 		case attehcl.TestKind:
 			parent.AddBranch("test " + string(id))
+		case attehcl.CodegenKind:
+			parent.AddBranch("codegen " + string(id))
+		case attehcl.LintKind:
+			parent.AddBranch("lint " + string(id))
 		default:
 			return fmt.Errorf("unsupported entity kind %q for %q", entity.Kind, id)
 		}

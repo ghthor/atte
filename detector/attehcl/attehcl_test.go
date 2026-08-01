@@ -45,8 +45,8 @@ test "unit" {
 	got, err := GraphWithContainment(repo)
 	must.NoError(t, err)
 
-	first := EntityID("atte.hcl", "0")
-	unit := EntityID("atte.hcl", "unit")
+	first := EntityID(TestKind, "atte.hcl", "0")
+	unit := EntityID(TestKind, "atte.hcl", "unit")
 	must.EqOp(t, TestKind, got.Entities[first].Kind)
 	must.EqOp(t, TestKind, got.Entities[unit].Kind)
 	must.True(t, hasRelation(got, first, attegit.EntityID(testPath("atte.hcl")), SourceFileRelation))
@@ -56,6 +56,65 @@ test "unit" {
 	must.True(t, hasRelation(got, unit, attegit.EntityID(testPath("trigger.yaml")), DependsOnRelation))
 	must.True(t, hasRelation(got, attegit.EntityID(reference.Root), first, attegit.ContainsRelation))
 	must.True(t, hasRelation(got, attegit.EntityID(reference.Root), unit, attegit.ContainsRelation))
+}
+
+func TestGraphLabeledAndUnlabeledCodegenAndLintBlocks(t *testing.T) {
+	repo := newHCLFixture(t, map[string]string{
+		"atte.hcl": `
+
+test {
+  script = "./test.sh"
+}
+
+test "unit" {
+  script = "./test.sh"
+}
+
+codegen {
+  script = "./codegen.sh"
+}
+
+codegen "proto" {
+  script = "./codegen.sh"
+}
+
+lint {
+  script = "./lint.sh"
+}
+
+lint "vet" {
+  script = "./lint.sh"
+}
+`,
+		"test.sh":    "#!/bin/sh\n",
+		"codegen.sh": "#!/bin/sh\n",
+		"lint.sh":    "#!/bin/sh\n",
+	})
+
+	got, err := GraphWithContainment(repo)
+	must.NoError(t, err)
+
+	test := EntityID(TestKind, "atte.hcl", "0")
+	testUnit := EntityID(TestKind, "atte.hcl", "unit")
+	codegen := EntityID(CodegenKind, "atte.hcl", "0")
+	codegenProto := EntityID(CodegenKind, "atte.hcl", "proto")
+	lint := EntityID(LintKind, "atte.hcl", "0")
+	lintVet := EntityID(LintKind, "atte.hcl", "vet")
+
+	must.EqOp(t, TestKind, got.Entities[test].Kind)
+	must.EqOp(t, TestKind, got.Entities[testUnit].Kind)
+	must.EqOp(t, CodegenKind, got.Entities[codegen].Kind)
+	must.EqOp(t, CodegenKind, got.Entities[codegenProto].Kind)
+	must.EqOp(t, LintKind, got.Entities[lint].Kind)
+	must.EqOp(t, LintKind, got.Entities[lintVet].Kind)
+
+	for _, id := range []graph.EntityID{test, testUnit, codegen, codegenProto, lint, lintVet} {
+		must.True(t, hasRelation(got, id, attegit.EntityID(testPath("atte.hcl")), SourceFileRelation))
+		must.True(t, hasRelation(got, attegit.EntityID(reference.Root), id, attegit.ContainsRelation))
+	}
+	must.True(t, hasRelation(got, test, attegit.EntityID(testPath("test.sh")), ScriptRelation))
+	must.True(t, hasRelation(got, codegen, attegit.EntityID(testPath("codegen.sh")), ScriptRelation))
+	must.True(t, hasRelation(got, lint, attegit.EntityID(testPath("lint.sh")), ScriptRelation))
 }
 
 func TestGraphGopkgTestDependency(t *testing.T) {
@@ -88,7 +147,7 @@ test "go" {
 	got, err := Graph(repo)
 	must.NoError(t, err)
 
-	testID := EntityID("atte.hcl", "go")
+	testID := EntityID(TestKind, "atte.hcl", "go")
 	packageTestID := attego.EntityID(attego.PackageTestKind, "", "example.com/root/p")
 	must.EqOp(t, attego.PackageTestKind, got.Entities[packageTestID].Kind)
 	must.True(t, hasRelation(got, testID, packageTestID, DependsOnRelation))
@@ -129,11 +188,16 @@ func TestGraphRejectsInvalidConfiguration(t *testing.T) {
 }
 
 func TestEntityIDRoundTrip(t *testing.T) {
-	id := EntityID("nested/atte.hcl", "unit")
-	file, name, err := DecodeEntityID(id)
-	must.NoError(t, err)
-	must.EqOp(t, reference.Blob("nested/atte.hcl"), file)
-	must.EqOp(t, "unit", name)
+	for _, kind := range []string{TestKind, CodegenKind, LintKind} {
+		t.Run(kind, func(t *testing.T) {
+			id := EntityID(kind, "nested/atte.hcl", "unit")
+			gotKind, file, name, err := DecodeEntityID(id)
+			must.NoError(t, err)
+			must.EqOp(t, kind, gotKind)
+			must.EqOp(t, reference.Blob("nested/atte.hcl"), file)
+			must.EqOp(t, "unit", name)
+		})
+	}
 }
 
 func newHCLFixture(t *testing.T, files map[string]string) *attegit.Repo {

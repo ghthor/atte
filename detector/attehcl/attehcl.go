@@ -1,4 +1,4 @@
-// Package attehcl detects test definitions in atte.hcl files.
+// Package attehcl detects test, codegen, and lint definitions in atte.hcl files.
 package attehcl
 
 import (
@@ -20,6 +20,8 @@ import (
 const (
 	Namespace                             = "attehcl"
 	TestKind                              = Namespace + ":test"
+	CodegenKind                           = Namespace + ":codegen"
+	LintKind                              = Namespace + ":lint"
 	SourceFileRelation graph.RelationKind = "source-file"
 	ScriptRelation     graph.RelationKind = "script"
 	DependsOnRelation  graph.RelationKind = "depends-on"
@@ -33,28 +35,54 @@ type testConfig struct {
 	TriggeredBy []string `hcl:"triggered_by,optional"`
 }
 
-type testBlock struct {
+// codegenConfig documents the supported HCL schema for consumers that use gohcl.
+type codegenConfig struct {
+	Label       string   `hcl:",label"`
+	Script      string   `hcl:"script"`
+	DependsOn   []string `hcl:"depends_on,optional"`
+	TriggeredBy []string `hcl:"triggered_by,optional"`
+}
+
+// lintConfig documents the supported HCL schema for consumers that use gohcl.
+type lintConfig struct {
+	Label       string   `hcl:",label"`
+	Script      string   `hcl:"script"`
+	DependsOn   []string `hcl:"depends_on,optional"`
+	TriggeredBy []string `hcl:"triggered_by,optional"`
+}
+
+// rawBlock is a parsed HCL block body with its labels, before any
+// kind-specific attribute decoding. It carries no schema information, so it
+// is shared across every block kind.
+type rawBlock struct {
 	body   *hclsyntax.Body
 	labels []string
 }
+
 type dependency struct {
 	value  string
 	entity graph.EntityID
 }
 
-func EntityID(file reference.Blob, name string) graph.EntityID {
-	return graph.EntityID(fmt.Sprintf("%s:test:%s:%s", Namespace, file, name))
+func EntityID(kind string, file reference.Blob, name string) graph.EntityID {
+	return graph.EntityID(fmt.Sprintf("%s:%s:%s", kind, file, name))
 }
-func DecodeEntityID(id graph.EntityID) (reference.Blob, string, error) {
+func DecodeEntityID(id graph.EntityID) (string, reference.Blob, string, error) {
 	parts := strings.SplitN(string(id), ":", 4)
-	if len(parts) != 4 || parts[0] != Namespace || parts[1] != "test" {
-		return "", "", fmt.Errorf("invalid attehcl entity ID %q", id)
+	if len(parts) != 4 || parts[0] != Namespace {
+		return "", "", "", fmt.Errorf("invalid attehcl entity ID %q", id)
+	}
+	kind := parts[0] + ":" + parts[1]
+	switch kind {
+	case TestKind, CodegenKind, LintKind:
+	default:
+		return "", "", "", fmt.Errorf("invalid attehcl entity ID %q", id)
 	}
 	file, err := reference.ParseBlob(parts[2])
 	if err != nil {
-		return "", "", fmt.Errorf("invalid HCL file path %q: %w", parts[2], err)
+		return "", "", "", fmt.Errorf("invalid HCL file path %q: %w", parts[2], err)
 	}
-	return file, parts[3], nil
+	return kind, file, parts[3], nil
 }
 func Graph(repo *attegit.Repo) (*graph.Graph, error)                { return graphFor(repo, false) }
 func GraphWithContainment(repo *attegit.Repo) (*graph.Graph, error) { return graphFor(repo, true) }
@@ -86,77 +114,111 @@ func graphFor(repo *attegit.Repo, containment bool) (*graph.Graph, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid HCL file path %q: %w", file, err)
 		}
-		blocks, err := parse(fileBlob, contents)
+		body, err := parseFile(fileBlob, contents)
 		if err != nil {
 			return nil, err
 		}
-		labels := map[string]struct{}{}
-		for index, block := range blocks {
-			name := fmt.Sprintf("%d", index)
-			if len(block.labels) == 1 {
-				name = block.labels[0]
-				if _, ok := labels[name]; ok {
-					return nil, fmt.Errorf("parse HCL %q: duplicate test label %q", file, name)
-				}
-				labels[name] = struct{}{}
-			}
-			id := EntityID(fileBlob, name)
-			addEntity(graph.Entity{ID: id, Kind: TestKind})
-			if containment {
-				fileBlob, err := reference.ParseBlob(file.String())
-				if err != nil {
-					return nil, fmt.Errorf("invalid HCL file path %q: %w", file, err)
-				}
-				addEntity(graph.Entity{ID: attegit.EntityID(fileBlob.Tree()), Kind: attegit.TreeKind})
-				addEntity(graph.Entity{ID: attegit.EntityID(fileBlob), Kind: attegit.BlobKind})
-				relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(fileBlob), Kind: SourceFileRelation})
-				relations = append(relations, graph.Relationship{From: attegit.EntityID(fileBlob.Tree()), To: id, Kind: attegit.ContainsRelation})
-			}
-			cfg, deps, err := decodeTest(repo, fileBlob, block)
-			if err != nil {
-				return nil, err
-			}
-			if cfg.Script != "" {
-				source, err := reference.ParseBlob(file.String())
-				targetBlob, typedErr := reference.ResolveBlobFromBlob(source, reference.SomePath(cfg.Script))
-				target := string(targetBlob)
-				if err == nil {
-					err = typedErr
-				}
-				if err != nil {
-					return nil, fmt.Errorf("%q: %w", file, err)
-				}
-				if obj, ok := repo.Obj[targetBlob]; !ok || obj.Kind != attegit.Blob {
-					return nil, fmt.Errorf("%q: script %q not found", file, target)
-				}
-				addEntity(graph.Entity{ID: attegit.EntityID(targetBlob), Kind: attegit.BlobKind})
-				relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(targetBlob), Kind: ScriptRelation})
-			}
-			for _, dep := range deps {
-				if dep.entity != "" {
-					addEntity(graph.Entity{ID: dep.entity, Kind: dependencyKind(repo, dep.entity)})
-					relations = append(relations, graph.Relationship{From: id, To: dep.entity, Kind: DependsOnRelation})
-					continue
-				}
-				source, err := reference.ParseBlob(file.String())
-				targetBlob, typedErr := reference.ResolveBlobFromBlob(source, reference.SomePath(dep.value))
-				target := string(targetBlob)
-				if err == nil {
-					err = typedErr
-				}
-				if err != nil {
-					return nil, fmt.Errorf("%q: %w", file, err)
-				}
-				obj, ok := repo.Obj[targetBlob]
-				if !ok || obj.Kind != attegit.Blob {
-					return nil, fmt.Errorf("%q: dependency %q not found", file, target)
-				}
-				addEntity(graph.Entity{ID: attegit.EntityID(targetBlob), Kind: attegit.BlobKind})
-				relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(targetBlob), Kind: DependsOnRelation})
-			}
+
+		testBlocks, err := blocksOfType(fileBlob, body, "test")
+		if err != nil {
+			return nil, err
 		}
+		testRelations, err := addBlockGraph(repo, fileBlob, TestKind, testBlocks, func(b rawBlock) (string, []dependency, error) {
+			cfg, deps, err := decodeTestBlock(repo, fileBlob, b)
+			return cfg.Script, deps, err
+		}, addEntity, containment)
+		if err != nil {
+			return nil, err
+		}
+		relations = append(relations, testRelations...)
+
+		codegenBlocks, err := blocksOfType(fileBlob, body, "codegen")
+		if err != nil {
+			return nil, err
+		}
+		codegenRelations, err := addBlockGraph(repo, fileBlob, CodegenKind, codegenBlocks, func(b rawBlock) (string, []dependency, error) {
+			cfg, deps, err := decodeCodegenBlock(repo, fileBlob, b)
+			return cfg.Script, deps, err
+		}, addEntity, containment)
+		if err != nil {
+			return nil, err
+		}
+		relations = append(relations, codegenRelations...)
+
+		lintBlocks, err := blocksOfType(fileBlob, body, "lint")
+		if err != nil {
+			return nil, err
+		}
+		lintRelations, err := addBlockGraph(repo, fileBlob, LintKind, lintBlocks, func(b rawBlock) (string, []dependency, error) {
+			cfg, deps, err := decodeLintBlock(repo, fileBlob, b)
+			return cfg.Script, deps, err
+		}, addEntity, containment)
+		if err != nil {
+			return nil, err
+		}
+		relations = append(relations, lintRelations...)
 	}
 	return graph.New(entities, relations)
+}
+
+// addBlockGraph builds the entities and relations for one block kind's raw
+// blocks: per-kind label/index bookkeeping, containment, script resolution,
+// and dependency resolution. It is schema-agnostic — each kind supplies its
+// own decode function to extract the script and dependencies it declares.
+func addBlockGraph(repo *attegit.Repo, file reference.Blob, kind string, blocks []rawBlock, decode func(rawBlock) (string, []dependency, error), addEntity func(graph.Entity), containment bool) ([]graph.Relationship, error) {
+	relations := make([]graph.Relationship, 0, len(blocks))
+	labels := map[string]struct{}{}
+	for index, block := range blocks {
+		name := fmt.Sprintf("%d", index)
+		if len(block.labels) == 1 {
+			name = block.labels[0]
+			if _, ok := labels[name]; ok {
+				return nil, fmt.Errorf("parse HCL %q: duplicate %s label %q", file, strings.TrimPrefix(kind, Namespace+":"), name)
+			}
+			labels[name] = struct{}{}
+		}
+		id := EntityID(kind, file, name)
+		addEntity(graph.Entity{ID: id, Kind: kind})
+		if containment {
+			addEntity(graph.Entity{ID: attegit.EntityID(file.Tree()), Kind: attegit.TreeKind})
+			addEntity(graph.Entity{ID: attegit.EntityID(file), Kind: attegit.BlobKind})
+			relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(file), Kind: SourceFileRelation})
+			relations = append(relations, graph.Relationship{From: attegit.EntityID(file.Tree()), To: id, Kind: attegit.ContainsRelation})
+		}
+		script, deps, err := decode(block)
+		if err != nil {
+			return nil, err
+		}
+		if script != "" {
+			targetBlob, err := reference.ResolveBlobFromBlob(file, reference.SomePath(script))
+			if err != nil {
+				return nil, fmt.Errorf("%q: %w", file, err)
+			}
+			if obj, ok := repo.Obj[targetBlob]; !ok || obj.Kind != attegit.Blob {
+				return nil, fmt.Errorf("%q: script %q not found", file, targetBlob)
+			}
+			addEntity(graph.Entity{ID: attegit.EntityID(targetBlob), Kind: attegit.BlobKind})
+			relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(targetBlob), Kind: ScriptRelation})
+		}
+		for _, dep := range deps {
+			if dep.entity != "" {
+				addEntity(graph.Entity{ID: dep.entity, Kind: dependencyKind(repo, dep.entity)})
+				relations = append(relations, graph.Relationship{From: id, To: dep.entity, Kind: DependsOnRelation})
+				continue
+			}
+			targetBlob, err := reference.ResolveBlobFromBlob(file, reference.SomePath(dep.value))
+			if err != nil {
+				return nil, fmt.Errorf("%q: %w", file, err)
+			}
+			obj, ok := repo.Obj[targetBlob]
+			if !ok || obj.Kind != attegit.Blob {
+				return nil, fmt.Errorf("%q: dependency %q not found", file, targetBlob)
+			}
+			addEntity(graph.Entity{ID: attegit.EntityID(targetBlob), Kind: attegit.BlobKind})
+			relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(targetBlob), Kind: DependsOnRelation})
+		}
+	}
+	return relations, nil
 }
 func dependencyKind(repo *attegit.Repo, id graph.EntityID) string {
 	g, err := attego.Graph(repo)
@@ -168,7 +230,7 @@ func dependencyKind(repo *attegit.Repo, id graph.EntityID) string {
 	return attego.PackageTestKind
 }
 
-func parse(file reference.Blob, contents []byte) ([]testBlock, error) {
+func parseFile(file reference.Blob, contents []byte) (*hclsyntax.Body, error) {
 	f, diags := hclparse.NewParser().ParseHCL(contents, file.String())
 	if diags.HasErrors() {
 		return nil, fmt.Errorf("parse HCL %q: %s", file, diags.Error())
@@ -177,20 +239,31 @@ func parse(file reference.Blob, contents []byte) ([]testBlock, error) {
 	if !ok {
 		return nil, fmt.Errorf("parse HCL %q: unsupported body type %T", file, f.Body)
 	}
-	blocks := make([]testBlock, 0)
+	return body, nil
+}
+
+// blocksOfType extracts the top-level blocks of the given HCL block type
+// (e.g. "test", "codegen", "lint") from an already-parsed file body. It
+// carries no schema knowledge, so it works unmodified for any block kind.
+func blocksOfType(file reference.Blob, body *hclsyntax.Body, blockType string) ([]rawBlock, error) {
+	blocks := make([]rawBlock, 0)
 	for _, block := range body.Blocks {
-		if block.Type != "test" {
+		if block.Type != blockType {
 			continue
 		}
 		if len(block.Labels) > 1 {
-			return nil, fmt.Errorf("parse HCL %q: test has too many labels", file)
+			return nil, fmt.Errorf("parse HCL %q: %s has too many labels", file, blockType)
 		}
-		blocks = append(blocks, testBlock{body: block.Body, labels: block.Labels})
+		blocks = append(blocks, rawBlock{body: block.Body, labels: block.Labels})
 	}
 	return blocks, nil
 }
-func decodeTest(repo *attegit.Repo, file reference.Blob, block testBlock) (testConfig, []dependency, error) {
-	cfg := testConfig{}
+
+// decodeScriptAndDeps decodes the script/depends_on/triggered_by attributes
+// shared by every attehcl block kind today. A kind whose schema diverges
+// calls this for the attributes it still has in common and layers its own
+// decoding on top for the rest.
+func decodeScriptAndDeps(repo *attegit.Repo, file reference.Blob, body *hclsyntax.Body) (string, []dependency, error) {
 	deps := make([]dependency, 0)
 	ctx := &hcl.EvalContext{Variables: map[string]cty.Value{}, Functions: map[string]function.Function{
 		"gopkg_test": function.New(&function.Spec{Params: []function.Parameter{{Name: "path", Type: cty.String}}, Type: function.StaticReturnType(cty.String), Impl: func(args []cty.Value, ret cty.Type) (cty.Value, error) {
@@ -209,34 +282,35 @@ func decodeTest(repo *attegit.Repo, file reference.Blob, block testBlock) (testC
 			return cty.NilVal, fmt.Errorf("go package-test %q not found", args[0].AsString())
 		}}),
 	}}
-	content, diags := block.body.Content(&hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "script", Required: true}, {Name: "depends_on"}, {Name: "triggered_by"}}})
+	content, diags := body.Content(&hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "script", Required: true}, {Name: "depends_on"}, {Name: "triggered_by"}}})
 	if diags.HasErrors() {
-		return cfg, nil, fmt.Errorf("decode HCL %q: %s", file, diags.Error())
+		return "", nil, fmt.Errorf("decode HCL %q: %s", file, diags.Error())
 	}
+	script := ""
 	if value, ok := content.Attributes["script"]; ok {
 		v, d := value.Expr.Value(ctx)
 		if d.HasErrors() {
-			return cfg, nil, fmt.Errorf("decode HCL %q: %s", file, d.Error())
+			return "", nil, fmt.Errorf("decode HCL %q: %s", file, d.Error())
 		}
 		if !v.IsKnown() || v.Type() != cty.String {
-			return cfg, nil, fmt.Errorf("decode HCL %q: script must be a string", file)
+			return "", nil, fmt.Errorf("decode HCL %q: script must be a string", file)
 		}
-		cfg.Script = v.AsString()
+		script = v.AsString()
 	}
 	for _, name := range []string{"depends_on", "triggered_by"} {
 		if attr, ok := content.Attributes[name]; ok {
 			values, d := attr.Expr.Value(ctx)
 			if d.HasErrors() {
-				return cfg, nil, fmt.Errorf("decode HCL %q: %s", file, d.Error())
+				return "", nil, fmt.Errorf("decode HCL %q: %s", file, d.Error())
 			}
 			if !values.IsKnown() || !values.CanIterateElements() {
-				return cfg, nil, fmt.Errorf("decode HCL %q: %s must be a list", file, name)
+				return "", nil, fmt.Errorf("decode HCL %q: %s must be a list", file, name)
 			}
 			it := values.ElementIterator()
 			for it.Next() {
 				_, v := it.Element()
 				if v.Type() != cty.String {
-					return cfg, nil, fmt.Errorf("decode HCL %q: %s values must be strings", file, name)
+					return "", nil, fmt.Errorf("decode HCL %q: %s values must be strings", file, name)
 				}
 				raw := v.AsString()
 				if strings.HasPrefix(raw, "attehcl-id:") {
@@ -247,5 +321,26 @@ func decodeTest(repo *attegit.Repo, file reference.Blob, block testBlock) (testC
 			}
 		}
 	}
-	return cfg, deps, nil
+	return script, deps, nil
+}
+
+func decodeTestBlock(repo *attegit.Repo, file reference.Blob, block rawBlock) (testConfig, []dependency, error) {
+	cfg := testConfig{}
+	script, deps, err := decodeScriptAndDeps(repo, file, block.body)
+	cfg.Script = script
+	return cfg, deps, err
+}
+
+func decodeCodegenBlock(repo *attegit.Repo, file reference.Blob, block rawBlock) (codegenConfig, []dependency, error) {
+	cfg := codegenConfig{}
+	script, deps, err := decodeScriptAndDeps(repo, file, block.body)
+	cfg.Script = script
+	return cfg, deps, err
+}
+
+func decodeLintBlock(repo *attegit.Repo, file reference.Blob, block rawBlock) (lintConfig, []dependency, error) {
+	cfg := lintConfig{}
+	script, deps, err := decodeScriptAndDeps(repo, file, block.body)
+	cfg.Script = script
+	return cfg, deps, err
 }
