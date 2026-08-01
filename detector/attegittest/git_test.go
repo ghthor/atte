@@ -34,7 +34,6 @@ func TestWriteFileOverwritesExistingFile(t *testing.T) {
 	must.EqOp(t, "second", string(got))
 }
 
-
 func TestWriteFilesCreatesAllFiles(t *testing.T) {
 	git := NewGitRepo(t)
 	git.WriteFiles(t, map[string]string{

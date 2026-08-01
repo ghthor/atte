@@ -29,7 +29,7 @@ const (
 	PackageExternalKind = Namespace + ":package-external"
 
 	// ImportsRelation relates a package to an imported package entity.
-	ImportsRelation   graph.RelationKind = "imports"
+	ImportsRelation    graph.RelationKind = "imports"
 	SourceFileRelation graph.RelationKind = "source-file"
 )
 

@@ -57,12 +57,11 @@ func (r *GitRepo) RunGitScript(t *testing.T, script string) {
 	must.NoError(t, err, must.Sprintf("git script: %s", output))
 }
 
-
 // writeFilesOptions contains the default behavior for WriteFiles and its
 // functional options.
 type writeFilesOptions struct {
-	trim             bool
-	trailingNewline  bool
+	trim            bool
+	trailingNewline bool
 }
 
 // WriteFilesOption configures WriteFiles.

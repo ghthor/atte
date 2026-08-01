@@ -1,5 +1,6 @@
 [formatter.go]
-command = "gofmt"
+command = "goimports"
+options = ["-w"]
 includes = ["*.go"]
 
 [formatter.nix]
