@@ -182,8 +182,8 @@ func formatRunTargetCompletion(prefix string, target runTarget, relative string)
 	selectorParts := strings.SplitN(prefix, "#", 2)
 	pathPrefix := selectorParts[0]
 	canonicalPath := parts[0]
-	if target.kind != attego.PackageTestKind && !strings.HasSuffix(canonicalPath, "/atte.hcl") && canonicalPath != "atte.hcl" {
-		canonicalPath += "/atte.hcl"
+	if target.kind != attego.PackageTestKind && !strings.HasSuffix(canonicalPath, "/"+attehcl.Filename) && canonicalPath != attehcl.Filename {
+		canonicalPath += "/" + attehcl.Filename
 	}
 	resolvedPrefix := resolveSelectorPath(pathPrefix, relative)
 	completionPath := canonicalPath
@@ -386,7 +386,7 @@ func runTargetAliases(target runTarget) (string, string) {
 func runTargetPaths(target runTarget) (string, string) {
 	canonicalPath := strings.TrimPrefix(target.selector, "//")
 	canonicalPath = strings.SplitN(canonicalPath, "#", 2)[0]
-	canonicalDir := strings.TrimSuffix(canonicalPath, "atte.hcl")
+	canonicalDir := strings.TrimSuffix(canonicalPath, attehcl.Filename)
 	canonicalDir = strings.TrimSuffix(canonicalDir, "/")
 	return canonicalPath, canonicalDir
 }
@@ -407,7 +407,7 @@ func matchesRunTargetPath(pathPart, canonicalPath, canonicalDir, relative string
 		return false
 	}
 	resolved := resolveSelectorPath(pathPart, relative)
-	if strings.HasSuffix(pathPart, "/atte.hcl") || pathPart == "atte.hcl" {
+	if strings.HasSuffix(pathPart, "/"+attehcl.Filename) || pathPart == attehcl.Filename {
 		if resolved != canonicalPath {
 			return false
 		}
@@ -460,7 +460,7 @@ func matchesSelector(selector, canonical string) bool {
 	}
 	selectorPath, selectorName := selectorParts[0], selectorParts[1]
 	if selectorName == targetName || selectorName == strings.TrimPrefix(targetName, strings.SplitN(targetName, ".", 2)[0]+".") {
-		return selectorPath == pathPart || selectorPath == strings.TrimSuffix(pathPart, "/atte.hcl")
+		return selectorPath == pathPart || selectorPath == strings.TrimSuffix(pathPart, "/"+attehcl.Filename)
 	}
 	return false
 } // TODO: resolve indexed and label aliases from runTarget metadata.

@@ -8,11 +8,13 @@ import (
 	"sync"
 
 	"github.com/ghthor/atte/detector/attegit"
+	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/graph"
 	"github.com/ghthor/atte/reference/selector"
 )
 
 // Target is detector-neutral runnable target metadata.
+
 type Target struct {
 	ID        graph.EntityID
 	Namespace string
@@ -131,7 +133,7 @@ func (r *Registry) Matches(target Target, input, relative string) bool {
 			return false
 		}
 	}
-	candidateDir := strings.TrimSuffix(canonical.Path, "/atte.hcl")
+	candidateDir := strings.TrimSuffix(canonical.Path, "/"+attehcl.Filename)
 	pathless := strings.HasPrefix(strings.TrimSpace(input), "#") || !strings.Contains(input, "#")
 	if parsed.Path == "" && !pathless && candidateDir != "" {
 		return false

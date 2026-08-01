@@ -20,7 +20,7 @@ func TestPrintGraphGolden(t *testing.T) {
 		"README.md": "read me",
 		"atte.hcl": `
 			test "default" {
-				script = "./test.sh"
+				script = path("./test.sh")
 			}
 		`,
 		"test.sh": "#!/bin/sh\n",

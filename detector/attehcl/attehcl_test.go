@@ -1,6 +1,7 @@
 package attehcl
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/ghthor/atte/detector/attegit"
@@ -28,12 +29,12 @@ func TestGraphLabeledAndUnlabeledTests(t *testing.T) {
 		"atte.hcl": `
 
 test {
-  script = "./first.sh"
+  script = path("./first.sh")
   depends_on = ["//config.yaml"]
 }
 
 test "unit" {
-  script = "./unit.sh"
+  script = path("./unit.sh")
   triggered_by = ["./trigger.yaml"]
 }
 `,
@@ -64,27 +65,27 @@ func TestGraphLabeledAndUnlabeledCodegenAndLintBlocks(t *testing.T) {
 		"atte.hcl": `
 
 test {
-  script = "./test.sh"
+  script = path("./test.sh")
 }
 
 test "unit" {
-  script = "./test.sh"
+  script = path("./test.sh")
 }
 
 codegen {
-  script = "./codegen.sh"
+  script = path("./codegen.sh")
 }
 
 codegen "proto" {
-  script = "./codegen.sh"
+  script = path("./codegen.sh")
 }
 
 lint {
-  script = "./lint.sh"
+  script = path("./lint.sh")
 }
 
 lint "vet" {
-  script = "./lint.sh"
+  script = path("./lint.sh")
 }
 `,
 		"test.sh":    "#!/bin/sh\n",
@@ -138,7 +139,7 @@ func TestP(t *testing.T) {}
 		"atte.hcl": `
 
 test "go" {
-  script = "./test.sh"
+  script = path("./test.sh")
   depends_on = [gopkg_test("example.com/root/p")]
 }
 `,
@@ -169,7 +170,7 @@ func TestGraphRejectsInvalidConfiguration(t *testing.T) {
 		},
 		{
 			name: "missing dependency",
-			file: `test { script = "./missing.sh" }`,
+			file: `test { script = path("./missing.sh") }`,
 		},
 		{
 			name: "path traversal",
@@ -186,6 +187,182 @@ func TestGraphRejectsInvalidConfiguration(t *testing.T) {
 			must.Error(t, err)
 		})
 	}
+}
+
+func TestGlobalInheritanceAndLocalScope(t *testing.T) {
+	repo := newHCLFixture(t, map[string]string{
+		"atte.hcl": `
+globals {
+  go_ver = "1.26"
+  script = path("./root.sh")
+}
+`,
+		"detector/atte.hcl": `
+locals {
+  script = path("./detector.sh")
+  version = global.go_ver
+}
+
+test "nested" {
+  script = local.script
+  depends_on = ["./go.mod"]
+}
+`,
+		"detector/attego/atte.hcl": `
+globals {
+  go_ver = "1.27"
+}
+
+test "override" {
+  script = path("./override.sh")
+}
+`,
+		"detector/dummy.sh":           "#!/bin/sh\n",
+		"detector/detector.sh":        "#!/bin/sh\n",
+		"detector/attego/override.sh": "#!/bin/sh\n",
+		"go.mod":                      "module example.com/root\n",
+	})
+	targets, err := Targets(repo)
+	must.NoError(t, err)
+	must.EqOp(t, 2, len(targets))
+	must.EqOp(t, reference.Blob("detector/detector.sh"), targets[0].Script)
+	must.EqOp(t, reference.Blob("detector/attego/override.sh"), targets[1].Script)
+}
+
+func TestLocalDoesNotPropagate(t *testing.T) {
+	repo := newHCLFixture(t, map[string]string{
+		"atte.hcl": `
+locals { script = path("./root.sh") }
+`,
+		"child/atte.hcl": `
+test { script = local.script }
+`,
+		"root.sh": "#!/bin/sh\n",
+	})
+	_, err := Targets(repo)
+	must.Error(t, err)
+}
+
+func TestLocalExpressionsAcrossBlockKindsAndGraphConsistency(t *testing.T) {
+	repo := newHCLFixture(t, map[string]string{
+		"atte.hcl": strings.TrimLeft(`
+			globals { base = "./shared.sh" }
+			locals {
+				prefix = "./"
+				test_script = "${local.prefix}test.sh"
+				codegen_script = "${local.prefix}codegen.sh"
+				lint_script = "${local.prefix}lint.sh"
+				shared = global.base
+			}
+			test "one" {
+				script = local.test_script
+				depends_on = [local.shared]
+			}
+			codegen "two" {
+				script = local.codegen_script
+				triggered_by = [local.shared]
+			}
+			lint "three" {
+				script = local.lint_script
+			}
+		`, "\t"),
+		"shared.sh":  "#!/bin/sh\n",
+		"test.sh":    "#!/bin/sh\n",
+		"codegen.sh": "#!/bin/sh\n",
+		"lint.sh":    "#!/bin/sh\n",
+	})
+	targets, err := Targets(repo)
+	must.NoError(t, err)
+	must.Len(t, 3, targets)
+	graphWithoutContainment, err := Graph(repo)
+	must.NoError(t, err)
+	graphWithContainment, err := GraphWithContainment(repo)
+	must.NoError(t, err)
+	for _, target := range targets {
+		_, inGraph := graphWithoutContainment.Entities[target.ID]
+		must.True(t, inGraph, must.Sprint("target should be present in graph"))
+		_, inContainedGraph := graphWithContainment.Entities[target.ID]
+		must.True(t, inContainedGraph, must.Sprint("target should be present in containment graph"))
+	}
+}
+
+func TestRepeatedDeclarationsAndDuplicateDeclarationErrors(t *testing.T) {
+	repo := newHCLFixture(t, map[string]string{
+		"atte.hcl": strings.TrimLeft(`
+			globals { script = path("./one.sh") }
+			globals { version = "one" }
+			locals { selected = global.script }
+			locals { version = "local" }
+			test { script = local.selected }
+			`, "\t"),
+		"one.sh": "#!/bin/sh\n",
+	})
+	_, err := Targets(repo)
+	must.NoError(t, err)
+
+	duplicate := newHCLFixture(t, map[string]string{
+		"atte.hcl": strings.TrimLeft(`
+			globals { value = "one" }
+			globals { value = "two" }
+			test { script = path("./one.sh") }
+			`, "\t"),
+		"one.sh": "#!/bin/sh\n",
+	})
+	_, err = Targets(duplicate)
+	must.Error(t, err)
+}
+
+func TestTargetScriptsFromInheritedGlobals(t *testing.T) {
+	repo := newHCLFixture(t, map[string]string{
+		"atte.hcl": `
+
+globals {
+  version = "root"
+  shared_path = path("./root.sh")
+}
+
+test "root" { script = path("./root.sh") }
+`,
+		"child/atte.hcl": `
+
+globals {
+  version = "child"
+  shared_path = path("./child.sh")
+}
+
+test "inherited" { script = path("./child.sh") }
+`,
+		"child/deeper/atte.hcl": `
+
+globals {
+  version = "deep"
+  shared_path = path("./deep.sh")
+}
+
+test "overridden" { script = path("./deep.sh") }
+`,
+		"root.sh":              "#!/bin/sh\\n",
+		"child/child.sh":       "#!/bin/sh\\n",
+		"child/deeper/deep.sh": "#!/bin/sh\\n",
+	})
+	targets, err := Targets(repo)
+	must.NoError(t, err)
+	must.EqOp(t, 3, len(targets))
+	must.EqOp(t, reference.Blob("root.sh"), targets[0].Script)
+	must.EqOp(t, reference.Blob("child/child.sh"), targets[1].Script)
+	must.EqOp(t, reference.Blob("child/deeper/deep.sh"), targets[2].Script)
+	root, err := ConfigFor(repo, "")
+	must.NoError(t, err)
+	must.EqOp(t, "root", root.Global["version"].AsString())
+	must.EqOp(t, reference.Blob("root.sh"), *root.Global["shared_path"].EncapsulatedValue().(*reference.Blob))
+	child, err := ConfigFor(repo, "child")
+	must.NoError(t, err)
+	must.EqOp(t, "child", child.Global["version"].AsString())
+	must.EqOp(t, reference.Blob("child/child.sh"), *child.Global["shared_path"].EncapsulatedValue().(*reference.Blob))
+	deep, err := ConfigFor(repo, "child/deeper")
+	must.NoError(t, err)
+	must.EqOp(t, "deep", deep.Global["version"].AsString())
+	must.EqOp(t, reference.Blob("child/deeper/deep.sh"), *deep.Global["shared_path"].EncapsulatedValue().(*reference.Blob))
 }
 
 func TestEntityIDRoundTrip(t *testing.T) {

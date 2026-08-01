@@ -1,3 +1,7 @@
+globals {
+  go_ver = "1.26.5"
+}
+
 test "go" {
   script     = "./atte_test.sh"
   depends_on = ["//go.mod"]
@@ -9,13 +13,13 @@ test "build" {
 }
 
 codegen "fmt" {
-  script = "./atte_fmt.sh"
+  script = path("./atte_fmt.sh")
 }
 
 codegen "go" {
-  script = "./atte_codegen.sh"
+  script = path("./atte_codegen.sh")
 }
 
 lint "go" {
-  script = "./atte_lint.sh"
+  script = path("./atte_lint.sh")
 }
