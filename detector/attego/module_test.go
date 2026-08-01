@@ -137,6 +137,7 @@ func TestGraphPackagesAndTests(t *testing.T) {
 	must.False(t, hasRelation(g, test, normalFile, SourceFileRelation))
 	treeID := attegit.EntityID("p")
 	must.True(t, hasRelation(g, treeID, normal, attegit.ContainsRelation))
+	must.True(t, hasRelation(g, treeID, test, attegit.ContainsRelation))
 	must.False(t, hasRelation(g, normal, treeID, attegit.ContainsRelation))
 }
 

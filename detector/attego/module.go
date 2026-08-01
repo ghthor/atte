@@ -166,6 +166,7 @@ func graphFor(repo *attegit.Repo, containment bool) (*graph.Graph, error) {
 		if p.hasTests {
 			entities[tid] = graph.Entity{ID: tid, Kind: PackageTestKind}
 			if containment {
+				relations[graph.Relationship{From: treeID, To: tid, Kind: attegit.ContainsRelation}] = struct{}{}
 				relations[graph.Relationship{From: tid, To: pid, Kind: attegit.ContainsRelation}] = struct{}{}
 				for _, file := range p.testFiles {
 					fileID := attegit.EntityID(file)
