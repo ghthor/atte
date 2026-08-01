@@ -13,6 +13,7 @@ pkgs.mkShell {
     pkgs.treefmt
     pkgs.nixfmt
     pkgs.graph-easy
+    pkgs.uv
     # nucleusPackage
     cobraCli
     (pkgs.writeShellScriptBin "atte-agent" ''
