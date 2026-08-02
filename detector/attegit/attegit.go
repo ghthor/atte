@@ -67,12 +67,19 @@ func WithWorkingTree() OpenOption {
 	return func(cfg *openConfig) { cfg.workingTree = true }
 }
 
+type DirTree map[reference.Tree][]reference.Tree
+
 // Repo contains the objects and direct-child index for one Git revision.
 // Show returns a new byte slice, so callers may safely modify its result.
 type Repo struct {
-	Obj      map[reference.Path]Obj
-	ObjKeys  []reference.Path
-	Tree     map[reference.Tree][]Obj
+	Obj     map[reference.Path]Obj
+	ObjKeys []reference.Path
+
+	// index of Tree => all children (Tree & Blob)
+	Tree map[reference.Tree][]Obj
+	// index of Tree => all child Tree's
+	DirTree DirTree
+
 	TreeKeys []reference.Tree
 	BlobKeys []reference.Blob
 
@@ -109,6 +116,7 @@ func Open(repositoryPath, ref string, options ...OpenOption) (*Repo, error) {
 		gitRepos: repos,
 		Obj:      make(map[reference.Path]Obj),
 		Tree:     make(map[reference.Tree][]Obj),
+		DirTree:  make(DirTree),
 		blobs:    make(map[reference.Blob][]byte),
 		gitRepo:  gr,
 	}
@@ -299,35 +307,40 @@ func (r *Repo) removePath(p reference.Path) {
 }
 
 func (r *Repo) rebuildIndexes() {
+	// Working-tree overlays add blobs without Git tree objects; synthesize every
+	// missing ancestor so nested untracked files remain reachable through the indexes.
 	for p, obj := range r.Obj {
 		if obj.Kind != Blob {
 			continue
 		}
 		for dir := parentTree(p, obj.Kind); dir != ""; dir = dir.Parent() {
 			if _, ok := r.Obj[dir]; !ok {
-				r.Obj[dir] = Obj{Path: dir, Kind: Tree, Source: GitSource}
+				r.Obj[dir] = Obj{Path: dir, Kind: Tree, Source: obj.Source}
 			}
 		}
 	}
-	r.Tree = make(map[reference.Tree][]Obj)
+
+	clear(r.Tree)
+	r.ObjKeys = make([]reference.Path, 0, len(r.Obj))
 	for p, obj := range r.Obj {
+		r.ObjKeys = append(r.ObjKeys, p)
 		tree := parentTree(p, obj.Kind)
 		r.Tree[tree] = append(r.Tree[tree], obj)
-		if obj.Kind == Tree {
-			pathTree := p.(reference.Tree)
-			if _, exists := r.Tree[pathTree]; !exists {
-				r.Tree[pathTree] = nil
-			}
-		}
-	}
-	r.ObjKeys = make([]reference.Path, 0, len(r.Obj))
-	for p := range r.Obj {
-		r.ObjKeys = append(r.ObjKeys, p)
+		// TODO: r.Tree is not sorted
 	}
 	slices.SortFunc(r.ObjKeys, func(a, b reference.Path) int { return strings.Compare(a.String(), b.String()) })
+
+	clear(r.DirTree)
 	r.TreeKeys = make([]reference.Tree, 0, len(r.Tree))
 	for tree := range r.Tree {
 		r.TreeKeys = append(r.TreeKeys, tree)
+		if tree == reference.Root {
+			// don't root as a reference to itself
+			continue
+		}
+		p := tree.Parent()
+		r.DirTree[p] = append(r.DirTree[p], tree)
+		slices.Sort(r.DirTree[p])
 	}
 	slices.Sort(r.TreeKeys)
 }

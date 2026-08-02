@@ -85,6 +85,21 @@ func TestWorkingTree(t *testing.T) {
 	must.NoError(t, err)
 	must.EqOp(t, "new", string(got))
 	must.EqOp(t, Blob, repo.Obj[testPath("nested/untracked.txt")].Kind)
+
+	// The untracked blob needs synthesized ancestor trees to remain reachable
+	// through the repository indexes, and those ancestors belong to the
+	// working-tree overlay rather than the committed revision.
+	nested := reference.Tree("nested")
+	must.EqOp(t, Tree, repo.Obj[nested].Kind)
+	must.EqOp(t, WorkingTreeSource, repo.Obj[nested].Source)
+	assertTreeChildren(t, repo.Tree[reference.Root], map[reference.Path]Kind{
+		testPath("tracked.txt"): Blob,
+		nested:                  Tree,
+		testPath("staged.txt"):  Blob,
+	})
+	assertTreeChildren(t, repo.Tree[nested], map[reference.Path]Kind{
+		testPath("nested/untracked.txt"): Blob,
+	})
 }
 
 func TestWorkingTreeRejectsSymlink(t *testing.T) {

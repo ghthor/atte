@@ -174,50 +174,84 @@ func evaluateDeclarations(repo *attegit.Repo, file *hclFile, expressions map[str
 	return values, nil
 }
 
-func scopeFor(repo *attegit.Repo, files map[reference.Blob]*hclFile, current *hclFile, provider detector.FunctionProvider) (hclScope, error) {
-	ancestors := make([]*hclFile, 0)
-	dir := current.file.Tree()
-	// TODO: this could be much simpler if we just evaluated this in the correct order to start
-	// We should always start at the repo root and then decend from there, that
-	// way whenever we need the global context from our parent we already have
-	// computed it. If we fix the scopeFor function to walk a graph, we can
-	// perform the evaluateGlobals in the correct order, so it will just be a
-	// lookup to the parent and overlay, instead of this accumulator thing we
-	// have going on here
-	// TODO: factor this into func evaluateGlobals
-	for {
-		candidate, err := dir.Blob(Filename)
-		if err != nil {
-			return hclScope{}, err
-		}
-		// If we fix scopeFor we can stop at the first matching canidate as
-		// we'll have already evaluated it before
-		if file, ok := files[candidate]; ok {
-			ancestors = append(ancestors, file)
-		}
-		if dir == reference.Root {
-			break
-		}
-		dir = dir.Parent()
+type evaluator struct {
+	repo     *attegit.Repo
+	files    hclFiles
+	provider detector.FunctionProvider
+}
+
+type globalPhase struct {
+	evaluator *evaluator
+	scopes    map[reference.Tree]map[string]cty.Value
+}
+
+type evaluationPhase struct {
+	globals globalPhase
+}
+
+func newEvaluator(repo *attegit.Repo, provider detector.FunctionProvider) (*evaluator, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("repository is nil")
 	}
-	globals := make(map[string]cty.Value)
-	for index := len(ancestors) - 1; index >= 0; index-- {
-		ancestor := ancestors[index]
-		values, err := evaluateDeclarations(repo, ancestor, ancestor.globals, globals, "global", provider)
-		if err != nil {
-			return hclScope{}, err
-		}
-		for name, value := range values {
+	files, err := readHCLFiles(repo)
+	if err != nil {
+		return nil, err
+	}
+	return &evaluator{repo: repo, files: files, provider: provider}, nil
+}
+
+func (e *evaluator) resolveGlobals() (globalPhase, error) {
+	phase := globalPhase{
+		evaluator: e,
+		scopes:    make(map[reference.Tree]map[string]cty.Value),
+	}
+
+	var visit func(reference.Tree) error
+	visit = func(dir reference.Tree) error {
+		inherited := phase.scopes[dir.Parent()]
+		globals := make(map[string]cty.Value, len(inherited))
+		for name, value := range inherited {
 			globals[name] = value
 		}
-	}
-	// TODO: factor this into func evaluateGlobals : end
+		candidate, err := dir.Blob(Filename)
+		if err != nil {
+			return err
+		}
+		if file, ok := e.files[candidate]; ok {
+			values, err := evaluateDeclarations(e.repo, file, file.globals, globals, "global", e.provider)
+			if err != nil {
+				return err
+			}
+			for name, value := range values {
+				globals[name] = value
+			}
+		}
+		phase.scopes[dir] = globals
 
-	locals, err := evaluateDeclarations(repo, current, current.locals, globals, "local", provider)
+		for _, child := range e.repo.DirTree[dir] {
+			if err := visit(child); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := visit(reference.Root); err != nil {
+		return globalPhase{}, err
+	}
+	return phase, nil
+}
+
+func (p globalPhase) scopeFor(file *hclFile) (hclScope, error) {
+	globals := p.scopes[file.file.Tree()]
+	locals, err := evaluateDeclarations(p.evaluator.repo, file, file.locals, globals, "local", p.evaluator.provider)
 	if err != nil {
 		return hclScope{}, err
 	}
 	return hclScope{global: objectValue(globals), local: objectValue(locals)}, nil
+}
+
+func (p evaluationPhase) scopeFor(file *hclFile) (hclScope, error) {
+	return p.globals.scopeFor(file)
 }
 
 func evalContext(repo *attegit.Repo, file reference.Blob, scope hclScope, provider detector.FunctionProvider) (*hcl.EvalContext, error) {
@@ -306,14 +340,18 @@ func targetsWithProvider(repo *attegit.Repo, provider detector.FunctionProvider)
 		return nil, fmt.Errorf("repository is nil")
 	}
 	targets := make([]Target, 0)
-	files, err := readHCLFiles(repo)
+	evaluator, err := newEvaluator(repo, provider)
 	if err != nil {
 		return nil, err
 	}
-	for _, blob := range files.sortedBlobs() {
-		hclConfig := files[blob]
-		// TODO: scope for should take a tree only graph from repo and start at the root and visit every node breadth / depth doesn't matter
-		scope, err := scopeFor(repo, files, hclConfig, provider)
+	globals, err := evaluator.resolveGlobals()
+	if err != nil {
+		return nil, err
+	}
+	phase := evaluationPhase{globals: globals}
+	for _, blob := range evaluator.files.sortedBlobs() {
+		hclConfig := evaluator.files[blob]
+		scope, err := phase.scopeFor(hclConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -392,7 +430,11 @@ func configForWithProvider(repo *attegit.Repo, relativePath string, provider det
 	if err != nil {
 		return Config{}, fmt.Errorf("invalid repository directory %q: %w", relativePath, err)
 	}
-	files, err := readHCLFiles(repo)
+	evaluator, err := newEvaluator(repo, provider)
+	if err != nil {
+		return Config{}, err
+	}
+	globals, err := evaluator.resolveGlobals()
 	if err != nil {
 		return Config{}, err
 	}
@@ -400,12 +442,12 @@ func configForWithProvider(repo *attegit.Repo, relativePath string, provider det
 	if err != nil {
 		return Config{}, err
 	}
-	current, ok := files[currentBlob]
+	current, ok := evaluator.files[currentBlob]
 	if !ok {
 		current = &hclFile{file: currentBlob, globals: make(map[string]hcl.Expression), locals: make(map[string]hcl.Expression)}
 	}
-	// TODO: scope for should take a graph from // => //dir => //dir/target and walk up from the root towards the target
-	scope, err := scopeFor(repo, files, current, provider)
+	phase := evaluationPhase{globals: globals}
+	scope, err := phase.scopeFor(current)
 	if err != nil {
 		return Config{}, err
 	}
@@ -450,10 +492,15 @@ func graphFor(repo *attegit.Repo, options detector.GraphOptions) (*graph.Graph, 
 	if repo == nil {
 		return nil, fmt.Errorf("repository is nil")
 	}
-	files, err := readHCLFiles(repo)
+	evaluator, err := newEvaluator(repo, options.Functions)
 	if err != nil {
 		return nil, err
 	}
+	globals, err := evaluator.resolveGlobals()
+	if err != nil {
+		return nil, err
+	}
+	phase := evaluationPhase{globals: globals}
 	entities := make([]graph.Entity, 0)
 	relations := make([]graph.Relationship, 0)
 	addEntity := func(e graph.Entity) {
@@ -464,11 +511,9 @@ func graphFor(repo *attegit.Repo, options detector.GraphOptions) (*graph.Graph, 
 		}
 		entities = append(entities, e)
 	}
-	for _, fileBlob := range files.sortedBlobs() {
-		config := files[fileBlob]
-		// TODO: scopeFor should take a tree only graph from repo and start at the root and visit every node breadth / depth doesn't matter
-		// scopeAll
-		scope, err := scopeFor(repo, files, config, options.Functions)
+	for _, fileBlob := range evaluator.files.sortedBlobs() {
+		config := evaluator.files[fileBlob]
+		scope, err := phase.scopeFor(config)
 		if err != nil {
 			return nil, err
 		}

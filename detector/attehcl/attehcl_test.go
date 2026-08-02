@@ -230,6 +230,90 @@ test "override" {
 	must.EqOp(t, reference.Blob("detector/attego/override.sh"), targets[1].Script)
 }
 
+func TestGlobalsCannotDependOnLocals(t *testing.T) {
+	repo := newHCLFixture(t, map[string]string{
+		"atte.hcl": `
+locals {
+  script = "./root.sh"
+}
+
+globals {
+  inherited_script = local.script
+}
+
+test { script = global.inherited_script }
+`,
+		"root.sh": "#!/bin/sh\n",
+	})
+
+	_, err := Targets(repo, nil)
+	must.Error(t, err)
+
+	_, err = Graph(repo)
+	must.Error(t, err)
+}
+
+func TestGlobalInheritanceAcrossDirectories(t *testing.T) {
+	repo := newHCLFixture(t, map[string]string{
+		"atte.hcl": strings.TrimLeft(`
+			globals { base = "root" }
+			test { script = path("./root.sh") }
+		`, "\t"),
+		"child/atte.hcl": strings.TrimLeft(`
+			globals { child = "${global.base}-child" }
+		`, "\t"),
+		"child/no-atte/marker.txt": "directory without atte.hcl\n",
+		"child/deeper/atte.hcl": strings.TrimLeft(`
+			globals { deep = "${global.child}-deep" }
+		`, "\t"),
+		"root.sh": "#!/bin/sh\n",
+	})
+
+	root, err := ConfigFor(repo, "", attegit.PathHCLFunctions)
+	must.NoError(t, err)
+	must.EqOp(t, "root", root.Global["base"].AsString())
+
+	child, err := ConfigFor(repo, "child", attegit.PathHCLFunctions)
+	must.NoError(t, err)
+	must.EqOp(t, "root", child.Global["base"].AsString())
+	must.EqOp(t, "root-child", child.Global["child"].AsString())
+
+	inherited, err := ConfigFor(repo, "child/no-atte", attegit.PathHCLFunctions)
+	must.NoError(t, err)
+	must.EqOp(t, "root-child", inherited.Global["child"].AsString())
+
+	deep, err := ConfigFor(repo, "child/deeper", attegit.PathHCLFunctions)
+	must.NoError(t, err)
+	must.EqOp(t, "root-child-deep", deep.Global["deep"].AsString())
+
+	targets, err := Targets(repo, attegit.PathHCLFunctions)
+	must.NoError(t, err)
+	must.Len(t, 1, targets)
+	_, err = Graph(repo, WithFunctions(attegit.PathHCLFunctions))
+	must.NoError(t, err)
+}
+
+func TestGlobalEvaluationRejectsUnresolvedDeclarations(t *testing.T) {
+	repo := newHCLFixture(t, map[string]string{
+		"atte.hcl": `
+globals {
+  first = global.second
+  second = global.first
+}
+
+test { script = path("./root.sh") }
+`,
+		"root.sh": "#!/bin/sh\n",
+	})
+
+	_, err := Targets(repo, nil)
+	must.Error(t, err)
+	must.ErrorContains(t, err, "global")
+
+	_, err = Graph(repo)
+	must.Error(t, err)
+}
+
 func TestLocalDoesNotPropagate(t *testing.T) {
 	repo := newHCLFixture(t, map[string]string{
 		"atte.hcl": `
