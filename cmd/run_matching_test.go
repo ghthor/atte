@@ -49,6 +49,9 @@ func TestMatchesRunTargetAt(t *testing.T) {
 	}
 
 	match("../atte.hcl#test.go", "detector/attego", true)
+	match("atte.hcl#test.go", "detector", true)
+	goTarget := runTarget{selector: "//detector/attego#go_test", kind: attego.PackageTestKind, path: "detector/attego", name: "go_test"}
+	must.True(t, matchesRunTargetAt("attego#go_test", goTarget, "detector"), must.Sprint("relative package selector should match from the current directory"))
 	match("../atte.hcl#test.go", "detector", false)
 	match("..#test.go", "cmd", false)
 	match("detector/atte.hcl#test.go", "", true)
@@ -69,6 +72,7 @@ func TestRunCmdValidArgs(t *testing.T) {
 		{selector: "//atte.hcl#test.go", kind: attehcl.TestKind, path: "atte.hcl", name: "go", index: 0},
 		{selector: "//detector/atte.hcl#test.py", kind: attehcl.TestKind, path: "detector/atte.hcl", name: "py", index: 0},
 		{selector: "//detector/attego#go_test", kind: attego.PackageTestKind, path: "detector/attego", name: "go_test"},
+		{selector: "//reference#go_test", kind: attego.PackageTestKind, path: "reference", name: "go_test"},
 	}
 	complete := func(relative, prefix string, want []string) {
 		t.Helper()
@@ -80,9 +84,18 @@ func TestRunCmdValidArgs(t *testing.T) {
 		}
 	}
 
+	complete("", "t", []string{"test.go"})
+	complete("", "test.", []string{"test.go"})
+	complete("", "test.go", []string{"test.go"})
+	complete("detector", "t", []string{"test.py"})
+	complete("detector", "", []string{"test.py", "attego#go_test"})
+	complete("detector", "atte", []string{"attego#go_test"})
+	complete("detector", "attego#", []string{"attego#go_test"})
 	complete("", "//atte", []string{"//atte.hcl#test.go"})
 	complete("", "//detector/", []string{"//detector/atte.hcl#test.py", "//detector/attego#go_test"})
-	complete("detector", "../", []string{"../atte.hcl#test.go"})
+	complete("detector", "../r", []string{"../reference#go_test"})
+	complete("detector", "../ref", []string{"../reference#go_test"})
+	complete("detector", "../", []string{"../atte.hcl#test.go", "../reference#go_test"})
 	complete("detector/attego", "../../detector/", []string{"../../detector/atte.hcl#test.py", "../../detector/attego#go_test"})
 	complete("detector/attego", "../../atte.hcl#", []string{"../../atte.hcl#test.go"})
 	complete("detector/attego", "../../atte.hcl#test", []string{"../../atte.hcl#test.go"})
@@ -123,10 +136,24 @@ func TestResolveRunTarget(t *testing.T) {
 	goTargets := []runTarget{{selector: "//detector/attego#go_test", kind: attego.PackageTestKind, path: "detector/attego", name: "go_test"}}
 	resolve("../detector/attego#go_test", "cmd", goTargets, "//detector/attego#go_test")
 
+	t.Run("local alias", func(t *testing.T) {
+		localTargets := []runTarget{
+			{selector: "//cmd#go_test", kind: attego.PackageTestKind, path: "cmd", name: "go_test"},
+			{selector: "//reference#go_test", kind: attego.PackageTestKind, path: "reference", name: "go_test"},
+			{selector: "//reference/selector#go_test", kind: attego.PackageTestKind, path: "reference/selector", name: "go_test"},
+		}
+		resolved, err := resolveRunTargetAt("go_test", localTargets, "reference")
+		must.NoError(t, err)
+		must.EqOp(t, "//reference#go_test", resolved.selector)
+	})
+
 	t.Run("ambiguity", func(t *testing.T) {
 		_, err := resolveRunTarget("test", targets)
 		must.Error(t, err)
 		must.StrContains(t, err.Error(), "ambiguous")
+		must.StrContains(t, err.Error(), "atte run //atte.hcl#test.go")
+		must.StrContains(t, err.Error(), "atte run //atte.hcl#test.py")
+		must.StrContains(t, err.Error(), "atte run //atte.hcl#test.2")
 	})
 	t.Run("missing target", func(t *testing.T) {
 		_, err := resolveRunTarget("missing", targets)

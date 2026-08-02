@@ -25,7 +25,7 @@ pkgs.mkShell {
       runtimeInputs = [ pkgs-unstable.go_1_26 ];
       text = ''
         : "''${ATTE_DEV_DIR:?ATTE_DEV_DIR must be set}"
-        exec go -C "$ATTE_DEV_DIR" run . "$@"
+        exec go run "$ATTE_DEV_DIR" "$@"
       '';
     })
     pkgs-unstable.go_1_26
