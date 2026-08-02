@@ -76,7 +76,11 @@ ignore_all_files_in_gitignore: true
 # Maps the language key to the options.
 # The settings are considered only if the project is trusted (see global configuration to define trusted projects).
 # See https://oraios.github.io/serena/02-usage/050_configuration.html#language-server-specific-settings
-ls_specific_settings: {}
+ls_specific_settings:
+  markdown:
+    ls_path: "/nix/store/63q57jkyrvrnx10cdlgxqbllvrc98vff-marksman-2026-02-08/bin/marksman"
+  bash:
+    shellcheckPath: "/nix/store/vwvvnr1qxpwn0vffbsn8bkviqcgicizr-shellcheck-0.11.0-bin/bin/shellcheck"
 
 # list of workspace folder paths (LSP backend only).
 # These folders will be used to build up Serena's symbol index.

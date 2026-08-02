@@ -9,6 +9,18 @@
 pkgs.mkShell {
   packages = [
     (pkgs.writeShellApplication {
+      name = "atte-configure-serena";
+      runtimeInputs = [ pkgs.uv ];
+      text = ''
+        : "''${ATTE_DEV_DIR:?ATTE_DEV_DIR must be set}"
+        tools_dir="$(git -C "$ATTE_DEV_DIR" rev-parse --show-toplevel)/tools"
+        uv run --directory "$tools_dir" \
+          python serena-set-lsp.py markdown "${pkgs.marksman}/bin/marksman"
+        uv run --directory "$tools_dir" \
+          python serena-set-lsp.py bash "${pkgs.shellcheck}/bin/shellcheck"
+      '';
+    })
+    (pkgs.writeShellApplication {
       name = "atte";
       runtimeInputs = [ pkgs-unstable.go_1_26 ];
       text = ''
@@ -24,6 +36,7 @@ pkgs.mkShell {
     pkgs.hclfmt
     pkgs.graph-easy
     pkgs.marksman
+    pkgs.shellcheck
     pkgs.uv
     # nucleusPackage
     cobraCli
@@ -42,6 +55,8 @@ pkgs.mkShell {
   ];
 
   shellHook = ''
+    export UV_NO_MANAGED_PYTHON=1
+
     if [ -z "''${ATTE_DEV_DIR:-}" ]; then
       export ATTE_DEV_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
     fi

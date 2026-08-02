@@ -1,3 +1,4 @@
 .direnv/
 .claude/worktrees
 atte
+*__pycache__*
