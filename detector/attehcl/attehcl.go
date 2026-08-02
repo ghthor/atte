@@ -3,10 +3,11 @@ package attehcl
 
 import (
 	"fmt"
+	"maps"
 	"os/exec"
 	"path"
 	"path/filepath"
-	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/ghthor/atte/detector/attegit"
@@ -89,8 +90,14 @@ func declarationBlocks(file reference.Blob, body *hclsyntax.Body) (map[string]hc
 	return globals, locals, nil
 }
 
-func hclFiles(repo *attegit.Repo) (map[reference.Blob]*hclFile, error) {
-	files := make(map[reference.Blob]*hclFile)
+type hclFiles map[reference.Blob]*hclFile
+
+func (files hclFiles) sortedBlobs() []reference.Blob {
+	return slices.Sorted(maps.Keys(files))
+}
+
+func readHCLFiles(repo *attegit.Repo) (hclFiles, error) {
+	files := make(hclFiles)
 	for _, file := range repo.ObjKeys {
 		if repo.Obj[file].Kind != attegit.Blob || path.Base(file.String()) != Filename {
 			continue
@@ -116,7 +123,9 @@ func hclFiles(repo *attegit.Repo) (map[reference.Blob]*hclFile, error) {
 	return files, nil
 }
 
-func evaluateDeclarations(repo *attegit.Repo, file *hclFile, expressions map[string]hcl.Expression, inherited map[string]cty.Value, namespace string) (map[string]cty.Value, error) {
+type FunctionProvider func(*attegit.Repo, reference.Blob) (map[string]function.Function, error)
+
+func evaluateDeclarations(repo *attegit.Repo, file *hclFile, expressions map[string]hcl.Expression, inherited map[string]cty.Value, namespace string, provider FunctionProvider) (map[string]cty.Value, error) {
 	values := make(map[string]cty.Value, len(expressions))
 	pending := make(map[string]hcl.Expression, len(expressions))
 	for name, expr := range expressions {
@@ -143,7 +152,11 @@ func evaluateDeclarations(repo *attegit.Repo, file *hclFile, expressions map[str
 			if namespace == "local" {
 				ctxValues["local"] = objectValue(values)
 			}
-			value, diags := expr.Value(&hcl.EvalContext{Variables: ctxValues, Functions: hclFunctions(repo, file.file)})
+			functions, err := mergedHCLFunctions(repo, file.file, provider)
+			if err != nil {
+				return nil, err
+			}
+			value, diags := expr.Value(&hcl.EvalContext{Variables: ctxValues, Functions: functions})
 			if diags.HasErrors() {
 				lastDiags = diags
 				continue
@@ -162,7 +175,7 @@ func evaluateDeclarations(repo *attegit.Repo, file *hclFile, expressions map[str
 	return values, nil
 }
 
-func scopeFor(repo *attegit.Repo, files map[reference.Blob]*hclFile, current *hclFile) (hclScope, error) {
+func scopeFor(repo *attegit.Repo, files map[reference.Blob]*hclFile, current *hclFile, provider FunctionProvider) (hclScope, error) {
 	ancestors := make([]*hclFile, 0)
 	dir := current.file.Tree()
 	// TODO: this could be much simpler if we just evaluated this in the correct order to start
@@ -191,7 +204,7 @@ func scopeFor(repo *attegit.Repo, files map[reference.Blob]*hclFile, current *hc
 	globals := make(map[string]cty.Value)
 	for index := len(ancestors) - 1; index >= 0; index-- {
 		ancestor := ancestors[index]
-		values, err := evaluateDeclarations(repo, ancestor, ancestor.globals, globals, "global")
+		values, err := evaluateDeclarations(repo, ancestor, ancestor.globals, globals, "global", provider)
 		if err != nil {
 			return hclScope{}, err
 		}
@@ -201,15 +214,19 @@ func scopeFor(repo *attegit.Repo, files map[reference.Blob]*hclFile, current *hc
 	}
 	// TODO: factor this into func evaluateGlobals : end
 
-	locals, err := evaluateDeclarations(repo, current, current.locals, globals, "local")
+	locals, err := evaluateDeclarations(repo, current, current.locals, globals, "local", provider)
 	if err != nil {
 		return hclScope{}, err
 	}
 	return hclScope{global: objectValue(globals), local: objectValue(locals)}, nil
 }
 
-func evalContext(repo *attegit.Repo, file reference.Blob, scope hclScope) *hcl.EvalContext {
-	return &hcl.EvalContext{Variables: map[string]cty.Value{"global": scope.global, "local": scope.local}, Functions: hclFunctions(repo, file)}
+func evalContext(repo *attegit.Repo, file reference.Blob, scope hclScope, provider FunctionProvider) (*hcl.EvalContext, error) {
+	functions, err := mergedHCLFunctions(repo, file, provider)
+	if err != nil {
+		return nil, err
+	}
+	return &hcl.EvalContext{Variables: map[string]cty.Value{"global": scope.global, "local": scope.local}, Functions: functions}, nil
 }
 
 func EntityID(kind string, file reference.Blob, name string) graph.EntityID {
@@ -282,22 +299,34 @@ func Selector(target Target) selector.Target {
 }
 
 func Targets(repo *attegit.Repo) ([]Target, error) {
+	return targetsWithProvider(repo, nil)
+}
+
+func TargetsWithFunctions(repo *attegit.Repo, provider FunctionProvider) ([]Target, error) {
+	return targetsWithProvider(repo, provider)
+}
+
+func targetsWithProvider(repo *attegit.Repo, provider FunctionProvider) ([]Target, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("repository is nil")
 	}
 	targets := make([]Target, 0)
-	files, err := hclFiles(repo)
+	files, err := readHCLFiles(repo)
 	if err != nil {
 		return nil, err
 	}
-	for blob, hclConfig := range files {
+	for _, blob := range files.sortedBlobs() {
+		hclConfig := files[blob]
 		// TODO: scope for should take a tree only graph from repo and start at the root and visit every node breadth / depth doesn't matter
-		scope, err := scopeFor(repo, files, hclConfig)
+		scope, err := scopeFor(repo, files, hclConfig, provider)
 		if err != nil {
 			return nil, err
 		}
 		body := hclConfig.body
-		ctx := evalContext(repo, blob, scope)
+		ctx, err := evalContext(repo, blob, scope, provider)
+		if err != nil {
+			return nil, err
+		}
 		for _, spec := range []struct{ blockType, kind string }{{"test", TestKind}, {"codegen", CodegenKind}, {"lint", LintKind}} {
 			blocks, err := blocksOfType(blob, body, spec.blockType)
 			if err != nil {
@@ -325,7 +354,7 @@ func Targets(repo *attegit.Repo) ([]Target, error) {
 					scriptBlob = reference.Blob(strings.TrimPrefix(script, DecodingPathPrefix))
 				} else if script != "" {
 					trimmed := strings.TrimSpace(script)
-					if object, ok := repo.Obj[reference.Blob(trimmed)]; ok && (object.Kind == attegit.Blob || object.Kind == attegit.Tree) {
+					if object, ok := repo.Obj[reference.Blob(trimmed)]; ok {
 						return nil, fmt.Errorf("decode HCL %q: script string resolves to repository %q %q; use path(%q) for an external script", blob, object.Kind, trimmed, trimmed)
 					}
 					inline = script
@@ -357,6 +386,14 @@ type Config struct {
 // Global values are inherited from repository ancestors; local values and targets
 // are scoped to the requested directory.
 func ConfigFor(repo *attegit.Repo, relativePath string) (Config, error) {
+	return configForWithProvider(repo, relativePath, nil)
+}
+
+func ConfigForWithFunctions(repo *attegit.Repo, relativePath string, provider FunctionProvider) (Config, error) {
+	return configForWithProvider(repo, relativePath, provider)
+}
+
+func configForWithProvider(repo *attegit.Repo, relativePath string, provider FunctionProvider) (Config, error) {
 	if repo == nil {
 		return Config{}, fmt.Errorf("repository is nil")
 	}
@@ -364,7 +401,7 @@ func ConfigFor(repo *attegit.Repo, relativePath string) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("invalid repository directory %q: %w", relativePath, err)
 	}
-	files, err := hclFiles(repo)
+	files, err := readHCLFiles(repo)
 	if err != nil {
 		return Config{}, err
 	}
@@ -377,11 +414,11 @@ func ConfigFor(repo *attegit.Repo, relativePath string) (Config, error) {
 		current = &hclFile{file: currentBlob, globals: make(map[string]hcl.Expression), locals: make(map[string]hcl.Expression)}
 	}
 	// TODO: scope for should take a graph from // => //dir => //dir/target and walk up from the root towards the target
-	scope, err := scopeFor(repo, files, current)
+	scope, err := scopeFor(repo, files, current, provider)
 	if err != nil {
 		return Config{}, err
 	}
-	allTargets, err := Targets(repo)
+	allTargets, err := targetsWithProvider(repo, provider)
 	if err != nil {
 		return Config{}, err
 	}
@@ -402,14 +439,21 @@ func ConfigFor(repo *attegit.Repo, relativePath string) (Config, error) {
 	return Config{Global: global, Local: local, Targets: targets}, nil
 }
 
-func Graph(repo *attegit.Repo) (*graph.Graph, error)                { return graphFor(repo, false) }
-func GraphWithContainment(repo *attegit.Repo) (*graph.Graph, error) { return graphFor(repo, true) }
+// TODO: lets refactor the Graph interface into Graph(*graph.Graph, ...options) so we can have one entrypoint for implementation
+func Graph(repo *attegit.Repo) (*graph.Graph, error)                { return graphFor(repo, false, nil) }
+func GraphWithContainment(repo *attegit.Repo) (*graph.Graph, error) { return graphFor(repo, true, nil) }
+func GraphWithFunctions(repo *attegit.Repo, provider FunctionProvider) (*graph.Graph, error) {
+	return graphFor(repo, false, provider)
+}
+func GraphWithContainmentAndFunctions(repo *attegit.Repo, provider FunctionProvider) (*graph.Graph, error) {
+	return graphFor(repo, true, provider)
+}
 
-func graphFor(repo *attegit.Repo, containment bool) (*graph.Graph, error) {
+func graphFor(repo *attegit.Repo, containment bool, provider FunctionProvider) (*graph.Graph, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("repository is nil")
 	}
-	files, err := hclFiles(repo)
+	files, err := readHCLFiles(repo)
 	if err != nil {
 		return nil, err
 	}
@@ -423,23 +467,18 @@ func graphFor(repo *attegit.Repo, containment bool) (*graph.Graph, error) {
 		}
 		entities = append(entities, e)
 	}
-	for _, file := range repo.ObjKeys {
-		obj := repo.Obj[file]
-		if obj.Kind != attegit.Blob || path.Base(file.String()) != Filename {
-			continue
-		}
-		fileBlob, err := reference.ParseBlob(file.String())
-		if err != nil {
-			return nil, fmt.Errorf("invalid HCL file path %q: %w", file, err)
-		}
+	for _, fileBlob := range files.sortedBlobs() {
 		config := files[fileBlob]
 		// TODO: scopeFor should take a tree only graph from repo and start at the root and visit every node breadth / depth doesn't matter
 		// scopeAll
-		scope, err := scopeFor(repo, files, config)
+		scope, err := scopeFor(repo, files, config, provider)
 		if err != nil {
 			return nil, err
 		}
-		ctx := evalContext(repo, fileBlob, scope)
+		ctx, err := evalContext(repo, fileBlob, scope, provider)
+		if err != nil {
+			return nil, err
+		}
 		for _, spec := range []struct{ typ, kind string }{{"test", TestKind}, {"codegen", CodegenKind}, {"lint", LintKind}} {
 			blocks, err := blocksOfType(fileBlob, config.body, spec.typ)
 			if err != nil {
@@ -520,6 +559,7 @@ func addBlockGraph(repo *attegit.Repo, file reference.Blob, kind string, blocks 
 	}
 	return relations, nil
 }
+
 func dependencyKind(repo *attegit.Repo, id graph.EntityID) string {
 	g, err := attego.Graph(repo)
 	if err == nil {
@@ -559,37 +599,29 @@ func blocksOfType(file reference.Blob, body *hclsyntax.Body, blockType string) (
 	return blocks, nil
 }
 
-// decodeScriptAndDeps decodes the script/depends_on/triggered_by attributes
-// shared by every attehcl block kind today. A kind whose schema diverges
-// calls this for the attributes it still has in common and layers its own
-// decoding on top for the rest.
-// hclFunctions returns the functions available to atte.hcl expressions.
-// Keep all registrations here so adding a function does not require changing
-// every expression decoder.
-var RepositoryPathType = cty.CapsuleWithOps(
-	"atte.repository_path",
-	reflect.TypeOf(reference.Blob("")),
-	&cty.CapsuleOps{
-		GoString:  func(value interface{}) string { return fmt.Sprintf("path(%q)", value.(reference.Blob)) },
-		RawEquals: func(a, b interface{}) bool { return a.(reference.Blob) == b.(reference.Blob) },
-	},
-)
-
 func hclFunctions(repo *attegit.Repo, file reference.Blob) map[string]function.Function {
-	return map[string]function.Function{
+	functions, _ := mergedHCLFunctions(repo, file, nil)
+	return functions
+}
+
+func mergedHCLFunctions(repo *attegit.Repo, file reference.Blob, provider FunctionProvider) (map[string]function.Function, error) {
+	functions := map[string]function.Function{
 		"gopkg_test": gopkgTestFunction(repo),
-		"path": function.New(&function.Spec{
-			Params: []function.Parameter{{Name: "path", Type: cty.String}},
-			Type:   function.StaticReturnType(RepositoryPathType),
-			Impl: func(args []cty.Value, retType cty.Type) (cty.Value, error) {
-				resolved, err := reference.ResolveBlobFromBlob(file, reference.SomePath(args[0].AsString()))
-				if err != nil {
-					return cty.NilVal, fmt.Errorf("resolve path %q from %q: %w", args[0].AsString(), file, err)
-				}
-				return cty.CapsuleVal(RepositoryPathType, &resolved), nil
-			},
-		}),
 	}
+	if provider == nil {
+		return functions, nil
+	}
+	extra, err := provider(repo, file)
+	if err != nil {
+		return nil, err
+	}
+	for name, fn := range extra {
+		if _, exists := functions[name]; exists {
+			return nil, fmt.Errorf("HCL function %q is already registered", name)
+		}
+		functions[name] = fn
+	}
+	return functions, nil
 }
 
 func gopkgTestFunction(repo *attegit.Repo) function.Function {
@@ -629,7 +661,7 @@ func decodeScriptAndDeps(repo *attegit.Repo, file reference.Blob, body *hclsynta
 		if !v.IsKnown() {
 			return "", nil, fmt.Errorf("decode HCL %q: script must be known", file)
 		}
-		if v.Type() == RepositoryPathType {
+		if v.Type() == attegit.RepositoryPathType {
 			blob := *v.EncapsulatedValue().(*reference.Blob)
 			script = DecodingPathPrefix + blob.String()
 		} else if v.Type() == cty.String {
@@ -651,7 +683,7 @@ func decodeScriptAndDeps(repo *attegit.Repo, file reference.Blob, body *hclsynta
 			for it.Next() {
 				_, v := it.Element()
 				raw := ""
-				if v.Type() == RepositoryPathType {
+				if v.Type() == attegit.RepositoryPathType {
 					blob := *v.EncapsulatedValue().(*reference.Blob)
 					raw = DecodingPathPrefix + blob.String()
 				} else if v.Type() == cty.String {

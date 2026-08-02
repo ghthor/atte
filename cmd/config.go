@@ -44,7 +44,7 @@ var configShowCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		config, err := attehcl.ConfigFor(repo, relative)
+		config, err := attehcl.ConfigForWithFunctions(repo, relative, attegit.PathHCLFunctions)
 		if err != nil {
 			return fmt.Errorf("evaluate attehcl configuration: %w", err)
 		}
@@ -149,7 +149,7 @@ func ctyJSON(value cty.Value) (any, error) {
 			items = append(items, converted)
 		}
 		return items, nil
-	case value.Type() == attehcl.RepositoryPathType:
+	case value.Type() == attegit.RepositoryPathType:
 		return (*value.EncapsulatedValue().(*reference.Blob)).String(), nil
 	case value.Type().IsObjectType() || value.Type().IsMapType():
 		result := make(map[string]any)

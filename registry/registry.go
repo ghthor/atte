@@ -10,7 +10,11 @@ import (
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/graph"
+	"github.com/ghthor/atte/reference"
 	"github.com/ghthor/atte/reference/selector"
+	"github.com/hashicorp/hcl/v2"
+	"github.com/hashicorp/hcl/v2/hclsyntax"
+	"github.com/zclconf/go-cty/cty/function"
 )
 
 // Target is detector-neutral runnable target metadata.
@@ -33,15 +37,42 @@ type Detector struct {
 	MatchIdentifier func(Target, string) bool
 }
 
-// Registry stores runtime detector registrations.
+// Plugin is the required base capability for a runtime plugin.
+type Plugin interface {
+	Graph(*attegit.Repo) (*graph.Graph, error)
+}
+
+// HCLFunctionFactory constructs a function for one repository and HCL file.
+type HCLFunctionFactory func(*attegit.Repo, reference.Blob) (function.Function, error)
+
+// HCLFunctionProvider is implemented by plugins that expose HCL functions.
+type HCLFunctionProvider interface {
+	HCLFunctions(*attegit.Repo, reference.Blob) (map[string]HCLFunctionFactory, error)
+}
+
+// HCLBlockHandler is a future extension point for named parsed HCL blocks.
+type HCLBlockHandler interface {
+	HCLBlockType() string
+	HandleHCLBlock(*hclsyntax.Block, *hcl.EvalContext, HCLGraphBuilder) error
+}
+
+// HCLGraphBuilder is intentionally small so block handlers cannot replace parsing.
+type HCLGraphBuilder interface {
+	AddEntity(graph.Entity)
+	AddRelationship(graph.Relationship)
+}
+
+// Registry stores runtime detector and plugin registrations.
 type Registry struct {
 	mu        sync.RWMutex
 	detectors map[string]Detector
+	plugins   []Plugin
+	functions map[string]HCLFunctionFactory
 }
 
 // New returns an empty detector registry.
 func New() *Registry {
-	return &Registry{detectors: make(map[string]Detector)}
+	return &Registry{detectors: make(map[string]Detector), functions: make(map[string]HCLFunctionFactory)}
 }
 
 // Register adds a detector. Namespaces must be unique and non-empty.
@@ -61,6 +92,86 @@ func (r *Registry) Register(detector Detector) error {
 		return fmt.Errorf("detector namespace %q is already registered", detector.Namespace)
 	}
 	r.detectors[detector.Namespace] = detector
+	return nil
+}
+
+// RegisterPlugin adds a plugin and discovers its optional capabilities.
+// RegisterHCLFunction registers a named HCL function factory.
+func (r *Registry) RegisterHCLFunction(name string, factory HCLFunctionFactory) error {
+	if r == nil {
+		return fmt.Errorf("registry is nil")
+	}
+	if name == "" {
+		return fmt.Errorf("HCL function name is empty")
+	}
+	if factory == nil {
+		return fmt.Errorf("HCL function %q factory is nil", name)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.functions[name]; exists {
+		return fmt.Errorf("HCL function %q is already registered", name)
+	}
+	r.functions[name] = factory
+	return nil
+}
+
+// HCLFunctions returns fresh functions for the repository and file.
+func (r *Registry) HCLFunctions(repo *attegit.Repo, file reference.Blob) (map[string]function.Function, error) {
+	if r == nil {
+		return nil, fmt.Errorf("registry is nil")
+	}
+	r.mu.RLock()
+	factories := make(map[string]HCLFunctionFactory, len(r.functions))
+	for name, factory := range r.functions {
+		factories[name] = factory
+	}
+	plugins := append([]Plugin(nil), r.plugins...)
+	r.mu.RUnlock()
+	result := make(map[string]function.Function, len(factories))
+	for _, plugin := range plugins {
+		provider, ok := plugin.(HCLFunctionProvider)
+		if !ok {
+			continue
+		}
+		provided, err := provider.HCLFunctions(repo, file)
+		if err != nil {
+			return nil, err
+		}
+		for name, factory := range provided {
+			if _, exists := factories[name]; exists {
+				return nil, fmt.Errorf("HCL function %q is already registered", name)
+			}
+			factories[name] = factory
+		}
+	}
+	for name, factory := range factories {
+		fn, err := factory(repo, file)
+		if err != nil {
+			return nil, fmt.Errorf("build HCL function %q: %w", name, err)
+		}
+		result[name] = fn
+	}
+	return result, nil
+}
+
+// RegisterPlugin adds a plugin as a graph detector and discovers optional HCL capabilities.
+func (r *Registry) RegisterPlugin(namespace string, plugin Plugin) error {
+	if r == nil {
+		return fmt.Errorf("registry is nil")
+	}
+	if namespace == "" {
+		return fmt.Errorf("plugin namespace is empty")
+	}
+	if plugin == nil {
+		return fmt.Errorf("plugin %q is nil", namespace)
+	}
+	if err := r.Register(Detector{Namespace: namespace, Graph: plugin.Graph}); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	r.plugins = append(r.plugins, plugin)
+	r.mu.Unlock()
 	return nil
 }
 

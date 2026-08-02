@@ -7,9 +7,11 @@ import (
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/attehcl"
+	"github.com/ghthor/atte/graph"
 	"github.com/ghthor/atte/reference"
 	"github.com/ghthor/atte/reference/selector"
 	"github.com/ghthor/atte/registry"
+	"github.com/zclconf/go-cty/cty/function"
 )
 
 func builtInDetectorRegistry() (*registry.Registry, error) {
@@ -39,9 +41,13 @@ func builtInDetectorRegistry() (*registry.Registry, error) {
 	}
 	if err := r.Register(registry.Detector{
 		Namespace: attehcl.Namespace,
-		Graph:     attehcl.GraphWithContainment,
+		Graph: func(repo *attegit.Repo) (*graph.Graph, error) {
+			return attehcl.GraphWithContainmentAndFunctions(repo, func(repo *attegit.Repo, file reference.Blob) (map[string]function.Function, error) {
+				return r.HCLFunctions(repo, file)
+			})
+		},
 		Targets: func(repo *attegit.Repo) ([]registry.Target, error) {
-			found, err := attehcl.Targets(repo)
+			found, err := attehcl.TargetsWithFunctions(repo, attegit.PathHCLFunctions)
 			if err != nil {
 				return nil, err
 			}
@@ -64,5 +70,10 @@ func builtInDetectorRegistry() (*registry.Registry, error) {
 	}); err != nil {
 		return nil, err
 	}
+
+	if err := r.RegisterHCLFunction("path", attegit.PathHCLFunction); err != nil {
+		return nil, err
+	}
+
 	return r, nil
 }

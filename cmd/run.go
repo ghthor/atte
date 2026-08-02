@@ -244,7 +244,7 @@ func runTargets(repo *attegit.Repo, root, cwd, relative string) ([]runTarget, er
 	if _, err := buildCompleteGraph(repo); err != nil {
 		return nil, err
 	}
-	hclTargets, err := attehcl.Targets(repo)
+	hclTargets, err := attehcl.TargetsWithFunctions(repo, attegit.PathHCLFunctions)
 	if err != nil {
 		return nil, err
 	}
