@@ -23,6 +23,7 @@ pkgs.mkShell {
     pkgs.nixfmt
     pkgs.hclfmt
     pkgs.graph-easy
+    pkgs.marksman
     pkgs.uv
     # nucleusPackage
     cobraCli
