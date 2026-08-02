@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/graph"
@@ -31,7 +32,7 @@ type Target struct {
 // Detector contains capabilities supplied by a detector namespace.
 type Detector struct {
 	Namespace       string
-	Graph           func(*attegit.Repo) (*graph.Graph, error)
+	Graph           func(*attegit.Repo, ...detector.GraphOption) (*graph.Graph, error)
 	Targets         func(*attegit.Repo) ([]Target, error)
 	Selectorize     func(Target) (selector.Target, bool)
 	MatchIdentifier func(Target, string) bool
@@ -39,7 +40,7 @@ type Detector struct {
 
 // Plugin is the required base capability for a runtime plugin.
 type Plugin interface {
-	Graph(*attegit.Repo) (*graph.Graph, error)
+	Graph(*attegit.Repo, ...detector.GraphOption) (*graph.Graph, error)
 }
 
 // HCLFunctionFactory constructs a function for one repository and HCL file.
@@ -176,13 +177,13 @@ func (r *Registry) RegisterPlugin(namespace string, plugin Plugin) error {
 }
 
 // Graph combines all registered detector graphs in namespace order.
-func (r *Registry) Graph(repo *attegit.Repo) (*graph.Graph, error) {
+func (r *Registry) Graph(repo *attegit.Repo, options ...detector.GraphOption) (*graph.Graph, error) {
 	var result *graph.Graph
 	for _, detector := range r.snapshot() {
 		if detector.Graph == nil {
 			continue
 		}
-		g, err := detector.Graph(repo)
+		g, err := detector.Graph(repo, options...)
 		if err != nil {
 			return nil, fmt.Errorf("build %s graph: %w", detector.Namespace, err)
 		}

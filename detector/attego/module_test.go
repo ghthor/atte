@@ -3,6 +3,7 @@ package attego
 import (
 	"testing"
 
+	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attegittest"
 	"github.com/ghthor/atte/graph"
@@ -116,7 +117,7 @@ func openTestGraph(t *testing.T, dir string) *graph.Graph {
 
 func openTestGraphWithContainment(t *testing.T, dir string) *graph.Graph {
 	t.Helper()
-	got, err := GraphWithContainment(openTestRepo(t, dir))
+	got, err := Graph(openTestRepo(t, dir), detector.WithAttachToTree())
 	must.NoError(t, err)
 	return got
 }

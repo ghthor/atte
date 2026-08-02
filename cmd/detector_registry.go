@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/attehcl"
@@ -18,7 +19,9 @@ func builtInDetectorRegistry() (*registry.Registry, error) {
 	r := registry.New()
 	if err := r.Register(registry.Detector{
 		Namespace: attego.Namespace,
-		Graph:     attego.GraphWithContainment,
+		Graph: func(repo *attegit.Repo, options ...detector.GraphOption) (*graph.Graph, error) {
+			return attego.Graph(repo, options...)
+		},
 		Targets: func(repo *attegit.Repo) ([]registry.Target, error) {
 			found, err := attego.Targets(repo)
 			if err != nil {
@@ -41,10 +44,17 @@ func builtInDetectorRegistry() (*registry.Registry, error) {
 	}
 	if err := r.Register(registry.Detector{
 		Namespace: attehcl.Namespace,
-		Graph: func(repo *attegit.Repo) (*graph.Graph, error) {
-			return attehcl.GraphWithContainmentAndFunctions(repo, func(repo *attegit.Repo, file reference.Blob) (map[string]function.Function, error) {
+		Graph: func(repo *attegit.Repo, options ...detector.GraphOption) (*graph.Graph, error) {
+			graphOptions := make([]detector.GraphOption, 0, len(options)+2)
+			graphOptions = append(graphOptions, detector.WithAttachToTree(), attehcl.WithFunctions(func(repo *attegit.Repo, file reference.Blob) (map[string]function.Function, error) {
 				return r.HCLFunctions(repo, file)
-			})
+			}))
+			for _, option := range options {
+				if option != nil {
+					graphOptions = append(graphOptions, option)
+				}
+			}
+			return attehcl.Graph(repo, graphOptions...)
 		},
 		Targets: func(repo *attegit.Repo) ([]registry.Target, error) {
 			found, err := attehcl.TargetsWithFunctions(repo, attegit.PathHCLFunctions)

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/attehcl"
@@ -109,7 +110,7 @@ func printGraph(w io.Writer, repo *attegit.Repo, relativePath string, options ..
 	if err != nil {
 		return fmt.Errorf("register detectors: %w", err)
 	}
-	detectorGraph, err := registry.Graph(repo)
+	detectorGraph, err := registry.Graph(repo, detector.WithAttachToTree())
 	if err != nil {
 		return fmt.Errorf("build Go graph: %w", err)
 	}

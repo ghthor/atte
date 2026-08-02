@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/graph"
@@ -123,9 +124,7 @@ func readHCLFiles(repo *attegit.Repo) (hclFiles, error) {
 	return files, nil
 }
 
-type FunctionProvider func(*attegit.Repo, reference.Blob) (map[string]function.Function, error)
-
-func evaluateDeclarations(repo *attegit.Repo, file *hclFile, expressions map[string]hcl.Expression, inherited map[string]cty.Value, namespace string, provider FunctionProvider) (map[string]cty.Value, error) {
+func evaluateDeclarations(repo *attegit.Repo, file *hclFile, expressions map[string]hcl.Expression, inherited map[string]cty.Value, namespace string, provider detector.FunctionProvider) (map[string]cty.Value, error) {
 	values := make(map[string]cty.Value, len(expressions))
 	pending := make(map[string]hcl.Expression, len(expressions))
 	for name, expr := range expressions {
@@ -175,7 +174,7 @@ func evaluateDeclarations(repo *attegit.Repo, file *hclFile, expressions map[str
 	return values, nil
 }
 
-func scopeFor(repo *attegit.Repo, files map[reference.Blob]*hclFile, current *hclFile, provider FunctionProvider) (hclScope, error) {
+func scopeFor(repo *attegit.Repo, files map[reference.Blob]*hclFile, current *hclFile, provider detector.FunctionProvider) (hclScope, error) {
 	ancestors := make([]*hclFile, 0)
 	dir := current.file.Tree()
 	// TODO: this could be much simpler if we just evaluated this in the correct order to start
@@ -221,7 +220,7 @@ func scopeFor(repo *attegit.Repo, files map[reference.Blob]*hclFile, current *hc
 	return hclScope{global: objectValue(globals), local: objectValue(locals)}, nil
 }
 
-func evalContext(repo *attegit.Repo, file reference.Blob, scope hclScope, provider FunctionProvider) (*hcl.EvalContext, error) {
+func evalContext(repo *attegit.Repo, file reference.Blob, scope hclScope, provider detector.FunctionProvider) (*hcl.EvalContext, error) {
 	functions, err := mergedHCLFunctions(repo, file, provider)
 	if err != nil {
 		return nil, err
@@ -302,11 +301,11 @@ func Targets(repo *attegit.Repo) ([]Target, error) {
 	return targetsWithProvider(repo, nil)
 }
 
-func TargetsWithFunctions(repo *attegit.Repo, provider FunctionProvider) ([]Target, error) {
+func TargetsWithFunctions(repo *attegit.Repo, provider detector.FunctionProvider) ([]Target, error) {
 	return targetsWithProvider(repo, provider)
 }
 
-func targetsWithProvider(repo *attegit.Repo, provider FunctionProvider) ([]Target, error) {
+func targetsWithProvider(repo *attegit.Repo, provider detector.FunctionProvider) ([]Target, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("repository is nil")
 	}
@@ -389,11 +388,11 @@ func ConfigFor(repo *attegit.Repo, relativePath string) (Config, error) {
 	return configForWithProvider(repo, relativePath, nil)
 }
 
-func ConfigForWithFunctions(repo *attegit.Repo, relativePath string, provider FunctionProvider) (Config, error) {
+func ConfigForWithFunctions(repo *attegit.Repo, relativePath string, provider detector.FunctionProvider) (Config, error) {
 	return configForWithProvider(repo, relativePath, provider)
 }
 
-func configForWithProvider(repo *attegit.Repo, relativePath string, provider FunctionProvider) (Config, error) {
+func configForWithProvider(repo *attegit.Repo, relativePath string, provider detector.FunctionProvider) (Config, error) {
 	if repo == nil {
 		return Config{}, fmt.Errorf("repository is nil")
 	}
@@ -439,17 +438,23 @@ func configForWithProvider(repo *attegit.Repo, relativePath string, provider Fun
 	return Config{Global: global, Local: local, Targets: targets}, nil
 }
 
-// TODO: lets refactor the Graph interface into Graph(*graph.Graph, ...options) so we can have one entrypoint for implementation
-func Graph(repo *attegit.Repo) (*graph.Graph, error)                { return graphFor(repo, false, nil) }
-func GraphWithContainment(repo *attegit.Repo) (*graph.Graph, error) { return graphFor(repo, true, nil) }
-func GraphWithFunctions(repo *attegit.Repo, provider FunctionProvider) (*graph.Graph, error) {
-	return graphFor(repo, false, provider)
-}
-func GraphWithContainmentAndFunctions(repo *attegit.Repo, provider FunctionProvider) (*graph.Graph, error) {
-	return graphFor(repo, true, provider)
+// WithFunctions adds provider-supplied HCL functions.
+func WithFunctions(provider detector.FunctionProvider) detector.GraphOption {
+	return func(options *detector.GraphOptions) { options.Functions = provider }
 }
 
-func graphFor(repo *attegit.Repo, containment bool, provider FunctionProvider) (*graph.Graph, error) {
+// Graph builds the HCL detector graph using the supplied options.
+func Graph(repo *attegit.Repo, options ...detector.GraphOption) (*graph.Graph, error) {
+	config := detector.GraphOptions{}
+	for _, option := range options {
+		if option != nil {
+			option(&config)
+		}
+	}
+	return graphFor(repo, config)
+}
+
+func graphFor(repo *attegit.Repo, options detector.GraphOptions) (*graph.Graph, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("repository is nil")
 	}
@@ -471,11 +476,11 @@ func graphFor(repo *attegit.Repo, containment bool, provider FunctionProvider) (
 		config := files[fileBlob]
 		// TODO: scopeFor should take a tree only graph from repo and start at the root and visit every node breadth / depth doesn't matter
 		// scopeAll
-		scope, err := scopeFor(repo, files, config, provider)
+		scope, err := scopeFor(repo, files, config, options.Functions)
 		if err != nil {
 			return nil, err
 		}
-		ctx, err := evalContext(repo, fileBlob, scope, provider)
+		ctx, err := evalContext(repo, fileBlob, scope, options.Functions)
 		if err != nil {
 			return nil, err
 		}
@@ -486,11 +491,9 @@ func graphFor(repo *attegit.Repo, containment bool, provider FunctionProvider) (
 			}
 			r, err := addBlockGraph(repo, fileBlob, spec.kind, blocks, func(b rawBlock) (string, []dependency, error) {
 				script, deps, err := decodeScriptAndDeps(repo, fileBlob, b.body, ctx)
-				if strings.HasPrefix(script, DecodingPathPrefix) {
-					script = strings.TrimPrefix(script, DecodingPathPrefix)
-				}
+				script = strings.TrimPrefix(script, DecodingPathPrefix)
 				return script, deps, err
-			}, addEntity, containment)
+			}, addEntity, options.AttachToTree)
 			if err != nil {
 				return nil, err
 			}
@@ -599,12 +602,7 @@ func blocksOfType(file reference.Blob, body *hclsyntax.Body, blockType string) (
 	return blocks, nil
 }
 
-func hclFunctions(repo *attegit.Repo, file reference.Blob) map[string]function.Function {
-	functions, _ := mergedHCLFunctions(repo, file, nil)
-	return functions
-}
-
-func mergedHCLFunctions(repo *attegit.Repo, file reference.Blob, provider FunctionProvider) (map[string]function.Function, error) {
+func mergedHCLFunctions(repo *attegit.Repo, file reference.Blob, provider detector.FunctionProvider) (map[string]function.Function, error) {
 	functions := map[string]function.Function{
 		"gopkg_test": gopkgTestFunction(repo),
 	}

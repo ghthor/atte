@@ -99,6 +99,9 @@ func (r *Repo) Graph() (*graph.Graph, error) {
 		return nil, err
 	}
 	r.fullGraph, err = graph.New(full.nodes, full.edges)
+	if err != nil {
+		return nil, err
+	}
 	return r.fullGraph, nil
 }
 

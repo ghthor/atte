@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/graph"
 	"github.com/ghthor/atte/reference"
@@ -108,7 +109,7 @@ func Selector(target Target) selector.Target {
 }
 
 func Targets(repo *attegit.Repo) ([]Target, error) {
-	g, err := GraphWithContainment(repo)
+	g, err := Graph(repo, detector.WithAttachToTree())
 	if err != nil {
 		return nil, err
 	}
@@ -152,14 +153,17 @@ func Targets(repo *attegit.Repo) ([]Target, error) {
 // Graph builds the dependency graph of Go packages and package tests found in
 // repo, related by ImportsRelation. Package entities are not related to the
 // repository's filesystem tree; use GraphWithContainment for that.
-func Graph(repo *attegit.Repo) (*graph.Graph, error) { return graphFor(repo, false) }
+func Graph(repo *attegit.Repo, options ...detector.GraphOption) (*graph.Graph, error) {
+	config := detector.GraphOptions{}
+	for _, option := range options {
+		if option != nil {
+			option(&config)
+		}
+	}
+	return graphFor(repo, config.AttachToTree)
+}
 
-// GraphWithContainment builds the same graph as Graph, but additionally
-// relates each package and package-test entity to the attegit.Tree entity for
-// its containing directory via attegit.ContainsRelation.
-func GraphWithContainment(repo *attegit.Repo) (*graph.Graph, error) { return graphFor(repo, true) }
-
-func graphFor(repo *attegit.Repo, containment bool) (*graph.Graph, error) {
+func graphFor(repo *attegit.Repo, attachToTree bool) (*graph.Graph, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("nil repository")
 	}
@@ -216,7 +220,7 @@ func graphFor(repo *attegit.Repo, containment bool) (*graph.Graph, error) {
 		pid := EntityID(PackageKind, p.module.dir, p.importPath)
 		entities[pid] = graph.Entity{ID: pid, Kind: PackageKind}
 		var treeID graph.EntityID
-		if containment {
+		if attachToTree {
 			tree, err := reference.ParseTree(p.dir)
 			if err != nil {
 				return nil, err
@@ -240,7 +244,7 @@ func graphFor(repo *attegit.Repo, containment bool) (*graph.Graph, error) {
 		tid := EntityID(PackageTestKind, p.module.dir, p.importPath)
 		if p.hasTests {
 			entities[tid] = graph.Entity{ID: tid, Kind: PackageTestKind}
-			if containment {
+			if attachToTree {
 				relations[graph.Relationship{From: treeID, To: tid, Kind: attegit.ContainsRelation}] = struct{}{}
 				relations[graph.Relationship{From: tid, To: pid, Kind: attegit.ContainsRelation}] = struct{}{}
 				for _, file := range p.testFiles {
