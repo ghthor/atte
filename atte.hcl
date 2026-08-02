@@ -3,12 +3,12 @@ globals {
 }
 
 test "go" {
-  script     = "./atte_test.sh"
+  script     = path("./atte_test.sh")
   depends_on = ["//go.mod"]
 }
 
 test "build" {
-  script     = "./atte_build.sh"
+  script     = path("./atte_build.sh")
   depends_on = ["//go.mod"]
 }
 

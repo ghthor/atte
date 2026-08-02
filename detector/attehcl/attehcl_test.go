@@ -223,7 +223,7 @@ test "override" {
 		"detector/attego/override.sh": "#!/bin/sh\n",
 		"go.mod":                      "module example.com/root\n",
 	})
-	targets, err := TargetsWithFunctions(repo, attegit.PathHCLFunctions)
+	targets, err := Targets(repo, attegit.PathHCLFunctions)
 	must.NoError(t, err)
 	must.EqOp(t, 2, len(targets))
 	must.EqOp(t, reference.Blob("detector/detector.sh"), targets[0].Script)
@@ -240,7 +240,7 @@ test { script = local.script }
 `,
 		"root.sh": "#!/bin/sh\n",
 	})
-	_, err := Targets(repo)
+	_, err := Targets(repo, nil)
 	must.Error(t, err)
 }
 
@@ -272,7 +272,7 @@ func TestLocalExpressionsAcrossBlockKindsAndGraphConsistency(t *testing.T) {
 		"codegen.sh": "#!/bin/sh\n",
 		"lint.sh":    "#!/bin/sh\n",
 	})
-	targets, err := TargetsWithFunctions(repo, attegit.PathHCLFunctions)
+	targets, err := Targets(repo, attegit.PathHCLFunctions)
 	must.NoError(t, err)
 	must.Len(t, 3, targets)
 	graphWithoutContainment, err := Graph(repo, WithFunctions(attegit.PathHCLFunctions))
@@ -298,7 +298,7 @@ func TestRepeatedDeclarationsAndDuplicateDeclarationErrors(t *testing.T) {
 			`, "\t"),
 		"one.sh": "#!/bin/sh\n",
 	})
-	_, err := TargetsWithFunctions(repo, attegit.PathHCLFunctions)
+	_, err := Targets(repo, attegit.PathHCLFunctions)
 	must.NoError(t, err)
 
 	duplicate := newHCLFixture(t, map[string]string{
@@ -309,7 +309,7 @@ func TestRepeatedDeclarationsAndDuplicateDeclarationErrors(t *testing.T) {
 			`, "\t"),
 		"one.sh": "#!/bin/sh\n",
 	})
-	_, err = Targets(duplicate)
+	_, err = Targets(duplicate, nil)
 	must.Error(t, err)
 }
 
@@ -346,21 +346,21 @@ test "overridden" { script = path("./deep.sh") }
 		"child/child.sh":       "#!/bin/sh\\n",
 		"child/deeper/deep.sh": "#!/bin/sh\\n",
 	})
-	targets, err := TargetsWithFunctions(repo, attegit.PathHCLFunctions)
+	targets, err := Targets(repo, attegit.PathHCLFunctions)
 	must.NoError(t, err)
 	must.EqOp(t, 3, len(targets))
 	must.EqOp(t, reference.Blob("root.sh"), targets[0].Script)
 	must.EqOp(t, reference.Blob("child/child.sh"), targets[1].Script)
 	must.EqOp(t, reference.Blob("child/deeper/deep.sh"), targets[2].Script)
-	root, err := ConfigForWithFunctions(repo, "", attegit.PathHCLFunctions)
+	root, err := ConfigFor(repo, "", attegit.PathHCLFunctions)
 	must.NoError(t, err)
 	must.EqOp(t, "root", root.Global["version"].AsString())
 	must.EqOp(t, reference.Blob("root.sh"), *root.Global["shared_path"].EncapsulatedValue().(*reference.Blob))
-	child, err := ConfigForWithFunctions(repo, "child", attegit.PathHCLFunctions)
+	child, err := ConfigFor(repo, "child", attegit.PathHCLFunctions)
 	must.NoError(t, err)
 	must.EqOp(t, "child", child.Global["version"].AsString())
 	must.EqOp(t, reference.Blob("child/child.sh"), *child.Global["shared_path"].EncapsulatedValue().(*reference.Blob))
-	deep, err := ConfigForWithFunctions(repo, "child/deeper", attegit.PathHCLFunctions)
+	deep, err := ConfigFor(repo, "child/deeper", attegit.PathHCLFunctions)
 	must.NoError(t, err)
 	must.EqOp(t, "deep", deep.Global["version"].AsString())
 	must.EqOp(t, reference.Blob("child/deeper/deep.sh"), *deep.Global["shared_path"].EncapsulatedValue().(*reference.Blob))

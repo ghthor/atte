@@ -117,6 +117,13 @@ func (r *Registry) RegisterHCLFunction(name string, factory HCLFunctionFactory) 
 	return nil
 }
 
+// FunctionProvider adapts registry HCL functions to detector evaluation.
+func (r *Registry) FunctionProvider() detector.FunctionProvider {
+	return func(repo *attegit.Repo, file reference.Blob) (map[string]function.Function, error) {
+		return r.HCLFunctions(repo, file)
+	}
+}
+
 // HCLFunctions returns fresh functions for the repository and file.
 func (r *Registry) HCLFunctions(repo *attegit.Repo, file reference.Blob) (map[string]function.Function, error) {
 	if r == nil {

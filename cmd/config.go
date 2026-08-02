@@ -10,6 +10,7 @@ import (
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/reference"
+	"github.com/ghthor/atte/registry"
 	"github.com/hashicorp/hcl/v2/hclwrite"
 	"github.com/spf13/cobra"
 	"github.com/zclconf/go-cty/cty"
@@ -44,7 +45,11 @@ var configShowCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		config, err := attehcl.ConfigForWithFunctions(repo, relative, attegit.PathHCLFunctions)
+		builtIns, err := registry.NewBuiltIn()
+		if err != nil {
+			return fmt.Errorf("register detectors: %w", err)
+		}
+		config, err := attehcl.ConfigFor(repo, relative, builtIns.FunctionProvider())
 		if err != nil {
 			return fmt.Errorf("evaluate attehcl configuration: %w", err)
 		}
@@ -104,7 +109,7 @@ func configOutputFor(config attehcl.Config) (configOutput, error) {
 	}
 	target := make(map[string]configTarget, len(config.Targets))
 	for _, item := range config.Targets {
-		key := fmt.Sprintf("//%s#%s.%d", item.File, strings.TrimPrefix(item.Kind, attehcl.Namespace+":"), item.Index)
+		key := fmt.Sprintf("//%s#%s.%s", item.File, strings.TrimPrefix(item.Kind, attehcl.Namespace+":"), item.Name)
 		target[key] = configTarget{Kind: item.Kind, File: item.File.String(), Name: item.Name, Label: item.Label, Index: item.Index, Script: item.Script.String(), Inline: item.Inline}
 	}
 	return configOutput{Global: global, Local: local, Target: target}, nil

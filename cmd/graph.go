@@ -18,6 +18,7 @@ import (
 	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/graph"
 	"github.com/ghthor/atte/reference"
+	"github.com/ghthor/atte/registry"
 	"github.com/spf13/cobra"
 	"github.com/xlab/treeprint"
 )
@@ -106,7 +107,7 @@ func printGraph(w io.Writer, repo *attegit.Repo, relativePath string, options ..
 	if err != nil {
 		return fmt.Errorf("build Git graph: %w", err)
 	}
-	registry, err := builtInDetectorRegistry()
+	registry, err := registry.NewBuiltIn()
 	if err != nil {
 		return fmt.Errorf("register detectors: %w", err)
 	}
@@ -131,7 +132,7 @@ func printGraph(w io.Writer, repo *attegit.Repo, relativePath string, options ..
 
 func graphRunTargetSelectors(repo *attegit.Repo) (map[graph.EntityID]string, error) {
 	selectors := make(map[graph.EntityID]string)
-	registry, err := builtInDetectorRegistry()
+	registry, err := registry.NewBuiltIn()
 	if err != nil {
 		return nil, err
 	}

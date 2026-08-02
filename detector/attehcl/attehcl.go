@@ -297,11 +297,7 @@ func Selector(target Target) selector.Target {
 	}
 }
 
-func Targets(repo *attegit.Repo) ([]Target, error) {
-	return targetsWithProvider(repo, nil)
-}
-
-func TargetsWithFunctions(repo *attegit.Repo, provider detector.FunctionProvider) ([]Target, error) {
+func Targets(repo *attegit.Repo, provider detector.FunctionProvider) ([]Target, error) {
 	return targetsWithProvider(repo, provider)
 }
 
@@ -384,11 +380,7 @@ type Config struct {
 // ConfigFor evaluates the attehcl configuration for a repository-relative directory.
 // Global values are inherited from repository ancestors; local values and targets
 // are scoped to the requested directory.
-func ConfigFor(repo *attegit.Repo, relativePath string) (Config, error) {
-	return configForWithProvider(repo, relativePath, nil)
-}
-
-func ConfigForWithFunctions(repo *attegit.Repo, relativePath string, provider detector.FunctionProvider) (Config, error) {
+func ConfigFor(repo *attegit.Repo, relativePath string, provider detector.FunctionProvider) (Config, error) {
 	return configForWithProvider(repo, relativePath, provider)
 }
 

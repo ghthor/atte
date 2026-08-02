@@ -14,6 +14,7 @@ import (
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/graph"
+	"github.com/ghthor/atte/registry"
 	fzf "github.com/junegunn/fzf/src"
 	"github.com/spf13/cobra"
 )
@@ -225,7 +226,7 @@ func buildCompleteGraph(repo *attegit.Repo) (*graph.Graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build Git graph: %w", err)
 	}
-	registry, err := builtInDetectorRegistry()
+	registry, err := registry.NewBuiltIn()
 	if err != nil {
 		return nil, fmt.Errorf("register detectors: %w", err)
 	}
@@ -245,50 +246,62 @@ func runTargets(repo *attegit.Repo, root, cwd, relative string) ([]runTarget, er
 	if _, err := buildCompleteGraph(repo); err != nil {
 		return nil, err
 	}
-	hclTargets, err := attehcl.TargetsWithFunctions(repo, attegit.PathHCLFunctions)
+	builtIns, err := registry.NewBuiltIn()
 	if err != nil {
 		return nil, err
 	}
-	goTargets, err := attego.Targets(repo)
+	registeredTargets, err := builtIns.Targets(repo)
 	if err != nil {
 		return nil, err
 	}
-	targets := make([]runTarget, 0, len(hclTargets)+len(goTargets))
+	hclTargets, err := attehcl.Targets(repo, builtIns.FunctionProvider())
+	if err != nil {
+		return nil, err
+	}
+	hclByID := make(map[graph.EntityID]attehcl.Target, len(hclTargets))
 	for _, target := range hclTargets {
-		if target.Script == "" {
+		hclByID[target.ID] = target
+	}
+	targets := make([]runTarget, 0, len(registeredTargets))
+	for _, target := range registeredTargets {
+		canonical, ok := builtIns.Selector(target)
+		if !ok {
 			continue
 		}
-		file := filepath.Join(root, filepath.FromSlash(target.Script.String()))
-		dir := filepath.Dir(filepath.Join(root, filepath.FromSlash(target.File.String())))
-		filePath := target.File.String()
-		rendered := attehcl.Selector(target).String()
-		targets = append(targets, runTarget{
-			selector: rendered,
-			kind:     target.Kind,
-			path:     filePath,
-			name:     target.Name,
-			index:    target.Index,
-			label:    target.Label,
-			dir:      dir,
-			argv:     []string{"/usr/bin/env", "bash", file},
-		})
-	}
-	for _, target := range goTargets {
-		packageDir := target.PackageDir.String()
-		dir := filepath.Join(root, filepath.FromSlash(packageDir))
-		if packageDir == relative {
-			// Keep the caller's working-directory path for the convenience target
-			// while preserving the repository-wide list.
-			dir = cwd
+		switch target.Namespace {
+		case attehcl.Namespace:
+			native, ok := hclByID[target.ID]
+			if !ok || native.Script == "" {
+				continue
+			}
+			file := filepath.Join(root, filepath.FromSlash(native.Script.String()))
+			dir := filepath.Dir(filepath.Join(root, filepath.FromSlash(native.File.String())))
+			targets = append(targets, runTarget{
+				selector: canonical.String(),
+				kind:     native.Kind,
+				path:     native.File.String(),
+				name:     native.Name,
+				index:    native.Index,
+				label:    native.Label,
+				dir:      dir,
+				argv:     []string{"/usr/bin/env", "bash", file},
+			})
+		case attego.Namespace:
+			dir := filepath.Join(root, filepath.FromSlash(target.Path))
+			if target.Path == relative {
+				// Keep the caller's working-directory path for the convenience target
+				// while preserving the repository-wide list.
+				dir = cwd
+			}
+			targets = append(targets, runTarget{
+				selector: canonical.String(),
+				kind:     target.Kind,
+				path:     target.Path,
+				name:     target.Name,
+				dir:      dir,
+				argv:     []string{"go", "test", "-v"},
+			})
 		}
-		targets = append(targets, runTarget{
-			selector: attego.Selector(target).String(),
-			kind:     target.Kind,
-			path:     packageDir,
-			name:     "go_test",
-			dir:      dir,
-			argv:     []string{"go", "test", "-v"},
-		})
 	}
 	sort.Slice(targets, func(i, j int) bool { return targets[i].selector < targets[j].selector })
 	return targets, nil
