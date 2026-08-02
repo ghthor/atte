@@ -8,6 +8,11 @@ import (
 	"strings"
 )
 
+// hclFilename is the canonical filename for HCL target declarations. It must
+// stay in sync with attehcl.Filename; the selector package cannot import
+// attehcl without creating an import cycle (attehcl imports selector).
+const hclFilename = "atte.hcl"
+
 // Target describes the selector-facing identity of a runnable target.
 // Selector is the formal repository selector syntax: <path>#<identifier>.
 //
@@ -84,6 +89,94 @@ func PathMatches(inputPath, relative, candidatePath, candidateDir string) bool {
 	return resolved == candidatePath || resolved == candidateDir
 }
 
+// ContainingDir returns the directory containing an HCL target file, or
+// candidatePath unchanged if it does not name an HCL file.
+func ContainingDir(candidatePath string) string {
+	if candidatePath == hclFilename {
+		return ""
+	}
+	if !strings.HasSuffix(candidatePath, "/"+hclFilename) {
+		return candidatePath
+	}
+	return strings.TrimSuffix(candidatePath, "/"+hclFilename)
+}
+
+// PathIsWithin reports whether candidate is dir itself or a descendant of dir,
+// comparing complete slash-separated path segments rather than raw string
+// prefixes so that sibling paths sharing a prefix (e.g. "foo" and "foobar")
+// are never mistaken for an ancestor/descendant relationship.
+func PathIsWithin(candidate, dir string) bool {
+	if dir == "" {
+		return true
+	}
+	if candidate == dir {
+		return true
+	}
+	return strings.HasPrefix(candidate, dir+"/")
+}
+
+// RelativePath returns the path of candidate relative to dir, using
+// segment-wise comparison, and reports whether candidate is dir itself or a
+// descendant of dir. The returned path uses forward slashes and never begins
+// with "../"; callers that need ancestor traversal should use ResolvePath.
+func RelativePath(candidate, dir string) (string, bool) {
+	if !PathIsWithin(candidate, dir) {
+		return "", false
+	}
+	if candidate == dir {
+		return "", true
+	}
+	if dir == "" {
+		return candidate, true
+	}
+	return strings.TrimPrefix(candidate, dir+"/"), true
+}
+
+// PathHasSegmentPrefix reports whether candidate's path segments begin with
+// prefix's segments, treating prefix's final segment as a possibly
+// incomplete, partially typed segment matched via raw string prefix. All
+// segments before the last must match exactly.
+//
+// This models shell-completion prefix matching, which is a distinct
+// operation from path containment (see PathIsWithin): a completion prefix is
+// frequently an incomplete final segment (e.g. "r" typed toward
+// "reference"), not a complete ancestor path, so its last segment
+// legitimately needs raw string-prefix semantics rather than a segment
+// boundary match.
+func PathHasSegmentPrefix(candidate, prefix string) bool {
+	if prefix == "" {
+		return true
+	}
+	if candidate == prefix || strings.HasPrefix(candidate, prefix+"/") {
+		return true
+	}
+	candidateSegments := strings.Split(candidate, "/")
+	prefixSegments := strings.Split(prefix, "/")
+	if len(prefixSegments) > len(candidateSegments) {
+		return false
+	}
+	for i := 0; i < len(prefixSegments)-1; i++ {
+		if candidateSegments[i] != prefixSegments[i] {
+			return false
+		}
+	}
+	return strings.HasPrefix(candidateSegments[len(prefixSegments)-1], prefixSegments[len(prefixSegments)-1])
+}
+
+// IsImmediateChild reports whether candidate is exactly one path segment
+// beneath dir, as opposed to a deeper descendant. Directory-style completion
+// reveals one path segment at a time (mirroring shell file-path completion),
+// so once a prefix names a complete directory boundary, only its direct
+// children are viable next completions; deeper descendants require the user
+// to type another segment first.
+func IsImmediateChild(candidate, dir string) bool {
+	rel, ok := RelativePath(candidate, dir)
+	if !ok || rel == "" {
+		return false
+	}
+	return !strings.Contains(rel, "/")
+}
+
 // String returns the canonical repository-root-qualified selector.
 func (s Selector) String() string { return "//" + s.Path + "#" + s.Identifier }
 
@@ -152,30 +245,10 @@ func (t Target) Matches(input, relative string) bool {
 		return false
 	}
 	pathPart, block := parts[0], parts[1]
-	canonicalPath := canonical
-	if i := strings.IndexByte(canonicalPath, '#'); i >= 0 {
-		canonicalPath = canonicalPath[:i]
-	}
-	canonicalDir := strings.TrimSuffix(canonicalPath, "/atte.hcl")
-	canonicalDir = strings.TrimSuffix(canonicalDir, "/")
-	if pathPart != "" && pathPart != "." && pathPart != canonicalPath && pathPart != canonicalDir {
-		if relative == "" {
-			return false
-		}
-		resolved := path.Clean(path.Join(relative, strings.ReplaceAll(pathPart, "\\\\", "/")))
-		if resolved == "." {
-			resolved = ""
-		}
-		if strings.HasSuffix(pathPart, "/atte.hcl") || pathPart == "atte.hcl" {
-			if resolved != canonicalPath {
-				return false
-			}
-		} else if resolved != canonicalPath && resolved != canonicalDir {
-			return false
-		}
-		if strings.HasPrefix(resolved, "../") || resolved == ".." {
-			return false
-		}
+	canonicalPath := t.Path
+	canonicalDir := ContainingDir(canonicalPath)
+	if !PathMatches(pathPart, relative, canonicalPath, canonicalDir) {
+		return false
 	}
 	return block == kind || block == blockName || block == kind+"."+itoa(t.Index)
 }
@@ -196,7 +269,7 @@ func matchesCanonical(input, canonical string) bool {
 	}
 	selectorPath, selectorName := selectorParts[0], selectorParts[1]
 	return (selectorName == targetName || selectorName == shortName(targetName)) &&
-		(selectorPath == pathPart || selectorPath == strings.TrimSuffix(pathPart, "/atte.hcl"))
+		(selectorPath == pathPart || selectorPath == ContainingDir(pathPart))
 }
 
 func shortName(name string) string {

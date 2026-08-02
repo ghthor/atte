@@ -14,6 +14,7 @@ import (
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/graph"
+	"github.com/ghthor/atte/reference/selector"
 	"github.com/ghthor/atte/registry"
 	fzf "github.com/junegunn/fzf/src"
 	"github.com/spf13/cobra"
@@ -104,16 +105,16 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		}
 		return nil
 	}
-	var selector string
+	var input string
 	if len(args) == 1 {
-		selector = args[0]
+		input = args[0]
 	} else {
-		selector, err = selectRunTarget(cmd, targets)
+		input, err = selectRunTarget(cmd, targets)
 		if err != nil {
 			return err
 		}
 	}
-	target, err := resolveRunTargetAt(selector, targets, relative)
+	target, err := resolveRunTargetAt(input, targets, relative)
 	if err != nil {
 		return err
 	}
@@ -129,7 +130,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	process.Stdout = cmd.OutOrStdout()
 	process.Stderr = cmd.ErrOrStderr()
 	if err := process.Run(); err != nil {
-		return fmt.Errorf("run %q: %w", selector, err)
+		return fmt.Errorf("run %q: %w", input, err)
 	}
 	return nil
 }
@@ -194,13 +195,11 @@ func formatRunTargetCompletion(prefix string, target runTarget, relative string)
 	}
 	resolvedPrefix := resolveSelectorPath(pathPrefix, relative)
 	completionPath := canonicalPath
-	if resolvedPrefix != "" && strings.HasPrefix(canonicalPath, resolvedPrefix+"/") {
-		completionPath = strings.TrimPrefix(canonicalPath, resolvedPrefix+"/")
-	} else if resolvedPrefix == canonicalPath {
-		completionPath = ""
+	if rel, ok := selector.RelativePath(canonicalPath, resolvedPrefix); ok {
+		completionPath = rel
 	}
 	if completionPath == "" {
-		return prefix + "#" + parts[1]
+		return pathPrefix + "#" + parts[1]
 	}
 	if pathPrefix != "" && strings.HasSuffix(pathPrefix, "/") {
 		return pathPrefix + completionPath + "#" + parts[1]
@@ -224,10 +223,13 @@ func runTargetCompletionAliases(target runTarget, relative string) []string {
 		}
 		return aliases
 	}
-	if relative == "" || !strings.HasPrefix(canonicalDir, relative+"/") {
+	if relative == "" {
 		return nil
 	}
-	dir := strings.TrimPrefix(canonicalDir, relative+"/")
+	dir, ok := selector.RelativePath(canonicalDir, relative)
+	if !ok || dir == "" {
+		return nil
+	}
 	if target.kind != attego.PackageTestKind {
 		blockName = strings.TrimPrefix(blockName, kindAlias+".")
 		return []string{dir + "#" + blockName}
@@ -245,7 +247,7 @@ func matchesRunTargetCompletion(prefix string, target runTarget, relative string
 		parts := strings.SplitN(prefix, "#", 2)
 		prefix = "//" + resolveSelectorPath(strings.TrimPrefix(parts[0], "//"), relative) + "#" + parts[1]
 	}
-	if strings.HasPrefix(target.selector, prefix) && (relative == "" || strings.HasPrefix(strings.TrimPrefix(target.selector, "//"), relative+"/") || strings.HasPrefix(prefix, "//")) {
+	if strings.HasPrefix(target.selector, prefix) && (relative == "" || selector.PathIsWithin(strings.TrimPrefix(target.selector, "//"), relative) || strings.HasPrefix(prefix, "//")) {
 		return true
 	}
 	if strings.Contains(prefix, "#") && matchesRunTargetAt(prefix, target, relative) {
@@ -264,22 +266,14 @@ func matchesRunTargetCompletion(prefix string, target runTarget, relative string
 			return true
 		}
 		_, canonicalDir := runTargetPaths(target)
-		return canonicalDir == relative || strings.HasPrefix(canonicalDir, relative+"/")
+		return selector.PathIsWithin(canonicalDir, relative)
 	}
 	resolved := resolveSelectorPath(pathPart, relative)
 	canonicalPath, canonicalDir := runTargetPaths(target)
 	if resolved == "" {
-		return canonicalDir == ""
+		return selector.IsImmediateChild(canonicalPath, resolved)
 	}
-	return resolved == canonicalPath || resolved == canonicalDir || strings.HasPrefix(canonicalPath, resolved) || strings.HasPrefix(canonicalDir, resolved)
-}
-
-func isCurrentRunTarget(target runTarget, relative string) bool {
-	_, canonicalDir := runTargetPaths(target)
-	if canonicalDir == relative {
-		return true
-	}
-	return relative != "" && strings.HasPrefix(canonicalDir, relative+"/")
+	return selector.PathHasSegmentPrefix(canonicalPath, resolved) || selector.PathHasSegmentPrefix(canonicalDir, resolved)
 }
 
 func buildCompleteGraph(repo *attegit.Repo) (*graph.Graph, error) {
@@ -406,44 +400,28 @@ func selectRunTarget(cmd *cobra.Command, targets []runTarget) (string, error) {
 	}
 }
 
-func resolveRunTarget(selector string, targets []runTarget) (runTarget, error) {
-	return resolveRunTargetAt(selector, targets, "")
+func resolveRunTarget(input string, targets []runTarget) (runTarget, error) {
+	return resolveRunTargetAt(input, targets, "")
 }
 
-func resolveRunTargetAt(selector string, targets []runTarget, relative string) (runTarget, error) {
+func resolveRunTargetAt(input string, targets []runTarget, relative string) (runTarget, error) {
 	for _, target := range targets {
-		if target.selector == selector {
+		if target.selector == input {
 			return target, nil
 		}
 	}
 	candidates := make([]runTarget, 0)
 	for _, target := range targets {
-		if matchesRunTargetAt(selector, target, relative) {
+		if matchesRunTargetAt(input, target, relative) {
 			candidates = append(candidates, target)
 		}
 	}
-	if len(candidates) > 1 && !strings.Contains(selector, "#") {
-		local := make([]runTarget, 0, len(candidates))
-		for _, target := range candidates {
-			_, canonicalDir := runTargetPaths(target)
-			if canonicalDir == relative {
-				local = append(local, target)
-			}
-		}
-		if len(local) == 0 {
-			for _, target := range candidates {
-				if isCurrentRunTarget(target, relative) && strings.TrimPrefix(target.selector, "//") != relative+"/atte.hcl" {
-					local = append(local, target)
-				}
-			}
-		}
-		if len(local) > 0 {
-			candidates = local
-		}
+	if len(candidates) > 1 && !strings.Contains(input, "#") {
+		candidates = preferLocalRunTargets(candidates, relative)
 	}
 	if len(candidates) == 0 {
 		for _, target := range targets {
-			if matchesRunTargetLabel(selector, target) {
+			if matchesRunTargetLabel(input, target) {
 				candidates = append(candidates, target)
 			}
 		}
@@ -452,22 +430,59 @@ func resolveRunTargetAt(selector string, targets []runTarget, relative string) (
 		return candidates[0], nil
 	}
 	if len(candidates) > 1 {
-		ids := make([]string, len(candidates))
-		for i, target := range candidates {
-			ids[i] = target.selector
-		}
-		sort.Strings(ids)
-		commands := make([]string, len(ids))
-		for i, id := range ids {
-			commands[i] = "atte run " + id
-		}
-		return runTarget{}, fmt.Errorf("selector %q is ambiguous; possible commands:\n%s", selector, strings.Join(commands, "\n"))
+		return runTarget{}, ambiguousRunTargetError(input, candidates)
 	}
-	return runTarget{}, fmt.Errorf("target %q not found", selector)
+	return runTarget{}, fmt.Errorf("target %q not found", input)
 }
 
-func matchesRunTarget(selector string, target runTarget) bool {
-	return matchesRunTargetAt(selector, target, "")
+// preferLocalRunTargets narrows candidates to those rooted at relative when a
+// pathless alias matches more than one target, so a short alias like "test"
+// prefers the current directory's target over targets elsewhere in the
+// repository. It falls back to any target within relative (excluding
+// relative's own atte.hcl file, whose block-scoped aliases already matched
+// directly) when no candidate is rooted exactly at relative.
+func preferLocalRunTargets(candidates []runTarget, relative string) []runTarget {
+	local := make([]runTarget, 0, len(candidates))
+	for _, target := range candidates {
+		_, canonicalDir := runTargetPaths(target)
+		if canonicalDir == relative {
+			local = append(local, target)
+		}
+	}
+	if len(local) > 0 {
+		return local
+	}
+	relativeHCLFile := relative + "/" + attehcl.Filename
+	if relative == "" {
+		relativeHCLFile = attehcl.Filename
+	}
+	for _, target := range candidates {
+		_, canonicalDir := runTargetPaths(target)
+		if selector.PathIsWithin(canonicalDir, relative) && strings.TrimPrefix(target.selector, "//") != relativeHCLFile {
+			local = append(local, target)
+		}
+	}
+	if len(local) > 0 {
+		return local
+	}
+	return candidates
+}
+
+func ambiguousRunTargetError(input string, candidates []runTarget) error {
+	ids := make([]string, len(candidates))
+	for i, target := range candidates {
+		ids[i] = target.selector
+	}
+	sort.Strings(ids)
+	commands := make([]string, len(ids))
+	for i, id := range ids {
+		commands[i] = "atte run " + id
+	}
+	return fmt.Errorf("selector %q is ambiguous; possible commands:\n%s", input, strings.Join(commands, "\n"))
+}
+
+func matchesRunTarget(input string, target runTarget) bool {
+	return matchesRunTargetAt(input, target, "")
 }
 
 func runTargetAliases(target runTarget) (string, string) {
@@ -484,85 +499,31 @@ func runTargetAliases(target runTarget) (string, string) {
 func runTargetPaths(target runTarget) (string, string) {
 	canonicalPath := strings.TrimPrefix(target.selector, "//")
 	canonicalPath = strings.SplitN(canonicalPath, "#", 2)[0]
-	canonicalDir := strings.TrimSuffix(canonicalPath, attehcl.Filename)
-	canonicalDir = strings.TrimSuffix(canonicalDir, "/")
-	return canonicalPath, canonicalDir
+	return canonicalPath, selector.ContainingDir(canonicalPath)
 }
 
 func resolveSelectorPath(pathPart, relative string) string {
-	resolved := filepath.ToSlash(filepath.Clean(filepath.Join(relative, filepath.FromSlash(pathPart))))
-	if resolved == "." {
+	resolved, err := selector.ResolvePath(pathPart, relative)
+	if err != nil {
 		return ""
 	}
 	return resolved
 }
 
-func matchesRunTargetPath(pathPart, canonicalPath, canonicalDir, relative string) bool {
-	if pathPart == "" || pathPart == "." || pathPart == canonicalPath || pathPart == canonicalDir {
-		return true
+func (target runTarget) selectorTarget() selector.Target {
+	kindAlias, _ := runTargetAliases(target)
+	canonicalPath, _ := runTargetPaths(target)
+	name := target.name
+	if target.kind == attego.PackageTestKind {
+		name = ""
 	}
-	if relative == "" {
-		return false
-	}
-	resolved := resolveSelectorPath(pathPart, relative)
-	if strings.HasSuffix(pathPart, "/"+attehcl.Filename) || pathPart == attehcl.Filename {
-		if resolved != canonicalPath {
-			return false
-		}
-	} else if resolved != canonicalPath && resolved != canonicalDir {
-		return false
-	}
-	return !strings.HasPrefix(resolved, "../") && resolved != ".."
+	return selector.Target{Path: canonicalPath, Kind: kindAlias, Name: name, Index: target.index}
 }
 
-func matchesRunTargetAt(selector string, target runTarget, relative string) bool {
-	if matchesSelector(selector, target.selector) {
-		return true
-	}
-	kindAlias, blockName := runTargetAliases(target)
-	indexedName := fmt.Sprintf("%s.%d", kindAlias, target.index)
-	if selector == kindAlias || selector == blockName || selector == indexedName {
-		return true
-	}
-	selector = strings.TrimPrefix(selector, "//")
-	parts := strings.SplitN(selector, "#", 2)
-	if len(parts) != 2 {
-		return false
-	}
-	pathPart, block := parts[0], parts[1]
-	if relative != "" && !strings.HasPrefix(pathPart, ".") && !strings.HasPrefix(pathPart, "/") {
-		pathPart = filepath.ToSlash(filepath.Join(relative, filepath.FromSlash(pathPart)))
-		relative = ""
-	}
-	canonicalPath, canonicalDir := runTargetPaths(target)
-	if !matchesRunTargetPath(pathPart, canonicalPath, canonicalDir, relative) {
-		return false
-	}
-	return block == kindAlias || block == blockName || block == indexedName || block == strings.TrimPrefix(target.kind, attehcl.Namespace+":")
+func matchesRunTargetAt(input string, target runTarget, relative string) bool {
+	return target.selectorTarget().Matches(input, relative)
 }
 
-func matchesRunTargetLabel(selector string, target runTarget) bool {
-	return target.label != "" && !strings.Contains(selector, "#") && selector == target.label
+func matchesRunTargetLabel(input string, target runTarget) bool {
+	return target.label != "" && !strings.Contains(input, "#") && input == target.label
 }
-
-func matchesSelector(selector, canonical string) bool {
-	selector = strings.TrimPrefix(selector, "//")
-	canonical = strings.TrimPrefix(canonical, "//")
-	parts := strings.SplitN(canonical, "#", 2)
-	if len(parts) != 2 {
-		return false
-	}
-	pathPart, targetName := parts[0], parts[1]
-	if selector == canonical {
-		return true
-	}
-	selectorParts := strings.SplitN(selector, "#", 2)
-	if len(selectorParts) == 1 {
-		return selector == targetName || selector == strings.TrimPrefix(targetName, strings.SplitN(targetName, ".", 2)[0]+".")
-	}
-	selectorPath, selectorName := selectorParts[0], selectorParts[1]
-	if selectorName == targetName || selectorName == strings.TrimPrefix(targetName, strings.SplitN(targetName, ".", 2)[0]+".") {
-		return selectorPath == pathPart || selectorPath == strings.TrimSuffix(pathPart, "/"+attehcl.Filename)
-	}
-	return false
-} // TODO: resolve indexed and label aliases from runTarget metadata.
