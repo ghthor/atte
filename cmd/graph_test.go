@@ -15,6 +15,27 @@ import (
 	"github.com/shoenig/test/must"
 )
 
+func TestRepositoryContext(t *testing.T) {
+	git := attegittest.NewGitRepo(t)
+	subdir := filepath.Join(git.Dir(), "nested", "working")
+	must.NoError(t, os.MkdirAll(subdir, 0o755))
+
+	root, relative, err := repositoryContext(git.Dir())
+	must.NoError(t, err)
+	must.EqOp(t, git.Dir(), root)
+	must.EqOp(t, "", relative)
+
+	root, relative, err = repositoryContext(subdir)
+	must.NoError(t, err)
+	must.EqOp(t, git.Dir(), root)
+	must.EqOp(t, "nested/working", relative)
+}
+
+func TestRepositoryContextRejectsNonRepository(t *testing.T) {
+	_, _, err := repositoryContext(t.TempDir())
+	must.ErrorContains(t, err, "resolve repository root")
+}
+
 func TestPrintGraphGolden(t *testing.T) {
 	repo := repoWithFiles(t, map[string]string{
 		"README.md": "read me",
