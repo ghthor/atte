@@ -23,6 +23,10 @@ For functional tests or repeated behavior checks, prefer a local helper with a s
 
 Prefer `make([]T, 0, <len>)` over a `[]T{}` literal when building up a slice by appending. Use a known or estimated length for the capacity hint.
 
+## Go package usage
+
+All current usage of the Go packages in this repository is within this repository. When refactoring, do not assume unknown external usages need to be preserved.
+
 ## Code navigation
 
 When working with Go code, always try using the LSP to obtain structural information about the code before editing, such as definitions, references, symbols, types, and call hierarchies.
