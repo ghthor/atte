@@ -360,9 +360,11 @@ func runTargetAliases(target runTarget) (string, string) {
 }
 
 func runTargetPaths(target runTarget) (string, string) {
-	canonicalPath := strings.TrimPrefix(target.selector, "//")
-	canonicalPath = strings.SplitN(canonicalPath, "#", 2)[0]
-	return canonicalPath, selector.ContainingDir(canonicalPath)
+	parsed, err := selector.Parse(target.selector)
+	if err != nil {
+		return "", ""
+	}
+	return parsed.Path, parsed.Tree().String()
 }
 
 func (target runTarget) selectorTarget() selector.Target {

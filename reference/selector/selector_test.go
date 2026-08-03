@@ -65,24 +65,6 @@ func TestRelativePath(t *testing.T) {
 	test.False(t, ok, test.Sprintf("a sibling sharing a string prefix must not resolve"))
 }
 
-func TestPathHasSegmentPrefix(t *testing.T) {
-	test.True(t, PathHasSegmentPrefix("reference", "r"), test.Sprintf("a partial final segment should match via raw string prefix"))
-	test.True(t, PathHasSegmentPrefix("detector/attego", "detector"), test.Sprintf("a complete leading segment should match its descendant"))
-	test.True(t, PathHasSegmentPrefix("detector/attego", "detector/att"), test.Sprintf("a partial final segment should match after exact leading segments"))
-	test.False(t, PathHasSegmentPrefix("detector/attego", "reference"), test.Sprintf("a mismatched leading segment must not match"))
-	test.False(t, PathHasSegmentPrefix("detector", "detector/attego"), test.Sprintf("prefix must not be longer than candidate"))
-	test.True(t, PathHasSegmentPrefix("detector", ""), test.Sprintf("an empty prefix matches everything"))
-}
-
-func TestIsImmediateChild(t *testing.T) {
-	test.True(t, IsImmediateChild("reference", ""), test.Sprintf("a top-level path is an immediate child of the repository root"))
-	test.False(t, IsImmediateChild("detector/atte.hcl", ""), test.Sprintf("a nested path is not an immediate child of the repository root"))
-	test.True(t, IsImmediateChild("detector/attego", "detector"), test.Sprintf("a direct subdirectory is an immediate child of its parent"))
-	test.False(t, IsImmediateChild("detector/attego/sub", "detector"), test.Sprintf("a grandchild is not an immediate child"))
-	test.False(t, IsImmediateChild("reference", "detector"), test.Sprintf("a path outside dir is not its child"))
-	test.False(t, IsImmediateChild("detector", "detector"), test.Sprintf("a path is not its own child"))
-}
-
 func TestTargetMatchesHCL(t *testing.T) {
 	target := HCL("atte.hcl", "test", "go", 0)
 	match := func(input string, want bool) {
@@ -97,6 +79,8 @@ func TestTargetMatchesHCL(t *testing.T) {
 	match("test", true)
 	match("test.go", true)
 	match("test.0", true)
+	match("#test.go", true)
+	match("#test.0", true)
 	match("test.py", false)
 	match("lint", false)
 	match("sub/atte.hcl#test.go", false)
@@ -115,7 +99,9 @@ func TestTargetMatchesHCLRelative(t *testing.T) {
 	match("../atte.hcl#test.go", "detector", false)
 	match("..#test.go", "cmd", false)
 	match("detector/atte.hcl#test.go", "", true)
+	match("detector/atte.hcl#test.0", "", true)
 	match("detector#test.go", "", true)
+	match("detector#test.0", "", true)
 	match("../../atte.hcl#test.go", "detector/attego", false)
 	match("../outside#test.go", "detector", false)
 	match("detectorx#test.go", "", false)
@@ -125,6 +111,7 @@ func TestTargetMatchesGoTest(t *testing.T) {
 	target := GoTest("detector/attego")
 	test.True(t, target.Matches("attego#go_test", "detector"), test.Sprintf("relative package selector should match from the current directory"))
 	test.True(t, target.Matches("go_test", "detector/attego"), test.Sprintf("bare go_test alias should match from the package directory"))
+	test.True(t, target.Matches("go_test.0", "unrelated"), test.Sprintf("indexed go_test alias should remain path-independent"))
 	test.False(t, target.Matches("attego#go_test", "detector/attegox"), test.Sprintf("a sibling package sharing a string prefix must not match a path-qualified selector"))
 }
 

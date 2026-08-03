@@ -31,16 +31,24 @@ type Selector struct {
 // Parse parses a formal selector. The optional // prefix means repository root.
 // Identifier syntax is intentionally opaque to this package.
 func Parse(raw string) (Selector, error) {
-	value := strings.TrimPrefix(raw, "//")
-	parts := strings.SplitN(value, Seperator, 2)
-	if len(parts) != 2 || parts[1] == "" {
-		return Selector{}, fmt.Errorf("invalid selector %q: expected <path>#<identifier>", raw)
-	}
-	clean, err := normalizePath(parts[0])
+	pathPart, identifier, err := split(raw)
 	if err != nil {
 		return Selector{}, err
 	}
-	return Selector{Path: clean, Identifier: parts[1]}, nil
+	clean, err := normalizePath(pathPart)
+	if err != nil {
+		return Selector{}, err
+	}
+	return Selector{Path: clean, Identifier: identifier}, nil
+}
+
+func split(raw string) (string, string, error) {
+	value := strings.TrimPrefix(raw, "//")
+	parts := strings.SplitN(value, Seperator, 2)
+	if len(parts) != 2 || parts[1] == "" {
+		return "", "", fmt.Errorf("invalid selector %q: expected <path>#<identifier>", raw)
+	}
+	return parts[0], parts[1], nil
 }
 
 func (s Selector) Tree() reference.Tree {
@@ -58,34 +66,25 @@ func (s Selector) HCL() bool {
 	return filepath.Base(s.Path) == HclFilename
 }
 
-func (s Selector) RelTo(tree reference.Tree) reference.SomePath {
-	rel, err := filepath.Rel(s.Path, string(tree))
-	if err != nil {
-		panic(fmt.Errorf("s=%v tree=%v", s, tree))
-	}
-	return reference.SomePath(rel)
-}
-
 // Resolve resolves a selector path against a repository-relative directory.
 // A // path is rooted at the repository; other paths are relative to relative.
 func Resolve(raw, relative string) (Selector, error) {
-	value := strings.TrimPrefix(raw, "//")
-	parts := strings.SplitN(value, "#", 2)
-	if len(parts) != 2 || parts[1] == "" {
-		return Selector{}, fmt.Errorf("invalid selector %q: expected <path>#<identifier>", raw)
-	}
-	if strings.HasPrefix(raw, "//") {
-		clean, err := normalizePath(parts[0])
-		if err != nil {
-			return Selector{}, err
-		}
-		return Selector{Path: clean, Identifier: parts[1]}, nil
-	}
-	resolved, err := ResolvePath(parts[0], relative)
+	pathPart, identifier, err := split(raw)
 	if err != nil {
 		return Selector{}, err
 	}
-	return Selector{Path: resolved, Identifier: parts[1]}, nil
+	if strings.HasPrefix(raw, "//") {
+		clean, err := normalizePath(pathPart)
+		if err != nil {
+			return Selector{}, err
+		}
+		return Selector{Path: clean, Identifier: identifier}, nil
+	}
+	resolved, err := ResolvePath(pathPart, relative)
+	if err != nil {
+		return Selector{}, err
+	}
+	return Selector{Path: resolved, Identifier: identifier}, nil
 }
 
 // ResolvePath resolves a repository-relative path and rejects root escapes.
@@ -160,51 +159,6 @@ func RelativePath(candidate, dir string) (string, bool) {
 	return strings.TrimPrefix(candidate, dir+"/"), true
 }
 
-// PathHasSegmentPrefix reports whether candidate's path segments begin with
-// prefix's segments, treating prefix's final segment as a possibly
-// incomplete, partially typed segment matched via raw string prefix. All
-// segments before the last must match exactly.
-//
-// This models shell-completion prefix matching, which is a distinct
-// operation from path containment (see PathIsWithin): a completion prefix is
-// frequently an incomplete final segment (e.g. "r" typed toward
-// "reference"), not a complete ancestor path, so its last segment
-// legitimately needs raw string-prefix semantics rather than a segment
-// boundary match.
-func PathHasSegmentPrefix(candidate, prefix string) bool {
-	if prefix == "" {
-		return true
-	}
-	if candidate == prefix || strings.HasPrefix(candidate, prefix+"/") {
-		return true
-	}
-	candidateSegments := strings.Split(candidate, "/")
-	prefixSegments := strings.Split(prefix, "/")
-	if len(prefixSegments) > len(candidateSegments) {
-		return false
-	}
-	for i := 0; i < len(prefixSegments)-1; i++ {
-		if candidateSegments[i] != prefixSegments[i] {
-			return false
-		}
-	}
-	return strings.HasPrefix(candidateSegments[len(prefixSegments)-1], prefixSegments[len(prefixSegments)-1])
-}
-
-// IsImmediateChild reports whether candidate is exactly one path segment
-// beneath dir, as opposed to a deeper descendant. Directory-style completion
-// reveals one path segment at a time (mirroring shell file-path completion),
-// so once a prefix names a complete directory boundary, only its direct
-// children are viable next completions; deeper descendants require the user
-// to type another segment first.
-func IsImmediateChild(candidate, dir string) bool {
-	rel, ok := RelativePath(candidate, dir)
-	if !ok || rel == "" {
-		return false
-	}
-	return !strings.Contains(rel, "/")
-}
-
 // String returns the canonical repository-root-qualified selector.
 func (s Selector) String() string { return "//" + s.Path + "#" + s.Identifier }
 
@@ -261,49 +215,43 @@ func HCL(filePath, kind, name string, index int) Target {
 
 // Matches reports whether input selects t from relative, a repository-relative directory.
 func (t Target) Matches(input, relative string) bool {
-	canonical := strings.TrimPrefix(t.String(), "//")
-	if matchesCanonical(input, canonical) {
-		return true
+	aliases := t.identifierAliases()
+	input = strings.TrimPrefix(input, "//")
+	parts := strings.SplitN(input, Seperator, 2)
+	if len(parts) == 1 {
+		return containsAlias(aliases, input)
 	}
-	kind := t.Kind
-	blockName := kind + "." + t.Name
+	if !containsAlias(aliases, parts[1]) {
+		return false
+	}
+	return PathMatches(parts[0], relative, t.Path, ContainingDir(t.Path))
+}
+
+func (t Target) identifierAliases() []string {
+	canonical := strings.Join([]string{t.Kind, t.Name}, ".")
+	if t.Name == "" {
+		canonical = t.Kind
+	}
+	blockName := canonical
 	if t.Kind == "go_test" {
 		blockName = "go_test"
 	}
-	if input == kind || input == blockName || input == kind+"."+itoa(t.Index) {
-		return true
+	aliases := make([]string, 0, 5)
+	for _, alias := range []string{canonical, shortName(canonical), t.Kind, blockName, t.Kind + "." + itoa(t.Index)} {
+		if !containsAlias(aliases, alias) {
+			aliases = append(aliases, alias)
+		}
 	}
-	input = strings.TrimPrefix(input, "//")
-	parts := strings.SplitN(input, "#", 2)
-	if len(parts) != 2 {
-		return false
-	}
-	pathPart, block := parts[0], parts[1]
-	canonicalPath := t.Path
-	canonicalDir := ContainingDir(canonicalPath)
-	if !PathMatches(pathPart, relative, canonicalPath, canonicalDir) {
-		return false
-	}
-	return block == kind || block == blockName || block == kind+"."+itoa(t.Index)
+	return aliases
 }
 
-func matchesCanonical(input, canonical string) bool {
-	input = strings.TrimPrefix(input, "//")
-	if input == canonical {
-		return true
+func containsAlias(aliases []string, value string) bool {
+	for _, alias := range aliases {
+		if value == alias {
+			return true
+		}
 	}
-	parts := strings.SplitN(canonical, "#", 2)
-	if len(parts) != 2 {
-		return false
-	}
-	pathPart, targetName := parts[0], parts[1]
-	selectorParts := strings.SplitN(input, "#", 2)
-	if len(selectorParts) == 1 {
-		return input == targetName || input == shortName(targetName)
-	}
-	selectorPath, selectorName := selectorParts[0], selectorParts[1]
-	return (selectorName == targetName || selectorName == shortName(targetName)) &&
-		(selectorPath == pathPart || selectorPath == ContainingDir(pathPart))
+	return false
 }
 
 func shortName(name string) string {
