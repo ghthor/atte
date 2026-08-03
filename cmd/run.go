@@ -10,7 +10,6 @@ import (
 	"unicode"
 
 	"github.com/ghthor/atte/cmd/runcomp"
-	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/attehcl"
@@ -81,20 +80,27 @@ func init() {
 	runCmd.Flags().BoolVar(&runList, "list", false, "List runnable targets")
 }
 
-func runCommand(cmd *cobra.Command, args []string) error {
-	cwd, err := os.Getwd()
+func loadRunTargets() (root, cwd, relative string, targets []runTarget, err error) {
+	cwd, err = os.Getwd()
 	if err != nil {
-		return fmt.Errorf("get working directory: %w", err)
+		err = fmt.Errorf("get working directory: %w", err)
+		return
 	}
-	root, relative, err := repositoryContext(cwd)
+	root, relative, err = repositoryContext(cwd)
 	if err != nil {
-		return err
+		return
 	}
 	repo, err := attegit.Open(root, "HEAD", attegit.WithWorkingTree())
 	if err != nil {
-		return fmt.Errorf("open repository: %w", err)
+		err = fmt.Errorf("open repository: %w", err)
+		return
 	}
-	targets, err := runTargets(repo, root, cwd, relative)
+	targets, err = runTargets(repo, root, cwd, relative)
+	return
+}
+
+func runCommand(cmd *cobra.Command, args []string) error {
+	_, _, relative, targets, err := loadRunTargets()
 	if err != nil {
 		return err
 	}
@@ -141,19 +147,7 @@ func runCmdValidArgs(cmd *cobra.Command, args []string, toComplete string) ([]st
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil, cobra.ShellCompDirectiveError
-	}
-	root, relative, err := repositoryContext(cwd)
-	if err != nil {
-		return nil, cobra.ShellCompDirectiveError
-	}
-	repo, err := attegit.Open(root, "HEAD", attegit.WithWorkingTree())
-	if err != nil {
-		return nil, cobra.ShellCompDirectiveError
-	}
-	targets, err := runTargets(repo, root, cwd, relative)
+	root, cwd, _, targets, err := loadRunTargets()
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveError
 	}
@@ -177,31 +171,7 @@ func runCmdValidArgsFromTargets(args []string, toComplete, root, cwd string, tar
 	return matches, cobra.ShellCompDirectiveNoFileComp
 }
 
-func buildCompleteGraph(repo *attegit.Repo) (*graph.Graph, error) {
-	g, err := repo.Graph()
-	if err != nil {
-		return nil, fmt.Errorf("build Git graph: %w", err)
-	}
-	registry, err := registry.NewBuiltIn()
-	if err != nil {
-		return nil, fmt.Errorf("register detectors: %w", err)
-	}
-	detectorGraph, err := registry.Graph(repo, detector.WithAttachToTree())
-	if err != nil {
-		return nil, fmt.Errorf("build detector graph: %w", err)
-	}
-	if detectorGraph != nil {
-		if err := g.Absorb(detectorGraph); err != nil {
-			return nil, fmt.Errorf("merge detector graph: %w", err)
-		}
-	}
-	return g, nil
-}
-
 func runTargets(repo *attegit.Repo, root, cwd, relative string) ([]runTarget, error) {
-	if _, err := buildCompleteGraph(repo); err != nil {
-		return nil, err
-	}
 	builtIns, err := registry.NewBuiltIn()
 	if err != nil {
 		return nil, err
@@ -301,10 +271,6 @@ func selectRunTarget(cmd *cobra.Command, targets []runTarget) (string, error) {
 	}
 }
 
-func resolveRunTarget(input string, targets []runTarget) (runTarget, error) {
-	return resolveRunTargetAt(input, targets, "")
-}
-
 func resolveRunTargetAt(input string, targets []runTarget, relative string) (runTarget, error) {
 	for _, target := range targets {
 		if target.selector == input {
@@ -380,10 +346,6 @@ func ambiguousRunTargetError(input string, candidates []runTarget) error {
 		commands[i] = "atte run " + id
 	}
 	return fmt.Errorf("selector %q is ambiguous; possible commands:\n%s", input, strings.Join(commands, "\n"))
-}
-
-func matchesRunTarget(input string, target runTarget) bool {
-	return matchesRunTargetAt(input, target, "")
 }
 
 func runTargetAliases(target runTarget) (string, string) {

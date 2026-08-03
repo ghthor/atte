@@ -20,7 +20,7 @@ func TestMatchesRunTarget(t *testing.T) {
 	}
 	match := func(selector string, want bool) {
 		t.Helper()
-		must.EqOp(t, want, matchesRunTarget(selector, target))
+		must.EqOp(t, want, matchesRunTargetAt(selector, target, ""))
 	}
 
 	match("//atte.hcl#test.go", true)
@@ -142,7 +142,7 @@ func TestResolveRunTarget(t *testing.T) {
 	})
 
 	t.Run("ambiguity", func(t *testing.T) {
-		_, err := resolveRunTarget("test", targets)
+		_, err := resolveRunTargetAt("test", targets, "")
 		must.Error(t, err)
 		must.StrContains(t, err.Error(), "ambiguous")
 		must.StrContains(t, err.Error(), "atte run //atte.hcl#test.go")
@@ -150,7 +150,7 @@ func TestResolveRunTarget(t *testing.T) {
 		must.StrContains(t, err.Error(), "atte run //atte.hcl#test.2")
 	})
 	t.Run("missing target", func(t *testing.T) {
-		_, err := resolveRunTarget("missing", targets)
+		_, err := resolveRunTargetAt("missing", targets, "")
 		must.Error(t, err)
 		must.StrContains(t, err.Error(), "not found")
 	})
