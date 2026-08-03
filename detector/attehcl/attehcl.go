@@ -189,6 +189,16 @@ type evaluator struct {
 	provider detector.FunctionProvider
 }
 
+type decodedBlock struct {
+	kind   string
+	file   reference.Blob
+	name   string
+	label  string
+	index  int
+	script string
+	deps   []dependency
+}
+
 type globalPhase struct {
 	evaluator *evaluator
 	scopes    map[reference.Tree]map[string]cty.Value
@@ -271,6 +281,66 @@ func evalContext(repo *attegit.Repo, file reference.Blob, scope hclScope, provid
 	return &hcl.EvalContext{Variables: map[string]cty.Value{"global": scope.global, "local": scope.local}, Functions: functions}, nil
 }
 
+func (e *evaluator) decodedBlocks(globals globalPhase) ([]decodedBlock, error) {
+	blocks := make([]decodedBlock, 0)
+	phase := evaluationPhase{globals: globals}
+	for _, file := range e.files.sortedBlobs() {
+		config := e.files[file]
+		scope, err := phase.scopeFor(config)
+		if err != nil {
+			return nil, err
+		}
+		ctx, err := evalContext(e.repo, file, scope, e.provider)
+		if err != nil {
+			return nil, err
+		}
+		for _, spec := range blockKinds {
+			raw, err := blocksOfType(file, config.body, spec.hclType)
+			if err != nil {
+				return nil, err
+			}
+			labels := make(map[string]struct{}, len(raw))
+			for index, block := range raw {
+				name := fmt.Sprintf("%d", index)
+				label := ""
+				if len(block.labels) == 1 {
+					label = block.labels[0]
+					name = label
+					if _, exists := labels[name]; exists {
+						return nil, fmt.Errorf("parse HCL %q: duplicate %s label %q", file, spec.hclType, name)
+					}
+					labels[name] = struct{}{}
+				}
+				script, deps, err := decodeScriptAndDeps(e.repo, file, block.body, ctx)
+				if err != nil {
+					return nil, err
+				}
+				blocks = append(blocks, decodedBlock{kind: spec.kind, file: file, name: name, label: label, index: index, script: script, deps: deps})
+			}
+		}
+	}
+	return blocks, nil
+}
+
+func targetsFromDecoded(repo *attegit.Repo, blocks []decodedBlock) ([]Target, error) {
+	targets := make([]Target, 0, len(blocks))
+	for _, block := range blocks {
+		scriptBlob := reference.Blob("")
+		inline := ""
+		if strings.HasPrefix(block.script, DecodingPathPrefix) {
+			scriptBlob = reference.Blob(strings.TrimPrefix(block.script, DecodingPathPrefix))
+		} else if block.script != "" {
+			trimmed := strings.TrimSpace(block.script)
+			if object, ok := repo.Obj[reference.Blob(trimmed)]; ok {
+				return nil, fmt.Errorf("decode HCL %q: script string resolves to repository %q %q; use path(%q) for an external script", block.file, object.Kind, trimmed, trimmed)
+			}
+			inline = block.script
+		}
+		targets = append(targets, Target{ID: EntityID(block.kind, block.file, block.name), Kind: block.kind, File: block.file, Name: block.name, Label: block.label, Index: block.index, Script: scriptBlob, Inline: inline})
+	}
+	return targets, nil
+}
+
 func EntityID(kind string, file reference.Blob, name string) graph.EntityID {
 	return graph.EntityID(fmt.Sprintf("%s:%s:%s", kind, file, name))
 }
@@ -345,10 +415,6 @@ func Targets(repo *attegit.Repo, provider detector.FunctionProvider) ([]Target, 
 }
 
 func targetsWithProvider(repo *attegit.Repo, provider detector.FunctionProvider) ([]Target, error) {
-	if repo == nil {
-		return nil, fmt.Errorf("repository is nil")
-	}
-	targets := make([]Target, 0)
 	evaluator, err := newEvaluator(repo, provider)
 	if err != nil {
 		return nil, err
@@ -357,64 +423,11 @@ func targetsWithProvider(repo *attegit.Repo, provider detector.FunctionProvider)
 	if err != nil {
 		return nil, err
 	}
-	phase := evaluationPhase{globals: globals}
-	for _, blob := range evaluator.files.sortedBlobs() {
-		hclConfig := evaluator.files[blob]
-		scope, err := phase.scopeFor(hclConfig)
-		if err != nil {
-			return nil, err
-		}
-		body := hclConfig.body
-		ctx, err := evalContext(repo, blob, scope, provider)
-		if err != nil {
-			return nil, err
-		}
-		for _, spec := range blockKinds {
-			blocks, err := blocksOfType(blob, body, spec.hclType)
-			if err != nil {
-				return nil, err
-			}
-			labels := make(map[string]struct{}, len(blocks))
-			for index, block := range blocks {
-				name := fmt.Sprintf("%d", index)
-				label := ""
-				if len(block.labels) == 1 {
-					label = block.labels[0]
-					name = label
-					if _, exists := labels[name]; exists {
-						return nil, fmt.Errorf("parse HCL %q: duplicate %s label %q", blob, spec.hclType, name)
-					}
-					labels[name] = struct{}{}
-				}
-				script, _, err := decodeScriptAndDeps(repo, blob, block.body, ctx)
-				if err != nil {
-					return nil, err
-				}
-				scriptBlob := reference.Blob("")
-				inline := ""
-				if strings.HasPrefix(script, DecodingPathPrefix) {
-					scriptBlob = reference.Blob(strings.TrimPrefix(script, DecodingPathPrefix))
-				} else if script != "" {
-					trimmed := strings.TrimSpace(script)
-					if object, ok := repo.Obj[reference.Blob(trimmed)]; ok {
-						return nil, fmt.Errorf("decode HCL %q: script string resolves to repository %q %q; use path(%q) for an external script", blob, object.Kind, trimmed, trimmed)
-					}
-					inline = script
-				}
-				targets = append(targets, Target{
-					ID:     EntityID(spec.kind, blob, name),
-					Kind:   spec.kind,
-					File:   blob,
-					Name:   name,
-					Label:  label,
-					Index:  index,
-					Script: scriptBlob,
-					Inline: inline,
-				})
-			}
-		}
+	blocks, err := evaluator.decodedBlocks(globals)
+	if err != nil {
+		return nil, err
 	}
-	return targets, nil
+	return targetsFromDecoded(repo, blocks)
 }
 
 // Config is the evaluated attehcl configuration for a repository directory.
@@ -460,7 +473,11 @@ func configForWithProvider(repo *attegit.Repo, relativePath string, provider det
 	if err != nil {
 		return Config{}, err
 	}
-	allTargets, err := targetsWithProvider(repo, provider)
+	blocks, err := evaluator.decodedBlocks(globals)
+	if err != nil {
+		return Config{}, err
+	}
+	allTargets, err := targetsFromDecoded(repo, blocks)
 	if err != nil {
 		return Config{}, err
 	}
@@ -509,7 +526,10 @@ func graphFor(repo *attegit.Repo, options detector.GraphOptions) (*graph.Graph, 
 	if err != nil {
 		return nil, err
 	}
-	phase := evaluationPhase{globals: globals}
+	blocks, err := evaluator.decodedBlocks(globals)
+	if err != nil {
+		return nil, err
+	}
 	entities := make([]graph.Entity, 0)
 	relations := make([]graph.Relationship, 0)
 	addEntity := func(e graph.Entity) {
@@ -520,91 +540,56 @@ func graphFor(repo *attegit.Repo, options detector.GraphOptions) (*graph.Graph, 
 		}
 		entities = append(entities, e)
 	}
-	for _, fileBlob := range evaluator.files.sortedBlobs() {
-		config := evaluator.files[fileBlob]
-		scope, err := phase.scopeFor(config)
+	for _, block := range blocks {
+		r, err := addDecodedBlockGraph(repo, block, addEntity, options.AttachToTree)
 		if err != nil {
 			return nil, err
 		}
-		ctx, err := evalContext(repo, fileBlob, scope, options.Functions)
-		if err != nil {
-			return nil, err
-		}
-		for _, spec := range blockKinds {
-			blocks, err := blocksOfType(fileBlob, config.body, spec.hclType)
-			if err != nil {
-				return nil, err
-			}
-			r, err := addBlockGraph(repo, fileBlob, spec.kind, blocks, func(b rawBlock) (string, []dependency, error) {
-				script, deps, err := decodeScriptAndDeps(repo, fileBlob, b.body, ctx)
-				script = strings.TrimPrefix(script, DecodingPathPrefix)
-				return script, deps, err
-			}, addEntity, options.AttachToTree)
-			if err != nil {
-				return nil, err
-			}
-			relations = append(relations, r...)
-		}
+		relations = append(relations, r...)
 	}
 	return graph.New(entities, relations)
 }
 
-// addBlockGraph builds the entities and relations for one block kind's raw
-// blocks: per-kind label/index bookkeeping, containment, script resolution,
-// and dependency resolution. It is schema-agnostic — each kind supplies its
-// own decode function to extract the script and dependencies it declares.
-func addBlockGraph(repo *attegit.Repo, file reference.Blob, kind string, blocks []rawBlock, decode func(rawBlock) (string, []dependency, error), addEntity func(graph.Entity), containment bool) ([]graph.Relationship, error) {
-	relations := make([]graph.Relationship, 0, len(blocks))
-	labels := map[string]struct{}{}
-	for index, block := range blocks {
-		name := fmt.Sprintf("%d", index)
-		if len(block.labels) == 1 {
-			name = block.labels[0]
-			if _, ok := labels[name]; ok {
-				return nil, fmt.Errorf("parse HCL %q: duplicate %s label %q", file, strings.TrimPrefix(kind, Namespace+":"), name)
-			}
-			labels[name] = struct{}{}
-		}
-		id := EntityID(kind, file, name)
-		addEntity(graph.Entity{ID: id, Kind: kind})
-		if containment {
-			addEntity(graph.Entity{ID: attegit.EntityID(file.Tree()), Kind: attegit.TreeKind})
-			addEntity(graph.Entity{ID: attegit.EntityID(file), Kind: attegit.BlobKind})
-			relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(file), Kind: SourceFileRelation})
-			relations = append(relations, graph.Relationship{From: attegit.EntityID(file.Tree()), To: id, Kind: attegit.ContainsRelation})
-		}
-		script, deps, err := decode(block)
+// addDecodedBlockGraph builds graph entities and relations for one decoded block.
+func addDecodedBlockGraph(repo *attegit.Repo, block decodedBlock, addEntity func(graph.Entity), containment bool) ([]graph.Relationship, error) {
+	relations := make([]graph.Relationship, 0, 1+len(block.deps)*2)
+	id := EntityID(block.kind, block.file, block.name)
+	addEntity(graph.Entity{ID: id, Kind: block.kind})
+	if containment {
+		addEntity(graph.Entity{ID: attegit.EntityID(block.file.Tree()), Kind: attegit.TreeKind})
+		addEntity(graph.Entity{ID: attegit.EntityID(block.file), Kind: attegit.BlobKind})
+		relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(block.file), Kind: SourceFileRelation})
+		relations = append(relations, graph.Relationship{From: attegit.EntityID(block.file.Tree()), To: id, Kind: attegit.ContainsRelation})
+	}
+	script := strings.TrimPrefix(block.script, DecodingPathPrefix)
+	if script != "" {
+		targetBlob, err := reference.ResolveBlobFromBlob(block.file, reference.SomePath(script))
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%q: %w", block.file, err)
 		}
-		if script != "" {
-			targetBlob, err := reference.ResolveBlobFromBlob(file, reference.SomePath(script))
-			if err != nil {
-				return nil, fmt.Errorf("%q: %w", file, err)
-			}
-			if obj, ok := repo.Obj[targetBlob]; !ok || obj.Kind != attegit.Blob {
-				return nil, fmt.Errorf("%q: script %q not found", file, targetBlob)
-			}
-			addEntity(graph.Entity{ID: attegit.EntityID(targetBlob), Kind: attegit.BlobKind})
-			relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(targetBlob), Kind: ScriptRelation})
+		if obj, ok := repo.Obj[targetBlob]; !ok || obj.Kind != attegit.Blob {
+			return nil, fmt.Errorf("%q: script %q not found", block.file, targetBlob)
 		}
-		for _, dep := range deps {
-			if dep.entity != "" {
-				addEntity(graph.Entity{ID: dep.entity, Kind: dependencyKind(repo, dep.entity)})
-				relations = append(relations, graph.Relationship{From: id, To: dep.entity, Kind: DependsOnRelation})
-				continue
-			}
-			targetBlob, err := reference.ResolveBlobFromBlob(file, reference.SomePath(dep.value))
-			if err != nil {
-				return nil, fmt.Errorf("%q: %w", file, err)
-			}
-			obj, ok := repo.Obj[targetBlob]
-			if !ok || obj.Kind != attegit.Blob {
-				return nil, fmt.Errorf("%q: dependency %q not found", file, targetBlob)
-			}
-			addEntity(graph.Entity{ID: attegit.EntityID(targetBlob), Kind: attegit.BlobKind})
-			relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(targetBlob), Kind: DependsOnRelation})
+		addEntity(graph.Entity{ID: attegit.EntityID(targetBlob), Kind: attegit.BlobKind})
+		relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(targetBlob), Kind: ScriptRelation})
+	}
+	for _, dep := range block.deps {
+		if dep.entity != "" {
+			addEntity(graph.Entity{ID: dep.entity, Kind: dependencyKind(repo, dep.entity)})
+			relations = append(relations, graph.Relationship{From: id, To: dep.entity, Kind: DependsOnRelation})
+			continue
 		}
+		value := dep.value
+		targetBlob, err := reference.ResolveBlobFromBlob(block.file, reference.SomePath(value))
+		if err != nil {
+			return nil, fmt.Errorf("%q: %w", block.file, err)
+		}
+		obj, ok := repo.Obj[targetBlob]
+		if !ok || obj.Kind != attegit.Blob {
+			return nil, fmt.Errorf("%q: dependency %q not found", block.file, targetBlob)
+		}
+		addEntity(graph.Entity{ID: attegit.EntityID(targetBlob), Kind: attegit.BlobKind})
+		relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(targetBlob), Kind: DependsOnRelation})
 	}
 	return relations, nil
 }
