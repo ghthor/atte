@@ -3,6 +3,7 @@ package selector
 import (
 	"testing"
 
+	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
 )
 
@@ -126,4 +127,24 @@ func TestTargetMatchesGoTest(t *testing.T) {
 	must.True(t, target.Matches("attego#go_test", "detector"), must.Sprint("relative package selector should match from the current directory"))
 	must.True(t, target.Matches("go_test", "detector/attego"), must.Sprint("bare go_test alias should match from the package directory"))
 	must.False(t, target.Matches("attego#go_test", "detector/attegox"), must.Sprint("a sibling package sharing a string prefix must not match a path-qualified selector"))
+}
+
+func TestSelectorNoHCLFile(t *testing.T) {
+	f := func(in, want string) {
+		t.Helper()
+
+		s, err := Parse(in)
+		must.NoError(t, err)
+
+		test.Eq(t, s.Tree().String(), want)
+	}
+
+	f("atte.hcl#test", "")
+	f("//atte.hcl#test", "")
+
+	f("subdir#go_test", "subdir")
+	f("//subdir#go_test", "subdir")
+
+	f("subdir/atte.hcl#test", "subdir")
+	f("//subdir/atte.hcl#test", "subdir")
 }

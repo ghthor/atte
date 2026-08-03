@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/ghthor/atte/detector/attego"
@@ -48,7 +49,6 @@ func TestMatchesRunTargetAt(t *testing.T) {
 		must.EqOp(t, want, matchesRunTargetAt(selector, target, relative))
 	}
 
-	match("../atte.hcl#test.go", "detector/attego", true)
 	match("atte.hcl#test.go", "detector", true)
 	goTarget := runTarget{selector: "//detector/attego#go_test", kind: attego.PackageTestKind, path: "detector/attego", name: "go_test"}
 	must.True(t, matchesRunTargetAt("attego#go_test", goTarget, "detector"), must.Sprint("relative package selector should match from the current directory"))
@@ -76,7 +76,7 @@ func TestRunCmdValidArgs(t *testing.T) {
 	}
 	complete := func(relative, prefix string, want []string) {
 		t.Helper()
-		matches, directive := runCmdValidArgsFromTargets(nil, prefix, relative, targets)
+		matches, directive := runCmdValidArgsFromTargets(nil, prefix, "/repo", filepath.Join("/repo", relative), targets)
 		must.SliceEqOp(t, want, matches)
 		must.EqOp(t, cobra.ShellCompDirectiveNoFileComp, directive)
 		for _, want := range want {
@@ -88,19 +88,13 @@ func TestRunCmdValidArgs(t *testing.T) {
 	complete("", "test.", []string{"test.go"})
 	complete("", "test.go", []string{"test.go"})
 	complete("detector", "t", []string{"test.py"})
-	complete("detector", "", []string{"test.py", "attego#go_test"})
-	complete("detector", "atte", []string{"attego#go_test"})
+	complete("detector", "", []string{"test.py", "atte.hcl#test.py", "attego#go_test"})
+	complete("detector", "atte", []string{"atte.hcl#test.py", "attego#go_test"})
 	complete("detector", "attego#", []string{"attego#go_test"})
 	complete("", "//atte", []string{"//atte.hcl#test.go"})
 	complete("", "//detector/", []string{"//detector/atte.hcl#test.py", "//detector/attego#go_test"})
-	complete("detector", "../r", []string{"../reference#go_test"})
-	complete("detector", "../ref", []string{"../reference#go_test"})
-	complete("detector", "../", []string{"../atte.hcl#test.go", "../reference#go_test"})
-	complete("detector/attego", "../../detector/", []string{"../../detector/atte.hcl#test.py", "../../detector/attego#go_test"})
-	complete("detector/attego", "../../atte.hcl#", []string{"../../atte.hcl#test.go"})
-	complete("detector/attego", "../../atte.hcl#test", []string{"../../atte.hcl#test.go"})
 
-	matches, directive := runCmdValidArgsFromTargets([]string{"existing"}, "", "", targets)
+	matches, directive := runCmdValidArgsFromTargets([]string{"existing"}, "", "/repo", "/repo", targets)
 	must.Nil(t, matches)
 	must.EqOp(t, cobra.ShellCompDirectiveNoFileComp, directive)
 }

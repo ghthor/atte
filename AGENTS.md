@@ -2,16 +2,18 @@
 
 ## Go tests
 
-Use `github.com/shoenig/test/must` for all assertions in Go tests. Prefer the most specific `must` assertion available; use `must.True` or `must.False` only when no specific assertion function expresses the check. Every `must.True` and `must.False` call must include a concise failure description as its final argument, wrapped with `must.Sprint`, for example:
+Use `github.com/shoenig/test` for behavioral assertions in Go tests. Use `github.com/shoenig/test/must` for test setup operations that can fail, such as creating fixtures, writing files, or running commands; keep those operations under `must.NoError` (or the most specific setup-oriented `must` assertion).
+
+Avoid using `must` assertions for expectations in table-driven tests: their failure context may not include the complete table-case context. Use the assertions from `github.com/shoenig/test` there instead. Do not use ad hoc `if` checks, `t.Fatal`, `t.Error`, or other assertion libraries for test assertions.
+
+When `must.True` or `must.False` is appropriate outside table-driven assertions, include a concise failure description as the final argument, wrapped with `must.Sprint`, for example:
 
 ```go
 must.True(t, got.Valid(), must.Sprint("resolved selector should be valid"))
 must.False(t, got.EscapesRoot(), must.Sprint("selector should remain inside the repository"))
 ```
 
-Do not pass a raw string as the description: the `must` package expects a `must.Setting`. Do not use ad hoc `if` checks, `t.Fatal`, `t.Error`, or other assertion libraries for test assertions.
-
-Keep setup operations that can fail under `must.NoError` as well.
+Do not pass a raw string as the description: the `must` package expects a `must.Setting`.
 
 When tests create multiline strings, use raw string literals. Start the string on the following line and use `strings.TrimLeft` to remove the leading whitespace added for readability.
 

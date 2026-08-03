@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/ghthor/atte/cmd/runcomp"
 	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attego"
@@ -157,123 +158,23 @@ func runCmdValidArgs(cmd *cobra.Command, args []string, toComplete string) ([]st
 		return nil, cobra.ShellCompDirectiveError
 	}
 
-	return runCmdValidArgsFromTargets(args, toComplete, relative, targets)
+	return runCmdValidArgsFromTargets(args, toComplete, root, cwd, targets)
 }
 
-func runCmdValidArgsFromTargets(args []string, toComplete, relative string, targets []runTarget) ([]string, cobra.ShellCompDirective) {
+func runCmdValidArgsFromTargets(args []string, toComplete, root, cwd string, targets []runTarget) ([]string, cobra.ShellCompDirective) {
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 
-	matches := make([]string, 0, len(targets))
+	completionTargets := make([]string, 0, len(targets))
 	for _, target := range targets {
-		if matchesRunTargetCompletion(toComplete, target, relative) {
-			matches = append(matches, formatRunTargetCompletion(toComplete, target, relative))
-		}
+		completionTargets = append(completionTargets, target.selector)
+	}
+	matches, err := runcomp.Match(root, cwd, toComplete, completionTargets)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveError
 	}
 	return matches, cobra.ShellCompDirectiveNoFileComp
-}
-
-func formatRunTargetCompletion(prefix string, target runTarget, relative string) string {
-	for _, alias := range runTargetCompletionAliases(target, relative) {
-		if strings.HasPrefix(alias, prefix) {
-			return alias
-		}
-	}
-	if !strings.HasPrefix(prefix, ".") || relative == "" {
-		return target.selector
-	}
-	parts := strings.SplitN(strings.TrimPrefix(target.selector, "//"), "#", 2)
-	if len(parts) != 2 {
-		return target.selector
-	}
-	selectorParts := strings.SplitN(prefix, "#", 2)
-	pathPrefix := selectorParts[0]
-	canonicalPath := parts[0]
-	if target.kind != attego.PackageTestKind && !strings.HasSuffix(canonicalPath, "/"+attehcl.Filename) && canonicalPath != attehcl.Filename {
-		canonicalPath += "/" + attehcl.Filename
-	}
-	resolvedPrefix := resolveSelectorPath(pathPrefix, relative)
-	completionPath := canonicalPath
-	if rel, ok := selector.RelativePath(canonicalPath, resolvedPrefix); ok {
-		completionPath = rel
-	}
-	if completionPath == "" {
-		return pathPrefix + "#" + parts[1]
-	}
-	if pathPrefix != "" && strings.HasSuffix(pathPrefix, "/") {
-		return pathPrefix + completionPath + "#" + parts[1]
-	}
-	if strings.HasPrefix(pathPrefix, "../") {
-		return pathPrefix + strings.TrimPrefix(completionPath, strings.TrimPrefix(pathPrefix, "../")) + "#" + parts[1]
-	}
-	return pathPrefix + completionPath + "#" + parts[1]
-}
-
-func runTargetCompletionAliases(target runTarget, relative string) []string {
-	kindAlias, blockName := runTargetAliases(target)
-	_, canonicalDir := runTargetPaths(target)
-	if canonicalDir == relative {
-		if target.kind == attego.PackageTestKind && relative != "" {
-			blockName = strings.TrimPrefix(blockName, kindAlias+".")
-		}
-		aliases := []string{blockName}
-		if target.kind == attego.PackageTestKind {
-			aliases = append(aliases, fmt.Sprintf("%s.%d", kindAlias, target.index), kindAlias)
-		}
-		return aliases
-	}
-	if relative == "" {
-		return nil
-	}
-	dir, ok := selector.RelativePath(canonicalDir, relative)
-	if !ok || dir == "" {
-		return nil
-	}
-	if target.kind != attego.PackageTestKind {
-		blockName = strings.TrimPrefix(blockName, kindAlias+".")
-		return []string{dir + "#" + blockName}
-	}
-	return []string{dir + "#" + blockName, dir + "#" + fmt.Sprintf("%s.%d", kindAlias, target.index), dir + "#" + kindAlias}
-}
-
-func matchesRunTargetCompletion(prefix string, target runTarget, relative string) bool {
-	for _, alias := range runTargetCompletionAliases(target, relative) {
-		if strings.HasPrefix(alias, prefix) {
-			return true
-		}
-	}
-	if strings.Contains(prefix, "#") && relative != "" {
-		parts := strings.SplitN(prefix, "#", 2)
-		prefix = "//" + resolveSelectorPath(strings.TrimPrefix(parts[0], "//"), relative) + "#" + parts[1]
-	}
-	if strings.HasPrefix(target.selector, prefix) && (relative == "" || selector.PathIsWithin(strings.TrimPrefix(target.selector, "//"), relative) || strings.HasPrefix(prefix, "//")) {
-		return true
-	}
-	if strings.Contains(prefix, "#") && matchesRunTargetAt(prefix, target, relative) {
-		return true
-	}
-	if strings.Contains(prefix, "#") {
-		return false
-	}
-	if relative != "" && !strings.Contains(prefix, "/") && !strings.HasPrefix(prefix, "..") && !strings.Contains(prefix, "#") {
-		return false
-	}
-
-	pathPart := strings.TrimPrefix(prefix, "//")
-	if pathPart == "" {
-		if relative == "" {
-			return true
-		}
-		_, canonicalDir := runTargetPaths(target)
-		return selector.PathIsWithin(canonicalDir, relative)
-	}
-	resolved := resolveSelectorPath(pathPart, relative)
-	canonicalPath, canonicalDir := runTargetPaths(target)
-	if resolved == "" {
-		return selector.IsImmediateChild(canonicalPath, resolved)
-	}
-	return selector.PathHasSegmentPrefix(canonicalPath, resolved) || selector.PathHasSegmentPrefix(canonicalDir, resolved)
 }
 
 func buildCompleteGraph(repo *attegit.Repo) (*graph.Graph, error) {
@@ -500,14 +401,6 @@ func runTargetPaths(target runTarget) (string, string) {
 	canonicalPath := strings.TrimPrefix(target.selector, "//")
 	canonicalPath = strings.SplitN(canonicalPath, "#", 2)[0]
 	return canonicalPath, selector.ContainingDir(canonicalPath)
-}
-
-func resolveSelectorPath(pathPart, relative string) string {
-	resolved, err := selector.ResolvePath(pathPart, relative)
-	if err != nil {
-		return ""
-	}
-	return resolved
 }
 
 func (target runTarget) selectorTarget() selector.Target {

@@ -4,14 +4,19 @@ package selector
 import (
 	"fmt"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/ghthor/atte/reference"
 )
 
-// hclFilename is the canonical filename for HCL target declarations. It must
+// HclFilename is the canonical filename for HCL target declarations. It must
 // stay in sync with attehcl.Filename; the selector package cannot import
 // attehcl without creating an import cycle (attehcl imports selector).
-const hclFilename = "atte.hcl"
+const HclFilename = "atte.hcl"
+
+const Seperator = "#"
 
 // Target describes the selector-facing identity of a runnable target.
 // Selector is the formal repository selector syntax: <path>#<identifier>.
@@ -27,7 +32,7 @@ type Selector struct {
 // Identifier syntax is intentionally opaque to this package.
 func Parse(raw string) (Selector, error) {
 	value := strings.TrimPrefix(raw, "//")
-	parts := strings.SplitN(value, "#", 2)
+	parts := strings.SplitN(value, Seperator, 2)
 	if len(parts) != 2 || parts[1] == "" {
 		return Selector{}, fmt.Errorf("invalid selector %q: expected <path>#<identifier>", raw)
 	}
@@ -36,6 +41,29 @@ func Parse(raw string) (Selector, error) {
 		return Selector{}, err
 	}
 	return Selector{Path: clean, Identifier: parts[1]}, nil
+}
+
+func (s Selector) Tree() reference.Tree {
+	if s.HCL() {
+		t := reference.Tree(filepath.Dir(s.Path))
+		if t == "." {
+			return reference.Root
+		}
+		return t
+	}
+	return reference.Tree(s.Path)
+}
+
+func (s Selector) HCL() bool {
+	return filepath.Base(s.Path) == HclFilename
+}
+
+func (s Selector) RelTo(tree reference.Tree) reference.SomePath {
+	rel, err := filepath.Rel(s.Path, string(tree))
+	if err != nil {
+		panic(fmt.Errorf("s=%v tree=%v", s, tree))
+	}
+	return reference.SomePath(rel)
 }
 
 // Resolve resolves a selector path against a repository-relative directory.
@@ -92,13 +120,13 @@ func PathMatches(inputPath, relative, candidatePath, candidateDir string) bool {
 // ContainingDir returns the directory containing an HCL target file, or
 // candidatePath unchanged if it does not name an HCL file.
 func ContainingDir(candidatePath string) string {
-	if candidatePath == hclFilename {
+	if candidatePath == HclFilename {
 		return ""
 	}
-	if !strings.HasSuffix(candidatePath, "/"+hclFilename) {
+	if !strings.HasSuffix(candidatePath, "/"+HclFilename) {
 		return candidatePath
 	}
-	return strings.TrimSuffix(candidatePath, "/"+hclFilename)
+	return strings.TrimSuffix(candidatePath, "/"+HclFilename)
 }
 
 // PathIsWithin reports whether candidate is dir itself or a descendant of dir,
@@ -179,6 +207,12 @@ func IsImmediateChild(candidate, dir string) bool {
 
 // String returns the canonical repository-root-qualified selector.
 func (s Selector) String() string { return "//" + s.Path + "#" + s.Identifier }
+
+// StringShort removed the /atte.hcl filename portion from a Canonical selector path
+func (s Selector) StringShort() string {
+	s.Path = string(s.Tree())
+	return s.String()
+}
 
 func normalizePath(raw string) (string, error) {
 	clean := path.Clean(strings.ReplaceAll(raw, "\\", "/"))
