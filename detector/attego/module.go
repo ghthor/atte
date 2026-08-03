@@ -151,8 +151,8 @@ func Targets(repo *attegit.Repo) ([]Target, error) {
 }
 
 // Graph builds the dependency graph of Go packages and package tests found in
-// repo, related by ImportsRelation. Package entities are not related to the
-// repository's filesystem tree; use GraphWithContainment for that.
+// repo, related by ImportsRelation. Pass detector.WithAttachToTree to relate
+// package entities to the repository's filesystem tree and source files.
 func Graph(repo *attegit.Repo, options ...detector.GraphOption) (*graph.Graph, error) {
 	config := detector.GraphOptions{}
 	for _, option := range options {
@@ -160,10 +160,10 @@ func Graph(repo *attegit.Repo, options ...detector.GraphOption) (*graph.Graph, e
 			option(&config)
 		}
 	}
-	return graphFor(repo, config.AttachToTree)
+	return graphFor(repo, config)
 }
 
-func graphFor(repo *attegit.Repo, attachToTree bool) (*graph.Graph, error) {
+func graphFor(repo *attegit.Repo, options detector.GraphOptions) (*graph.Graph, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("nil repository")
 	}
@@ -220,7 +220,7 @@ func graphFor(repo *attegit.Repo, attachToTree bool) (*graph.Graph, error) {
 		pid := EntityID(PackageKind, p.module.dir, p.importPath)
 		entities[pid] = graph.Entity{ID: pid, Kind: PackageKind}
 		var treeID graph.EntityID
-		if attachToTree {
+		if options.AttachToTree {
 			tree, err := reference.ParseTree(p.dir)
 			if err != nil {
 				return nil, err
@@ -244,7 +244,7 @@ func graphFor(repo *attegit.Repo, attachToTree bool) (*graph.Graph, error) {
 		tid := EntityID(PackageTestKind, p.module.dir, p.importPath)
 		if p.hasTests {
 			entities[tid] = graph.Entity{ID: tid, Kind: PackageTestKind}
-			if attachToTree {
+			if options.AttachToTree {
 				relations[graph.Relationship{From: treeID, To: tid, Kind: attegit.ContainsRelation}] = struct{}{}
 				relations[graph.Relationship{From: tid, To: pid, Kind: attegit.ContainsRelation}] = struct{}{}
 				for _, file := range p.testFiles {
