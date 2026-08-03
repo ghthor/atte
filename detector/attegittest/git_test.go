@@ -6,12 +6,13 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
 )
 
 func TestNewGitRepoCreatesUsableRepo(t *testing.T) {
 	git := NewGitRepo(t)
-	must.NotEq(t, "", git.Dir())
+	test.NotEq(t, "", git.Dir())
 	git.RunGitScript(t, "git rev-parse --is-inside-work-tree")
 }
 
@@ -21,7 +22,7 @@ func TestWriteFileCreatesNestedDirectories(t *testing.T) {
 
 	got, err := os.ReadFile(filepath.Join(git.Dir(), "nested", "deeper", "file.txt"))
 	must.NoError(t, err)
-	must.EqOp(t, "contents", string(got))
+	test.EqOp(t, "contents", string(got))
 }
 
 func TestWriteFileOverwritesExistingFile(t *testing.T) {
@@ -31,7 +32,7 @@ func TestWriteFileOverwritesExistingFile(t *testing.T) {
 
 	got, err := os.ReadFile(filepath.Join(git.Dir(), "file.txt"))
 	must.NoError(t, err)
-	must.EqOp(t, "second", string(got))
+	test.EqOp(t, "second", string(got))
 }
 
 func TestWriteFilesCreatesAllFiles(t *testing.T) {
@@ -43,10 +44,10 @@ func TestWriteFilesCreatesAllFiles(t *testing.T) {
 
 	root, err := os.ReadFile(filepath.Join(git.Dir(), "root.txt"))
 	must.NoError(t, err)
-	must.EqOp(t, "root\n", string(root))
+	test.EqOp(t, "root\n", string(root))
 	child, err := os.ReadFile(filepath.Join(git.Dir(), "nested", "child.txt"))
 	must.NoError(t, err)
-	must.EqOp(t, "child\n", string(child))
+	test.EqOp(t, "child\n", string(child))
 }
 
 func TestWriteFilesOptions(t *testing.T) {
@@ -58,15 +59,15 @@ func TestWriteFilesOptions(t *testing.T) {
 
 	got, err := os.ReadFile(filepath.Join(git.Dir(), "default.txt"))
 	must.NoError(t, err)
-	must.EqOp(t, "  default  ", string(got))
+	test.EqOp(t, "  default  ", string(got))
 	got, err = os.ReadFile(filepath.Join(git.Dir(), "raw.txt"))
 	must.NoError(t, err)
-	must.EqOp(t, "  raw  ", string(got))
+	test.EqOp(t, "  raw  ", string(got))
 
 	git.WriteFiles(t, map[string]string{"normalized.txt": "  normalized  "})
 	got, err = os.ReadFile(filepath.Join(git.Dir(), "normalized.txt"))
 	must.NoError(t, err)
-	must.EqOp(t, "normalized\n", string(got))
+	test.EqOp(t, "normalized\n", string(got))
 }
 
 func TestRunGitScriptCanLeaveFilesStaged(t *testing.T) {
@@ -76,7 +77,7 @@ func TestRunGitScriptCanLeaveFilesStaged(t *testing.T) {
 
 	cmd := "git diff --cached --name-only"
 	got := runGitOutput(t, git.Dir(), cmd)
-	must.EqOp(t, "staged.txt\n", got)
+	test.EqOp(t, "staged.txt\n", got)
 }
 
 func TestRunGitScriptRunsFromRepoRoot(t *testing.T) {

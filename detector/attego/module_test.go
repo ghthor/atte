@@ -9,6 +9,7 @@ import (
 	"github.com/ghthor/atte/graph"
 	"github.com/ghthor/atte/graph/graphtest"
 	"github.com/ghthor/atte/reference"
+	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
 )
 
@@ -84,21 +85,21 @@ func TestEntityIDRoundTrip(t *testing.T) {
 			id := EntityID(PackageKind, c.moduleDir, c.importPath)
 			kind, moduleDir, importPath, err := DecodeEntityID(id)
 			must.NoError(t, err)
-			must.EqOp(t, PackageKind, kind)
-			must.EqOp(t, c.moduleDir, moduleDir)
-			must.EqOp(t, c.importPath, importPath)
+			test.EqOp(t, PackageKind, kind)
+			test.EqOp(t, c.moduleDir, moduleDir)
+			test.EqOp(t, c.importPath, importPath)
 		})
 	}
 }
 
 func TestEntityIDContainsGoModPath(t *testing.T) {
-	must.EqOp(t, graph.EntityID("attego:package:go.mod:ZXhhbXBsZS5jb20vcm9vdC9w"), EntityID(PackageKind, "", "example.com/root/p"))
-	must.EqOp(t, graph.EntityID("attego:package:sub/go.mod:ZXhhbXBsZS5jb20vcm9vdC9w"), EntityID(PackageKind, "sub", "example.com/root/p"))
+	test.EqOp(t, graph.EntityID("attego:package:go.mod:ZXhhbXBsZS5jb20vcm9vdC9w"), EntityID(PackageKind, "", "example.com/root/p"))
+	test.EqOp(t, graph.EntityID("attego:package:sub/go.mod:ZXhhbXBsZS5jb20vcm9vdC9w"), EntityID(PackageKind, "sub", "example.com/root/p"))
 }
 
 func TestDecodeEntityIDRejectsMalformed(t *testing.T) {
 	_, _, _, err := DecodeEntityID(graph.EntityID("attego:package:not-a-gomod-path:ZXhhbXBsZS5jb20vcm9vdC9w"))
-	must.Error(t, err)
+	test.Error(t, err)
 }
 
 func openTestRepo(t *testing.T, dir string) *attegit.Repo {
@@ -130,27 +131,27 @@ func TestGraphMatchesGoList(t *testing.T) {
 func TestGraphPackagesAndTests(t *testing.T) {
 	repo := newBasicFixture(t)
 	g := openTestGraphWithContainment(t, repo)
-	var normal, test graph.EntityID
+	var normal, testPackage graph.EntityID
 	for _, id := range g.EntityKeys {
 		if g.Entities[id].Kind == PackageKind && string(id) != "" {
 			normal = id
 		}
 		if g.Entities[id].Kind == PackageTestKind {
-			test = id
+			testPackage = id
 		}
 	}
-	must.NotEq(t, graph.EntityID(""), normal, must.Sprintf("missing normal node: %#v", g.EntityKeys))
-	must.NotEq(t, graph.EntityID(""), test, must.Sprintf("missing test node: %#v", g.EntityKeys))
+	test.NotEq(t, graph.EntityID(""), normal, test.Sprintf("missing normal node: %#v", g.EntityKeys))
+	test.NotEq(t, graph.EntityID(""), testPackage, test.Sprintf("missing test node: %#v", g.EntityKeys))
 	packageID := EntityID(PackageKind, "", "example.com/root/p")
 	normalFile := attegit.EntityID(testPath("p/p.go"))
 	testFile := attegit.EntityID(testPath("p/p_test.go"))
-	graphtest.MustHaveRelation(t, g, test, packageID, attegit.ContainsRelation)
+	graphtest.MustHaveRelation(t, g, testPackage, packageID, attegit.ContainsRelation)
 	graphtest.MustHaveRelation(t, g, normal, normalFile, SourceFileRelation)
 	graphtest.MustNotHaveRelation(t, g, normal, testFile, SourceFileRelation)
-	graphtest.MustHaveRelation(t, g, test, testFile, SourceFileRelation)
-	graphtest.MustNotHaveRelation(t, g, test, normalFile, SourceFileRelation)
+	graphtest.MustHaveRelation(t, g, testPackage, testFile, SourceFileRelation)
+	graphtest.MustNotHaveRelation(t, g, testPackage, normalFile, SourceFileRelation)
 	treeID := attegit.EntityID(testPath("p"))
 	graphtest.MustHaveRelation(t, g, treeID, normal, attegit.ContainsRelation)
-	graphtest.MustHaveRelation(t, g, treeID, test, attegit.ContainsRelation)
+	graphtest.MustHaveRelation(t, g, treeID, testPackage, attegit.ContainsRelation)
 	graphtest.MustNotHaveRelation(t, g, normal, treeID, attegit.ContainsRelation)
 }

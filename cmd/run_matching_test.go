@@ -6,7 +6,7 @@ import (
 
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/attehcl"
-	"github.com/shoenig/test/must"
+	"github.com/shoenig/test"
 	"github.com/spf13/cobra"
 )
 
@@ -20,7 +20,7 @@ func TestMatchesRunTarget(t *testing.T) {
 	}
 	match := func(selector string, want bool) {
 		t.Helper()
-		must.EqOp(t, want, matchesRunTargetAt(selector, target, ""))
+		test.EqOp(t, want, matchesRunTargetAt(selector, target, ""))
 	}
 
 	match("//atte.hcl#test.go", true)
@@ -46,12 +46,12 @@ func TestMatchesRunTargetAt(t *testing.T) {
 	}
 	match := func(selector, relative string, want bool) {
 		t.Helper()
-		must.EqOp(t, want, matchesRunTargetAt(selector, target, relative))
+		test.EqOp(t, want, matchesRunTargetAt(selector, target, relative))
 	}
 
 	match("atte.hcl#test.go", "detector", true)
 	goTarget := runTarget{selector: "//detector/attego#go_test", kind: attego.PackageTestKind, path: "detector/attego", name: "go_test"}
-	must.True(t, matchesRunTargetAt("attego#go_test", goTarget, "detector"), must.Sprint("relative package selector should match from the current directory"))
+	test.True(t, matchesRunTargetAt("attego#go_test", goTarget, "detector"), test.Sprintf("relative package selector should match from the current directory"))
 	match("../atte.hcl#test.go", "detector", false)
 	match("..#test.go", "cmd", false)
 	match("detector/atte.hcl#test.go", "", true)
@@ -63,8 +63,8 @@ func TestMatchesRunTargetAt(t *testing.T) {
 func TestRunTargetPaths(t *testing.T) {
 	target := runTarget{selector: "//detector/atte.hcl#test.go"}
 	canonicalPath, canonicalDir := runTargetPaths(target)
-	must.EqOp(t, "detector/atte.hcl", canonicalPath)
-	must.EqOp(t, "detector", canonicalDir)
+	test.EqOp(t, "detector/atte.hcl", canonicalPath)
+	test.EqOp(t, "detector", canonicalDir)
 }
 
 func TestRunCmdValidArgs(t *testing.T) {
@@ -77,10 +77,10 @@ func TestRunCmdValidArgs(t *testing.T) {
 	complete := func(relative, prefix string, want []string) {
 		t.Helper()
 		matches, directive := runCmdValidArgsFromTargets(nil, prefix, "/repo", filepath.Join("/repo", relative), targets)
-		must.SliceEqOp(t, want, matches)
-		must.EqOp(t, cobra.ShellCompDirectiveNoFileComp, directive)
+		test.SliceEqOp(t, want, matches)
+		test.EqOp(t, cobra.ShellCompDirectiveNoFileComp, directive)
 		for _, want := range want {
-			must.StrHasPrefix(t, prefix, want, must.Sprint("completions must prefix match with the completion request or the shell will ignore them"))
+			test.StrHasPrefix(t, prefix, want, test.Sprintf("completions must prefix match with the completion request or the shell will ignore them"))
 		}
 	}
 
@@ -95,8 +95,8 @@ func TestRunCmdValidArgs(t *testing.T) {
 	complete("", "//detector/", []string{"//detector/atte.hcl#test.py", "//detector/attego#go_test"})
 
 	matches, directive := runCmdValidArgsFromTargets([]string{"existing"}, "", "/repo", "/repo", targets)
-	must.Nil(t, matches)
-	must.EqOp(t, cobra.ShellCompDirectiveNoFileComp, directive)
+	test.Nil(t, matches)
+	test.EqOp(t, cobra.ShellCompDirectiveNoFileComp, directive)
 }
 
 func TestResolveRunTarget(t *testing.T) {
@@ -108,8 +108,8 @@ func TestResolveRunTarget(t *testing.T) {
 	resolve := func(selector, relative string, targetList []runTarget, want string) {
 		t.Helper()
 		resolved, err := resolveRunTargetAt(selector, targetList, relative)
-		must.NoError(t, err)
-		must.EqOp(t, want, resolved.selector)
+		test.NoError(t, err)
+		test.EqOp(t, want, resolved.selector)
 	}
 
 	resolve("test.go", "", targets, "//atte.hcl#test.go")
@@ -137,21 +137,21 @@ func TestResolveRunTarget(t *testing.T) {
 			{selector: "//reference/selector#go_test", kind: attego.PackageTestKind, path: "reference/selector", name: "go_test"},
 		}
 		resolved, err := resolveRunTargetAt("go_test", localTargets, "reference")
-		must.NoError(t, err)
-		must.EqOp(t, "//reference#go_test", resolved.selector)
+		test.NoError(t, err)
+		test.EqOp(t, "//reference#go_test", resolved.selector)
 	})
 
 	t.Run("ambiguity", func(t *testing.T) {
 		_, err := resolveRunTargetAt("test", targets, "")
-		must.Error(t, err)
-		must.StrContains(t, err.Error(), "ambiguous")
-		must.StrContains(t, err.Error(), "atte run //atte.hcl#test.go")
-		must.StrContains(t, err.Error(), "atte run //atte.hcl#test.py")
-		must.StrContains(t, err.Error(), "atte run //atte.hcl#test.2")
+		test.Error(t, err)
+		test.StrContains(t, err.Error(), "ambiguous")
+		test.StrContains(t, err.Error(), "atte run //atte.hcl#test.go")
+		test.StrContains(t, err.Error(), "atte run //atte.hcl#test.py")
+		test.StrContains(t, err.Error(), "atte run //atte.hcl#test.2")
 	})
 	t.Run("missing target", func(t *testing.T) {
 		_, err := resolveRunTargetAt("missing", targets, "")
-		must.Error(t, err)
-		must.StrContains(t, err.Error(), "not found")
+		test.Error(t, err)
+		test.StrContains(t, err.Error(), "not found")
 	})
 }

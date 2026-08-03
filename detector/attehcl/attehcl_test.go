@@ -11,6 +11,7 @@ import (
 	"github.com/ghthor/atte/graph"
 	"github.com/ghthor/atte/graph/graphtest"
 	"github.com/ghthor/atte/reference"
+	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
 )
 
@@ -50,8 +51,8 @@ test "unit" {
 
 	first := EntityID(TestKind, "atte.hcl", "0")
 	unit := EntityID(TestKind, "atte.hcl", "unit")
-	must.EqOp(t, TestKind, got.Entities[first].Kind)
-	must.EqOp(t, TestKind, got.Entities[unit].Kind)
+	test.EqOp(t, TestKind, got.Entities[first].Kind)
+	test.EqOp(t, TestKind, got.Entities[unit].Kind)
 	graphtest.MustHaveRelation(t, got, first, attegit.EntityID(testPath("atte.hcl")), SourceFileRelation)
 	graphtest.MustHaveRelation(t, got, first, attegit.EntityID(testPath("first.sh")), ScriptRelation)
 	graphtest.MustHaveRelation(t, got, first, attegit.EntityID(testPath("config.yaml")), DependsOnRelation)
@@ -97,25 +98,25 @@ lint "vet" {
 	got, err := Graph(repo, detector.WithAttachToTree(), WithFunctions(attegit.PathHCLFunctions))
 	must.NoError(t, err)
 
-	test := EntityID(TestKind, "atte.hcl", "0")
+	testTarget := EntityID(TestKind, "atte.hcl", "0")
 	testUnit := EntityID(TestKind, "atte.hcl", "unit")
 	codegen := EntityID(CodegenKind, "atte.hcl", "0")
 	codegenProto := EntityID(CodegenKind, "atte.hcl", "proto")
 	lint := EntityID(LintKind, "atte.hcl", "0")
 	lintVet := EntityID(LintKind, "atte.hcl", "vet")
 
-	must.EqOp(t, TestKind, got.Entities[test].Kind)
-	must.EqOp(t, TestKind, got.Entities[testUnit].Kind)
-	must.EqOp(t, CodegenKind, got.Entities[codegen].Kind)
-	must.EqOp(t, CodegenKind, got.Entities[codegenProto].Kind)
-	must.EqOp(t, LintKind, got.Entities[lint].Kind)
-	must.EqOp(t, LintKind, got.Entities[lintVet].Kind)
+	test.EqOp(t, TestKind, got.Entities[testTarget].Kind)
+	test.EqOp(t, TestKind, got.Entities[testUnit].Kind)
+	test.EqOp(t, CodegenKind, got.Entities[codegen].Kind)
+	test.EqOp(t, CodegenKind, got.Entities[codegenProto].Kind)
+	test.EqOp(t, LintKind, got.Entities[lint].Kind)
+	test.EqOp(t, LintKind, got.Entities[lintVet].Kind)
 
-	for _, id := range []graph.EntityID{test, testUnit, codegen, codegenProto, lint, lintVet} {
+	for _, id := range []graph.EntityID{testTarget, testUnit, codegen, codegenProto, lint, lintVet} {
 		graphtest.MustHaveRelation(t, got, id, attegit.EntityID(testPath("atte.hcl")), SourceFileRelation)
 		graphtest.MustHaveRelation(t, got, attegit.EntityID(reference.Root), id, attegit.ContainsRelation)
 	}
-	graphtest.MustHaveRelation(t, got, test, attegit.EntityID(testPath("test.sh")), ScriptRelation)
+	graphtest.MustHaveRelation(t, got, testTarget, attegit.EntityID(testPath("test.sh")), ScriptRelation)
 	graphtest.MustHaveRelation(t, got, codegen, attegit.EntityID(testPath("codegen.sh")), ScriptRelation)
 	graphtest.MustHaveRelation(t, got, lint, attegit.EntityID(testPath("lint.sh")), ScriptRelation)
 }
@@ -152,7 +153,7 @@ test "go" {
 
 	testID := EntityID(TestKind, "atte.hcl", "go")
 	packageTestID := attego.EntityID(attego.PackageTestKind, "", "example.com/root/p")
-	must.EqOp(t, attego.PackageTestKind, got.Entities[packageTestID].Kind)
+	test.EqOp(t, attego.PackageTestKind, got.Entities[packageTestID].Kind)
 	graphtest.MustHaveRelation(t, got, testID, packageTestID, DependsOnRelation)
 }
 
@@ -185,7 +186,7 @@ func TestGraphRejectsInvalidConfiguration(t *testing.T) {
 				"nested/atte.hcl": tt.file,
 			})
 			_, err := Graph(repo)
-			must.Error(t, err)
+			test.Error(t, err)
 		})
 	}
 }
@@ -225,9 +226,9 @@ test "override" {
 	})
 	targets, err := Targets(repo, attegit.PathHCLFunctions)
 	must.NoError(t, err)
-	must.EqOp(t, 2, len(targets))
-	must.EqOp(t, reference.Blob("detector/detector.sh"), targets[0].Script)
-	must.EqOp(t, reference.Blob("detector/attego/override.sh"), targets[1].Script)
+	test.EqOp(t, 2, len(targets))
+	test.EqOp(t, reference.Blob("detector/detector.sh"), targets[0].Script)
+	test.EqOp(t, reference.Blob("detector/attego/override.sh"), targets[1].Script)
 }
 
 func TestGlobalsCannotDependOnLocals(t *testing.T) {
@@ -247,10 +248,10 @@ test { script = global.inherited_script }
 	})
 
 	_, err := Targets(repo, nil)
-	must.Error(t, err)
+	test.Error(t, err)
 
 	_, err = Graph(repo)
-	must.Error(t, err)
+	test.Error(t, err)
 }
 
 func TestGlobalInheritanceAcrossDirectories(t *testing.T) {
@@ -271,24 +272,24 @@ func TestGlobalInheritanceAcrossDirectories(t *testing.T) {
 
 	root, err := ConfigFor(repo, "", attegit.PathHCLFunctions)
 	must.NoError(t, err)
-	must.EqOp(t, "root", root.Global["base"].AsString())
+	test.EqOp(t, "root", root.Global["base"].AsString())
 
 	child, err := ConfigFor(repo, "child", attegit.PathHCLFunctions)
 	must.NoError(t, err)
-	must.EqOp(t, "root", child.Global["base"].AsString())
-	must.EqOp(t, "root-child", child.Global["child"].AsString())
+	test.EqOp(t, "root", child.Global["base"].AsString())
+	test.EqOp(t, "root-child", child.Global["child"].AsString())
 
 	inherited, err := ConfigFor(repo, "child/no-atte", attegit.PathHCLFunctions)
 	must.NoError(t, err)
-	must.EqOp(t, "root-child", inherited.Global["child"].AsString())
+	test.EqOp(t, "root-child", inherited.Global["child"].AsString())
 
 	deep, err := ConfigFor(repo, "child/deeper", attegit.PathHCLFunctions)
 	must.NoError(t, err)
-	must.EqOp(t, "root-child-deep", deep.Global["deep"].AsString())
+	test.EqOp(t, "root-child-deep", deep.Global["deep"].AsString())
 
 	targets, err := Targets(repo, attegit.PathHCLFunctions)
 	must.NoError(t, err)
-	must.Len(t, 1, targets)
+	test.Len(t, 1, targets)
 	_, err = Graph(repo, WithFunctions(attegit.PathHCLFunctions))
 	must.NoError(t, err)
 }
@@ -307,11 +308,11 @@ test { script = path("./root.sh") }
 	})
 
 	_, err := Targets(repo, nil)
-	must.Error(t, err)
-	must.ErrorContains(t, err, "global")
+	test.Error(t, err)
+	test.ErrorContains(t, err, "global")
 
 	_, err = Graph(repo)
-	must.Error(t, err)
+	test.Error(t, err)
 }
 
 func TestLocalDoesNotPropagate(t *testing.T) {
@@ -325,7 +326,7 @@ test { script = local.script }
 		"root.sh": "#!/bin/sh\n",
 	})
 	_, err := Targets(repo, nil)
-	must.Error(t, err)
+	test.Error(t, err)
 }
 
 func TestLocalExpressionsAcrossBlockKindsAndGraphConsistency(t *testing.T) {
@@ -358,16 +359,16 @@ func TestLocalExpressionsAcrossBlockKindsAndGraphConsistency(t *testing.T) {
 	})
 	targets, err := Targets(repo, attegit.PathHCLFunctions)
 	must.NoError(t, err)
-	must.Len(t, 3, targets)
+	test.Len(t, 3, targets)
 	graphWithoutContainment, err := Graph(repo, WithFunctions(attegit.PathHCLFunctions))
 	must.NoError(t, err)
 	graphWithContainment, err := Graph(repo, detector.WithAttachToTree(), WithFunctions(attegit.PathHCLFunctions))
 	must.NoError(t, err)
 	for _, target := range targets {
 		_, inGraph := graphWithoutContainment.Entities[target.ID]
-		must.True(t, inGraph, must.Sprint("target should be present in graph"))
+		test.True(t, inGraph, test.Sprintf("target should be present in graph"))
 		_, inContainedGraph := graphWithContainment.Entities[target.ID]
-		must.True(t, inContainedGraph, must.Sprint("target should be present in containment graph"))
+		test.True(t, inContainedGraph, test.Sprintf("target should be present in containment graph"))
 	}
 }
 
@@ -394,7 +395,7 @@ func TestRepeatedDeclarationsAndDuplicateDeclarationErrors(t *testing.T) {
 		"one.sh": "#!/bin/sh\n",
 	})
 	_, err = Targets(duplicate, nil)
-	must.Error(t, err)
+	test.Error(t, err)
 }
 
 func TestTargetScriptsFromInheritedGlobals(t *testing.T) {
@@ -432,22 +433,22 @@ test "overridden" { script = path("./deep.sh") }
 	})
 	targets, err := Targets(repo, attegit.PathHCLFunctions)
 	must.NoError(t, err)
-	must.EqOp(t, 3, len(targets))
-	must.EqOp(t, reference.Blob("root.sh"), targets[0].Script)
-	must.EqOp(t, reference.Blob("child/child.sh"), targets[1].Script)
-	must.EqOp(t, reference.Blob("child/deeper/deep.sh"), targets[2].Script)
+	test.EqOp(t, 3, len(targets))
+	test.EqOp(t, reference.Blob("root.sh"), targets[0].Script)
+	test.EqOp(t, reference.Blob("child/child.sh"), targets[1].Script)
+	test.EqOp(t, reference.Blob("child/deeper/deep.sh"), targets[2].Script)
 	root, err := ConfigFor(repo, "", attegit.PathHCLFunctions)
 	must.NoError(t, err)
-	must.EqOp(t, "root", root.Global["version"].AsString())
-	must.EqOp(t, reference.Blob("root.sh"), *root.Global["shared_path"].EncapsulatedValue().(*reference.Blob))
+	test.EqOp(t, "root", root.Global["version"].AsString())
+	test.EqOp(t, reference.Blob("root.sh"), *root.Global["shared_path"].EncapsulatedValue().(*reference.Blob))
 	child, err := ConfigFor(repo, "child", attegit.PathHCLFunctions)
 	must.NoError(t, err)
-	must.EqOp(t, "child", child.Global["version"].AsString())
-	must.EqOp(t, reference.Blob("child/child.sh"), *child.Global["shared_path"].EncapsulatedValue().(*reference.Blob))
+	test.EqOp(t, "child", child.Global["version"].AsString())
+	test.EqOp(t, reference.Blob("child/child.sh"), *child.Global["shared_path"].EncapsulatedValue().(*reference.Blob))
 	deep, err := ConfigFor(repo, "child/deeper", attegit.PathHCLFunctions)
 	must.NoError(t, err)
-	must.EqOp(t, "deep", deep.Global["version"].AsString())
-	must.EqOp(t, reference.Blob("child/deeper/deep.sh"), *deep.Global["shared_path"].EncapsulatedValue().(*reference.Blob))
+	test.EqOp(t, "deep", deep.Global["version"].AsString())
+	test.EqOp(t, reference.Blob("child/deeper/deep.sh"), *deep.Global["shared_path"].EncapsulatedValue().(*reference.Blob))
 }
 
 func TestEntityIDRoundTrip(t *testing.T) {
@@ -456,9 +457,9 @@ func TestEntityIDRoundTrip(t *testing.T) {
 			id := EntityID(kind, "nested/atte.hcl", "unit")
 			gotKind, file, name, err := DecodeEntityID(id)
 			must.NoError(t, err)
-			must.EqOp(t, kind, gotKind)
-			must.EqOp(t, reference.Blob("nested/atte.hcl"), file)
-			must.EqOp(t, "unit", name)
+			test.EqOp(t, kind, gotKind)
+			test.EqOp(t, reference.Blob("nested/atte.hcl"), file)
+			test.EqOp(t, "unit", name)
 		})
 	}
 }

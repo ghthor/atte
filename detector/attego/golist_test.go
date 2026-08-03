@@ -17,6 +17,7 @@ import (
 	"github.com/ghthor/atte/graph"
 	"github.com/ghthor/atte/reference"
 	"github.com/goccy/go-graphviz"
+	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
 )
 
@@ -197,8 +198,8 @@ func snapshotGraph(g *graph.Graph) graphSnapshot {
 func assertGraphsEqual(t *testing.T, want, got *graph.Graph) {
 	t.Helper()
 	wantSnapshot, gotSnapshot := snapshotGraph(want), snapshotGraph(got)
-	must.SliceEqOp(t, wantSnapshot.Entities, gotSnapshot.Entities)
-	must.SliceEqOp(t, wantSnapshot.Relations, gotSnapshot.Relations)
+	test.SliceEqOp(t, wantSnapshot.Entities, gotSnapshot.Entities)
+	test.SliceEqOp(t, wantSnapshot.Relations, gotSnapshot.Relations)
 }
 
 func graphvizSnapshot(t *testing.T, g *graph.Graph) string {
@@ -261,10 +262,10 @@ func TestGraphvizSnapshot(t *testing.T) {
 	}
 	fixture, err := os.ReadFile(fixturePath)
 	must.NoError(t, err)
-	must.EqOp(t, string(fixture), want)
+	test.EqOp(t, string(fixture), want)
 	boxartFixture, err := os.ReadFile(boxartPath)
 	must.NoError(t, err)
-	must.EqOp(t, string(boxartFixture), graphEasyBoxart(t, want))
+	test.EqOp(t, string(boxartFixture), graphEasyBoxart(t, want))
 }
 
 // defaultLabelLine matches the Graphviz-emitted "node [label=\"\\N\"];" and

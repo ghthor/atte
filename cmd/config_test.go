@@ -10,6 +10,7 @@ import (
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/reference"
+	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
 )
 
@@ -47,16 +48,16 @@ test "child2" {
 		"child/child.sh": "#!/bin/sh\n",
 	})
 	config, err := attehcl.ConfigFor(repo, "child", attegit.PathHCLFunctions)
-	must.NoError(t, err)
-	must.EqOp(t, "1.27", config.Global["go_ver"].AsString())
-	must.EqOp(t, "child/child.sh", (*config.Global["script"].EncapsulatedValue().(*reference.Blob)).String())
-	must.Len(t, 2, config.Targets)
-	must.EqOp(t, "child", config.Targets[0].Name)
-	must.EqOp(t, "echo inline\n", config.Targets[0].Inline)
-	must.EqOp(t, reference.Blob(""), config.Targets[0].Script)
-	must.EqOp(t, "child2", config.Targets[1].Name)
-	must.EqOp(t, "", config.Targets[1].Inline)
-	must.EqOp(t, reference.Blob("child/child.sh"), config.Targets[1].Script)
+	test.NoError(t, err)
+	test.EqOp(t, "1.27", config.Global["go_ver"].AsString())
+	test.EqOp(t, "child/child.sh", (*config.Global["script"].EncapsulatedValue().(*reference.Blob)).String())
+	test.Len(t, 2, config.Targets)
+	test.EqOp(t, "child", config.Targets[0].Name)
+	test.EqOp(t, "echo inline\n", config.Targets[0].Inline)
+	test.EqOp(t, reference.Blob(""), config.Targets[0].Script)
+	test.EqOp(t, "child2", config.Targets[1].Name)
+	test.EqOp(t, "", config.Targets[1].Inline)
+	test.EqOp(t, reference.Blob("child/child.sh"), config.Targets[1].Script)
 	var got bytes.Buffer
 	must.NoError(t, writeConfig(&got, config, "hcl"))
 	assertConfigGolden(t, "global-inheritance", got.String())
@@ -73,10 +74,10 @@ globals {
 		"child/file.txt": "child\n",
 	})
 	config, err := attehcl.ConfigFor(repo, "child", attegit.PathHCLFunctions)
-	must.NoError(t, err)
-	must.EqOp(t, "1.26", config.Global["go_ver"].AsString())
-	must.EqOp(t, 0, len(config.Local))
-	must.EqOp(t, 0, len(config.Targets))
+	test.NoError(t, err)
+	test.EqOp(t, "1.26", config.Global["go_ver"].AsString())
+	test.EqOp(t, 0, len(config.Local))
+	test.EqOp(t, 0, len(config.Targets))
 
 }
 
@@ -90,6 +91,6 @@ func assertConfigGolden(t *testing.T, name, got string) {
 		return
 	}
 	want, err := os.ReadFile(goldenPath)
-	must.NoError(t, err)
-	must.EqOp(t, string(want), got)
+	test.NoError(t, err)
+	test.EqOp(t, string(want), got)
 }

@@ -4,91 +4,90 @@ import (
 	"testing"
 
 	"github.com/shoenig/test"
-	"github.com/shoenig/test/must"
 )
 
 func TestParseCanonicalSelector(t *testing.T) {
 	got, err := Parse("//pkg/atte.hcl#test.default")
-	must.NoError(t, err)
-	must.EqOp(t, "pkg/atte.hcl", got.Path)
-	must.EqOp(t, "test.default", got.Identifier)
-	must.EqOp(t, "//pkg/atte.hcl#test.default", got.String())
+	test.NoError(t, err)
+	test.EqOp(t, "pkg/atte.hcl", got.Path)
+	test.EqOp(t, "test.default", got.Identifier)
+	test.EqOp(t, "//pkg/atte.hcl#test.default", got.String())
 }
 
 func TestParseKeepsIdentifierOpaque(t *testing.T) {
 	got, err := Parse("//pkg#plugin.identifier.with.dots")
-	must.NoError(t, err)
-	must.EqOp(t, "plugin.identifier.with.dots", got.Identifier)
+	test.NoError(t, err)
+	test.EqOp(t, "plugin.identifier.with.dots", got.Identifier)
 }
 
 func TestResolveRelativePath(t *testing.T) {
 	got, err := Resolve("../atte.hcl#test.go", "detector/attego")
-	must.NoError(t, err)
-	must.EqOp(t, "detector/atte.hcl", got.Path)
+	test.NoError(t, err)
+	test.EqOp(t, "detector/atte.hcl", got.Path)
 }
 
 func TestResolveRejectsRepositoryEscape(t *testing.T) {
 	_, err := Resolve("../../../atte.hcl#test.go", "detector/attego")
-	must.ErrorContains(t, err, "escapes repository root")
+	test.ErrorContains(t, err, "escapes repository root")
 }
 
 func TestPathMatchesFileAndContainingDirectory(t *testing.T) {
-	must.True(t, PathMatches("detector/atte.hcl", "", "detector/atte.hcl", "detector"), must.Sprint("full HCL file path should match"))
-	must.True(t, PathMatches("detector", "", "detector/atte.hcl", "detector"), must.Sprint("HCL containing directory should match"))
-	must.True(t, PathMatches("../atte.hcl", "detector/attego", "detector/atte.hcl", "detector"), must.Sprint("relative HCL file path should resolve and match"))
-	must.False(t, PathMatches("../outside", "detector", "detector/atte.hcl", "detector"), must.Sprint("path outside the target should not match"))
+	test.True(t, PathMatches("detector/atte.hcl", "", "detector/atte.hcl", "detector"), test.Sprintf("full HCL file path should match"))
+	test.True(t, PathMatches("detector", "", "detector/atte.hcl", "detector"), test.Sprintf("HCL containing directory should match"))
+	test.True(t, PathMatches("../atte.hcl", "detector/attego", "detector/atte.hcl", "detector"), test.Sprintf("relative HCL file path should resolve and match"))
+	test.False(t, PathMatches("../outside", "detector", "detector/atte.hcl", "detector"), test.Sprintf("path outside the target should not match"))
 }
 
 func TestContainingDir(t *testing.T) {
-	must.EqOp(t, "", ContainingDir("atte.hcl"))
-	must.EqOp(t, "detector", ContainingDir("detector/atte.hcl"))
-	must.EqOp(t, "detector/attego", ContainingDir("detector/attego"), must.Sprint("a non-HCL path is returned unchanged"))
+	test.EqOp(t, "", ContainingDir("atte.hcl"))
+	test.EqOp(t, "detector", ContainingDir("detector/atte.hcl"))
+	test.EqOp(t, "detector/attego", ContainingDir("detector/attego"), test.Sprintf("a non-HCL path is returned unchanged"))
 }
 
 func TestPathIsWithin(t *testing.T) {
-	must.True(t, PathIsWithin("detector", "detector"), must.Sprint("a path is within itself"))
-	must.True(t, PathIsWithin("detector/attego", "detector"), must.Sprint("a descendant is within its ancestor"))
-	must.True(t, PathIsWithin("detector", ""), must.Sprint("every path is within the repository root"))
-	must.False(t, PathIsWithin("detectorx", "detector"), must.Sprint("a sibling sharing a string prefix must not match"))
-	must.False(t, PathIsWithin("foobar", "foo"), must.Sprint("segment boundaries must be respected, not raw string prefixes"))
+	test.True(t, PathIsWithin("detector", "detector"), test.Sprintf("a path is within itself"))
+	test.True(t, PathIsWithin("detector/attego", "detector"), test.Sprintf("a descendant is within its ancestor"))
+	test.True(t, PathIsWithin("detector", ""), test.Sprintf("every path is within the repository root"))
+	test.False(t, PathIsWithin("detectorx", "detector"), test.Sprintf("a sibling sharing a string prefix must not match"))
+	test.False(t, PathIsWithin("foobar", "foo"), test.Sprintf("segment boundaries must be respected, not raw string prefixes"))
 }
 
 func TestRelativePath(t *testing.T) {
 	rel, ok := RelativePath("detector/attego", "detector")
-	must.True(t, ok, must.Sprint("a descendant path should resolve relative to its ancestor"))
-	must.EqOp(t, "attego", rel)
+	test.True(t, ok, test.Sprintf("a descendant path should resolve relative to its ancestor"))
+	test.EqOp(t, "attego", rel)
 
 	rel, ok = RelativePath("detector", "detector")
-	must.True(t, ok, must.Sprint("a path is within itself"))
-	must.EqOp(t, "", rel)
+	test.True(t, ok, test.Sprintf("a path is within itself"))
+	test.EqOp(t, "", rel)
 
 	_, ok = RelativePath("detectorx", "detector")
-	must.False(t, ok, must.Sprint("a sibling sharing a string prefix must not resolve"))
+	test.False(t, ok, test.Sprintf("a sibling sharing a string prefix must not resolve"))
 }
 
 func TestPathHasSegmentPrefix(t *testing.T) {
-	must.True(t, PathHasSegmentPrefix("reference", "r"), must.Sprint("a partial final segment should match via raw string prefix"))
-	must.True(t, PathHasSegmentPrefix("detector/attego", "detector"), must.Sprint("a complete leading segment should match its descendant"))
-	must.True(t, PathHasSegmentPrefix("detector/attego", "detector/att"), must.Sprint("a partial final segment should match after exact leading segments"))
-	must.False(t, PathHasSegmentPrefix("detector/attego", "reference"), must.Sprint("a mismatched leading segment must not match"))
-	must.False(t, PathHasSegmentPrefix("detector", "detector/attego"), must.Sprint("prefix must not be longer than candidate"))
-	must.True(t, PathHasSegmentPrefix("detector", ""), must.Sprint("an empty prefix matches everything"))
+	test.True(t, PathHasSegmentPrefix("reference", "r"), test.Sprintf("a partial final segment should match via raw string prefix"))
+	test.True(t, PathHasSegmentPrefix("detector/attego", "detector"), test.Sprintf("a complete leading segment should match its descendant"))
+	test.True(t, PathHasSegmentPrefix("detector/attego", "detector/att"), test.Sprintf("a partial final segment should match after exact leading segments"))
+	test.False(t, PathHasSegmentPrefix("detector/attego", "reference"), test.Sprintf("a mismatched leading segment must not match"))
+	test.False(t, PathHasSegmentPrefix("detector", "detector/attego"), test.Sprintf("prefix must not be longer than candidate"))
+	test.True(t, PathHasSegmentPrefix("detector", ""), test.Sprintf("an empty prefix matches everything"))
 }
 
 func TestIsImmediateChild(t *testing.T) {
-	must.True(t, IsImmediateChild("reference", ""), must.Sprint("a top-level path is an immediate child of the repository root"))
-	must.False(t, IsImmediateChild("detector/atte.hcl", ""), must.Sprint("a nested path is not an immediate child of the repository root"))
-	must.True(t, IsImmediateChild("detector/attego", "detector"), must.Sprint("a direct subdirectory is an immediate child of its parent"))
-	must.False(t, IsImmediateChild("detector/attego/sub", "detector"), must.Sprint("a grandchild is not an immediate child"))
-	must.False(t, IsImmediateChild("reference", "detector"), must.Sprint("a path outside dir is not its child"))
-	must.False(t, IsImmediateChild("detector", "detector"), must.Sprint("a path is not its own child"))
+	test.True(t, IsImmediateChild("reference", ""), test.Sprintf("a top-level path is an immediate child of the repository root"))
+	test.False(t, IsImmediateChild("detector/atte.hcl", ""), test.Sprintf("a nested path is not an immediate child of the repository root"))
+	test.True(t, IsImmediateChild("detector/attego", "detector"), test.Sprintf("a direct subdirectory is an immediate child of its parent"))
+	test.False(t, IsImmediateChild("detector/attego/sub", "detector"), test.Sprintf("a grandchild is not an immediate child"))
+	test.False(t, IsImmediateChild("reference", "detector"), test.Sprintf("a path outside dir is not its child"))
+	test.False(t, IsImmediateChild("detector", "detector"), test.Sprintf("a path is not its own child"))
 }
 
 func TestTargetMatchesHCL(t *testing.T) {
 	target := HCL("atte.hcl", "test", "go", 0)
 	match := func(input string, want bool) {
 		t.Helper()
-		must.EqOp(t, want, target.Matches(input, ""))
+		test.EqOp(t, want, target.Matches(input, ""))
 	}
 
 	match("//atte.hcl#test.go", true)
@@ -108,7 +107,7 @@ func TestTargetMatchesHCLRelative(t *testing.T) {
 	target := HCL("detector/atte.hcl", "test", "go", 0)
 	match := func(input, relative string, want bool) {
 		t.Helper()
-		must.EqOp(t, want, target.Matches(input, relative))
+		test.EqOp(t, want, target.Matches(input, relative))
 	}
 
 	match("../atte.hcl#test.go", "detector/attego", true)
@@ -124,9 +123,9 @@ func TestTargetMatchesHCLRelative(t *testing.T) {
 
 func TestTargetMatchesGoTest(t *testing.T) {
 	target := GoTest("detector/attego")
-	must.True(t, target.Matches("attego#go_test", "detector"), must.Sprint("relative package selector should match from the current directory"))
-	must.True(t, target.Matches("go_test", "detector/attego"), must.Sprint("bare go_test alias should match from the package directory"))
-	must.False(t, target.Matches("attego#go_test", "detector/attegox"), must.Sprint("a sibling package sharing a string prefix must not match a path-qualified selector"))
+	test.True(t, target.Matches("attego#go_test", "detector"), test.Sprintf("relative package selector should match from the current directory"))
+	test.True(t, target.Matches("go_test", "detector/attego"), test.Sprintf("bare go_test alias should match from the package directory"))
+	test.False(t, target.Matches("attego#go_test", "detector/attegox"), test.Sprintf("a sibling package sharing a string prefix must not match a path-qualified selector"))
 }
 
 func TestSelectorNoHCLFile(t *testing.T) {
@@ -134,7 +133,7 @@ func TestSelectorNoHCLFile(t *testing.T) {
 		t.Helper()
 
 		s, err := Parse(in)
-		must.NoError(t, err)
+		test.NoError(t, err)
 
 		test.Eq(t, s.Tree().String(), want)
 	}

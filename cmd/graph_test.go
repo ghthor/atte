@@ -12,6 +12,7 @@ import (
 	"github.com/ghthor/atte/detector/attegittest"
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/attehcl"
+	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
 )
 
@@ -22,18 +23,18 @@ func TestRepositoryContext(t *testing.T) {
 
 	root, relative, err := repositoryContext(git.Dir())
 	must.NoError(t, err)
-	must.EqOp(t, git.Dir(), root)
-	must.EqOp(t, "", relative)
+	test.EqOp(t, git.Dir(), root)
+	test.EqOp(t, "", relative)
 
 	root, relative, err = repositoryContext(subdir)
 	must.NoError(t, err)
-	must.EqOp(t, git.Dir(), root)
-	must.EqOp(t, "nested/working", relative)
+	test.EqOp(t, git.Dir(), root)
+	test.EqOp(t, "nested/working", relative)
 }
 
 func TestRepositoryContextRejectsNonRepository(t *testing.T) {
 	_, _, err := repositoryContext(t.TempDir())
-	must.ErrorContains(t, err, "resolve repository root")
+	test.ErrorContains(t, err, "resolve repository root")
 }
 
 func TestPrintGraphGolden(t *testing.T) {
@@ -131,7 +132,7 @@ func assertGraphGolden(t *testing.T, name, got string) {
 	}
 	want, err := os.ReadFile(goldenPath)
 	must.NoError(t, err)
-	must.EqOp(t, string(want), got)
+	test.EqOp(t, string(want), got)
 }
 
 func graphTestdataDir() string {
@@ -153,9 +154,9 @@ func main() { fmt.Println("hello") }
 `,
 	})
 	got := renderTestGraph(t, repo)
-	must.StrContains(t, got, "go package")
-	must.StrContains(t, got, "go.mod")
-	must.StrContains(t, got, "main.go")
+	test.StrContains(t, got, "go package")
+	test.StrContains(t, got, "go.mod")
+	test.StrContains(t, got, "main.go")
 }
 
 func TestPrintGraphFallsBackToGitPerspective(t *testing.T) {
@@ -163,8 +164,8 @@ func TestPrintGraphFallsBackToGitPerspective(t *testing.T) {
 		"root.txt": "root",
 	})
 	got := renderTestGraph(t, repo)
-	must.StrContains(t, got, "root.txt")
-	must.StrNotContains(t, got, "attego:")
+	test.StrContains(t, got, "root.txt")
+	test.StrNotContains(t, got, "attego:")
 }
 
 func TestPrintGraphReportsGoParseError(t *testing.T) {
@@ -179,7 +180,7 @@ import "unterminated
 	})
 	var got bytes.Buffer
 	err := printGraph(&got, repo, "")
-	must.ErrorContains(t, err, "build Go graph")
+	test.ErrorContains(t, err, "build Go graph")
 }
 
 func TestPrintGraphLocalImports(t *testing.T) {
@@ -208,8 +209,8 @@ var Value = 1
 `,
 	})
 	got := renderTestGraph(t, repo)
-	must.StrContains(t, got, "import example.com/root/detector")
-	must.StrNotContains(t, got, "attego:")
+	test.StrContains(t, got, "import example.com/root/detector")
+	test.StrNotContains(t, got, "attego:")
 }
 
 func TestPrintGraphExternalImports(t *testing.T) {
@@ -230,18 +231,18 @@ func main() { fmt.Println(must.NoError) }
 `,
 	})
 	without := renderTestGraph(t, repo)
-	must.StrNotContains(t, without, "external import fmt")
+	test.StrNotContains(t, without, "external import fmt")
 
 	with := renderTestGraph(t, repo, PrintGraphOptions{IncludeExternalImports: true})
-	must.StrContains(t, with, "go package example.com/root")
-	must.StrContains(t, with, "std import fmt")
-	must.StrNotContains(t, with, "external import fmt")
+	test.StrContains(t, with, "go package example.com/root")
+	test.StrContains(t, with, "std import fmt")
+	test.StrNotContains(t, with, "external import fmt")
 }
 
 func TestIsGraphChildKind(t *testing.T) {
 	childKind := func(kind string, want bool) {
 		t.Helper()
-		must.EqOp(t, want, isGraphChildKind(kind))
+		test.EqOp(t, want, isGraphChildKind(kind))
 	}
 
 	childKind(attego.PackageKind, true)
