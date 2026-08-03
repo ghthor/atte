@@ -133,7 +133,32 @@ func readHCLFiles(repo *attegit.Repo) (hclFiles, error) {
 	return files, nil
 }
 
-func evaluateDeclarations(repo *attegit.Repo, file *hclFile, expressions map[string]hcl.Expression, inherited map[string]cty.Value, namespace string, provider detector.FunctionProvider) (map[string]cty.Value, error) {
+func declarationContext(namespace string, inherited, values map[string]cty.Value, functions map[string]function.Function) *hcl.EvalContext {
+	global := inherited
+	if namespace == "global" {
+		global = make(map[string]cty.Value, len(inherited)+len(values))
+		for key, value := range inherited {
+			global[key] = value
+		}
+		for key, value := range values {
+			global[key] = value
+		}
+	}
+	variables := map[string]cty.Value{"global": objectValue(global)}
+	if namespace == "local" {
+		variables["local"] = objectValue(values)
+	}
+	return &hcl.EvalContext{Variables: variables, Functions: functions}
+}
+
+func evaluateDeclaration(expression hcl.Expression, context *hcl.EvalContext) (cty.Value, hcl.Diagnostics) {
+	return expression.Value(context)
+}
+
+// evaluateDeclarations resolves declarations within one HCL file. Cross-file
+// target dependencies will need a repository-wide target index or dependency
+// resolution phase rather than extending this file-local retry loop.
+func evaluateDeclarations(file *hclFile, expressions map[string]hcl.Expression, inherited map[string]cty.Value, namespace string, functions map[string]function.Function) (map[string]cty.Value, error) {
 	values := make(map[string]cty.Value, len(expressions))
 	pending := make(map[string]hcl.Expression, len(expressions))
 	for name, expr := range expressions {
@@ -145,26 +170,8 @@ func evaluateDeclarations(repo *attegit.Repo, file *hclFile, expressions map[str
 		var lastDiags hcl.Diagnostics
 		for name, expr := range pending {
 			lastName = name
-			ctxValues := make(map[string]cty.Value, 2)
-			global := inherited
-			if namespace == "global" {
-				global = make(map[string]cty.Value, len(inherited)+len(values))
-				for key, value := range inherited {
-					global[key] = value
-				}
-				for key, value := range values {
-					global[key] = value
-				}
-			}
-			ctxValues["global"] = objectValue(global)
-			if namespace == "local" {
-				ctxValues["local"] = objectValue(values)
-			}
-			functions, err := mergedHCLFunctions(repo, file.file, provider)
-			if err != nil {
-				return nil, err
-			}
-			value, diags := expr.Value(&hcl.EvalContext{Variables: ctxValues, Functions: functions})
+			ctx := declarationContext(namespace, inherited, values, functions)
+			value, diags := evaluateDeclaration(expr, ctx)
 			if diags.HasErrors() {
 				lastDiags = diags
 				continue
@@ -184,9 +191,10 @@ func evaluateDeclarations(repo *attegit.Repo, file *hclFile, expressions map[str
 }
 
 type evaluator struct {
-	repo     *attegit.Repo
-	files    hclFiles
-	provider detector.FunctionProvider
+	repo      *attegit.Repo
+	files     hclFiles
+	provider  detector.FunctionProvider
+	functions map[reference.Blob]map[string]function.Function
 }
 
 type decodedBlock struct {
@@ -216,7 +224,24 @@ func newEvaluator(repo *attegit.Repo, provider detector.FunctionProvider) (*eval
 	if err != nil {
 		return nil, err
 	}
-	return &evaluator{repo: repo, files: files, provider: provider}, nil
+	return &evaluator{
+		repo:      repo,
+		files:     files,
+		provider:  provider,
+		functions: make(map[reference.Blob]map[string]function.Function),
+	}, nil
+}
+
+func (e *evaluator) hclFunctions(file reference.Blob) (map[string]function.Function, error) {
+	if functions, ok := e.functions[file]; ok {
+		return functions, nil
+	}
+	functions, err := mergedHCLFunctions(e.repo, file, e.provider)
+	if err != nil {
+		return nil, err
+	}
+	e.functions[file] = functions
+	return functions, nil
 }
 
 func (e *evaluator) resolveGlobals() (globalPhase, error) {
@@ -237,7 +262,11 @@ func (e *evaluator) resolveGlobals() (globalPhase, error) {
 			return err
 		}
 		if file, ok := e.files[candidate]; ok {
-			values, err := evaluateDeclarations(e.repo, file, file.globals, globals, "global", e.provider)
+			functions, err := e.hclFunctions(file.file)
+			if err != nil {
+				return err
+			}
+			values, err := evaluateDeclarations(file, file.globals, globals, "global", functions)
 			if err != nil {
 				return err
 			}
@@ -262,7 +291,11 @@ func (e *evaluator) resolveGlobals() (globalPhase, error) {
 
 func (p globalPhase) scopeFor(file *hclFile) (hclScope, error) {
 	globals := p.scopes[file.file.Tree()]
-	locals, err := evaluateDeclarations(p.evaluator.repo, file, file.locals, globals, "local", p.evaluator.provider)
+	functions, err := p.evaluator.hclFunctions(file.file)
+	if err != nil {
+		return hclScope{}, err
+	}
+	locals, err := evaluateDeclarations(file, file.locals, globals, "local", functions)
 	if err != nil {
 		return hclScope{}, err
 	}
@@ -273,8 +306,8 @@ func (p evaluationPhase) scopeFor(file *hclFile) (hclScope, error) {
 	return p.globals.scopeFor(file)
 }
 
-func evalContext(repo *attegit.Repo, file reference.Blob, scope hclScope, provider detector.FunctionProvider) (*hcl.EvalContext, error) {
-	functions, err := mergedHCLFunctions(repo, file, provider)
+func (e *evaluator) evalContext(file reference.Blob, scope hclScope) (*hcl.EvalContext, error) {
+	functions, err := e.hclFunctions(file)
 	if err != nil {
 		return nil, err
 	}
@@ -290,7 +323,7 @@ func (e *evaluator) decodedBlocks(globals globalPhase) ([]decodedBlock, error) {
 		if err != nil {
 			return nil, err
 		}
-		ctx, err := evalContext(e.repo, file, scope, e.provider)
+		ctx, err := e.evalContext(file, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -311,7 +344,7 @@ func (e *evaluator) decodedBlocks(globals globalPhase) ([]decodedBlock, error) {
 					}
 					labels[name] = struct{}{}
 				}
-				script, deps, err := decodeScriptAndDeps(e.repo, file, block.body, ctx)
+				script, deps, err := decodeTargetBlock(e.repo, file, block.body, ctx)
 				if err != nil {
 					return nil, err
 				}
@@ -689,7 +722,7 @@ func gopkgTestFunction(repo *attegit.Repo) function.Function {
 	})
 }
 
-func decodeScriptAndDeps(repo *attegit.Repo, file reference.Blob, body *hclsyntax.Body, ctx *hcl.EvalContext) (string, []dependency, error) {
+func decodeTargetBlock(repo *attegit.Repo, file reference.Blob, body *hclsyntax.Body, ctx *hcl.EvalContext) (string, []dependency, error) {
 	deps := make([]dependency, 0)
 	content, diags := body.Content(&hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "script", Required: true}, {Name: "depends_on"}, {Name: "triggered_by"}}})
 	if diags.HasErrors() {
