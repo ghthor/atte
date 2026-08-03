@@ -336,7 +336,19 @@ func targetsFromDecoded(repo *attegit.Repo, blocks []decodedBlock) ([]Target, er
 			}
 			inline = block.script
 		}
-		targets = append(targets, Target{ID: EntityID(block.kind, block.file, block.name), Kind: block.kind, File: block.file, Name: block.name, Label: block.label, Index: block.index, Script: scriptBlob, Inline: inline})
+		kind := strings.TrimPrefix(block.kind, Namespace+":")
+		aliases := selector.Aliases(selector.Target{Path: block.file.String(), Kind: kind, Name: block.name, Index: block.index})
+		targets = append(targets, Target{
+			ID:      EntityID(block.kind, block.file, block.name),
+			Kind:    block.kind,
+			File:    block.file,
+			Name:    block.name,
+			Label:   block.label,
+			Index:   block.index,
+			Aliases: aliases,
+			Script:  scriptBlob,
+			Inline:  inline,
+		})
 	}
 	return targets, nil
 }
@@ -378,14 +390,15 @@ func DecodeEntityID(id graph.EntityID) (string, reference.Blob, string, error) {
 // declaring atte.hcl file. Label preserves the HCL block label, when present,
 // while Index records the block's zero-based position within its kind.
 type Target struct {
-	ID     graph.EntityID
-	Kind   string
-	File   reference.Blob
-	Name   string
-	Label  string
-	Index  int
-	Script reference.Blob
-	Inline string
+	ID      graph.EntityID
+	Kind    string
+	File    reference.Blob
+	Name    string
+	Label   string
+	Index   int
+	Aliases []string
+	Script  reference.Blob
+	Inline  string
 }
 
 // Command constructs the command used to execute the target from a repository root.
@@ -403,10 +416,11 @@ func (target Target) Command(root string) (*exec.Cmd, error) {
 // Selector returns the canonical selector for an HCL runnable target.
 func Selector(target Target) selector.Target {
 	return selector.Target{
-		Path:  target.File.String(),
-		Kind:  strings.TrimPrefix(target.Kind, Namespace+":"),
-		Name:  target.Name,
-		Index: target.Index,
+		Path:    target.File.String(),
+		Kind:    strings.TrimPrefix(target.Kind, Namespace+":"),
+		Name:    target.Name,
+		Index:   target.Index,
+		Aliases: target.Aliases,
 	}
 }
 

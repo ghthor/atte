@@ -27,6 +27,7 @@ type Target struct {
 	Path      string
 	Name      string
 	Index     int
+	Aliases   []string
 }
 
 // Detector contains capabilities supplied by a detector namespace.

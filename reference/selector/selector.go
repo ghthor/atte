@@ -185,6 +185,13 @@ type Target struct {
 	Kind  string
 	Name  string
 	Index int
+	// Aliases are additional identifiers accepted when matching this target.
+	Aliases []string
+}
+
+// Aliases returns the identifiers accepted when matching target.
+func Aliases(target Target) []string {
+	return target.identifierAliases()
 }
 
 // String returns the canonical repository-root-qualified selector.
@@ -236,8 +243,8 @@ func (t Target) identifierAliases() []string {
 	if t.Kind == "go_test" {
 		blockName = "go_test"
 	}
-	aliases := make([]string, 0, 5)
-	for _, alias := range []string{canonical, shortName(canonical), t.Kind, blockName, t.Kind + "." + itoa(t.Index)} {
+	aliases := make([]string, 0, 5+len(t.Aliases))
+	for _, alias := range append([]string{canonical, shortName(canonical), t.Kind, blockName, t.Kind + "." + itoa(t.Index)}, t.Aliases...) {
 		if !containsAlias(aliases, alias) {
 			aliases = append(aliases, alias)
 		}

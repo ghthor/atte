@@ -1,7 +1,6 @@
 package registry
 
 import (
-	"strconv"
 	"strings"
 
 	"github.com/ghthor/atte/detector"
@@ -26,15 +25,28 @@ func NewBuiltIn() (*Registry, error) {
 			}
 			targets := make([]Target, 0, len(found))
 			for _, target := range found {
-				targets = append(targets, Target{ID: target.ID, Namespace: attego.Namespace, Kind: target.Kind, Path: target.PackageDir.String(), Name: "go_test"})
+				aliases := selector.Aliases(attego.Selector(target))
+				targets = append(targets, Target{
+					ID:        target.ID,
+					Namespace: attego.Namespace,
+					Kind:      target.Kind,
+					Path:      target.PackageDir.String(),
+					Name:      "go_test",
+					Aliases:   aliases,
+				})
 			}
 			return targets, nil
 		},
 		Selectorize: func(target Target) (selector.Target, bool) {
-			return attego.Selector(attego.Target{PackageDir: reference.Tree(target.Path)}), true
+			result := attego.Selector(attego.Target{PackageDir: reference.Tree(target.Path)})
+			result.Aliases = target.Aliases
+			return result, true
 		},
 		MatchIdentifier: func(target Target, identifier string) bool {
-			return identifier == "go_test"
+			return selector.Target{
+				Kind:    "go_test",
+				Aliases: target.Aliases,
+			}.Matches("#"+identifier, "")
 		},
 	}); err != nil {
 		return nil, err
@@ -61,16 +73,29 @@ func NewBuiltIn() (*Registry, error) {
 				if target.Script == "" {
 					continue
 				}
-				targets = append(targets, Target{ID: target.ID, Namespace: attehcl.Namespace, Kind: target.Kind, Path: target.File.String(), Name: target.Name, Index: target.Index})
+				targets = append(targets, Target{
+					ID:        target.ID,
+					Namespace: attehcl.Namespace,
+					Kind:      target.Kind,
+					Path:      target.File.String(),
+					Name:      target.Name,
+					Index:     target.Index,
+					Aliases:   target.Aliases,
+				})
 			}
 			return targets, nil
 		},
 		Selectorize: func(target Target) (selector.Target, bool) {
-			return attehcl.Selector(attehcl.Target{Kind: target.Kind, File: reference.Blob(target.Path), Name: target.Name, Index: target.Index}), true
+			return attehcl.Selector(attehcl.Target{Kind: target.Kind, File: reference.Blob(target.Path), Name: target.Name, Index: target.Index, Aliases: target.Aliases}), true
 		},
 		MatchIdentifier: func(target Target, identifier string) bool {
 			kind := strings.TrimPrefix(target.Kind, attehcl.Namespace+":")
-			return identifier == kind || identifier == kind+"."+target.Name || identifier == kind+"."+strconv.Itoa(target.Index)
+			return selector.Target{
+				Kind:    kind,
+				Name:    target.Name,
+				Index:   target.Index,
+				Aliases: target.Aliases,
+			}.Matches("#"+identifier, "")
 		},
 	}); err != nil {
 		return nil, err

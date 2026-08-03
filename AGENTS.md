@@ -25,6 +25,8 @@ For functional tests or repeated behavior checks, prefer a local helper with a s
 
 Prefer `make([]T, 0, <len>)` over a `[]T{}` literal when building up a slice by appending. Use a known or estimated length for the capacity hint.
 
+When initializing a Go struct with more than two fields, format the fields across multiple lines.
+
 ## Go package usage
 
 All current usage of the Go packages in this repository is within this repository. When refactoring, do not assume unknown external usages need to be preserved.

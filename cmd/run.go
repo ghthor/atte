@@ -31,6 +31,7 @@ type runTarget struct {
 	path     string
 	name     string
 	index    int
+	aliases  []string
 	label    string
 	dir      string
 	argv     []string
@@ -208,6 +209,7 @@ func runTargets(repo *attegit.Repo, root, cwd, relative string) ([]runTarget, er
 				path:     native.File.String(),
 				name:     native.Name,
 				index:    native.Index,
+				aliases:  native.Aliases,
 				label:    native.Label,
 				dir:      dir,
 				argv:     []string{"/usr/bin/env", "bash", file},
@@ -224,6 +226,8 @@ func runTargets(repo *attegit.Repo, root, cwd, relative string) ([]runTarget, er
 				kind:     target.Kind,
 				path:     target.Path,
 				name:     target.Name,
+				index:    target.Index,
+				aliases:  target.Aliases,
 				dir:      dir,
 				argv:     []string{"go", "test", "-v"},
 			})
@@ -348,17 +352,6 @@ func ambiguousRunTargetError(input string, candidates []runTarget) error {
 	return fmt.Errorf("selector %q is ambiguous; possible commands:\n%s", input, strings.Join(commands, "\n"))
 }
 
-func runTargetAliases(target runTarget) (string, string) {
-	kind := strings.TrimPrefix(target.kind, attehcl.Namespace+":")
-	kindAlias := kind
-	blockName := kind + "." + target.name
-	if target.kind == attego.PackageTestKind {
-		kindAlias = "go_test"
-		blockName = "go_test"
-	}
-	return kindAlias, blockName
-}
-
 func runTargetPaths(target runTarget) (string, string) {
 	parsed, err := selector.Parse(target.selector)
 	if err != nil {
@@ -368,13 +361,20 @@ func runTargetPaths(target runTarget) (string, string) {
 }
 
 func (target runTarget) selectorTarget() selector.Target {
-	kindAlias, _ := runTargetAliases(target)
 	canonicalPath, _ := runTargetPaths(target)
+	kind := strings.TrimPrefix(target.kind, attehcl.Namespace+":")
 	name := target.name
 	if target.kind == attego.PackageTestKind {
+		kind = "go_test"
 		name = ""
 	}
-	return selector.Target{Path: canonicalPath, Kind: kindAlias, Name: name, Index: target.index}
+	return selector.Target{
+		Path:    canonicalPath,
+		Kind:    kind,
+		Name:    name,
+		Index:   target.index,
+		Aliases: target.aliases,
+	}
 }
 
 func matchesRunTargetAt(input string, target runTarget, relative string) bool {
