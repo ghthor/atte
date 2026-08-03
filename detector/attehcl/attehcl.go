@@ -36,6 +36,15 @@ const (
 	DecodingPathPrefix = "attehcl-path:"
 )
 
+var blockKinds = []struct {
+	hclType string
+	kind    string
+}{
+	{hclType: "test", kind: TestKind},
+	{hclType: "codegen", kind: CodegenKind},
+	{hclType: "lint", kind: LintKind},
+}
+
 // rawBlock is a parsed HCL block body with its labels, before any
 // kind-specific attribute decoding. It carries no schema information, so it
 // is shared across every block kind.
@@ -360,8 +369,8 @@ func targetsWithProvider(repo *attegit.Repo, provider detector.FunctionProvider)
 		if err != nil {
 			return nil, err
 		}
-		for _, spec := range []struct{ blockType, kind string }{{"test", TestKind}, {"codegen", CodegenKind}, {"lint", LintKind}} {
-			blocks, err := blocksOfType(blob, body, spec.blockType)
+		for _, spec := range blockKinds {
+			blocks, err := blocksOfType(blob, body, spec.hclType)
 			if err != nil {
 				return nil, err
 			}
@@ -373,7 +382,7 @@ func targetsWithProvider(repo *attegit.Repo, provider detector.FunctionProvider)
 					label = block.labels[0]
 					name = label
 					if _, exists := labels[name]; exists {
-						return nil, fmt.Errorf("parse HCL %q: duplicate %s label %q", blob, spec.blockType, name)
+						return nil, fmt.Errorf("parse HCL %q: duplicate %s label %q", blob, spec.hclType, name)
 					}
 					labels[name] = struct{}{}
 				}
@@ -521,8 +530,8 @@ func graphFor(repo *attegit.Repo, options detector.GraphOptions) (*graph.Graph, 
 		if err != nil {
 			return nil, err
 		}
-		for _, spec := range []struct{ typ, kind string }{{"test", TestKind}, {"codegen", CodegenKind}, {"lint", LintKind}} {
-			blocks, err := blocksOfType(fileBlob, config.body, spec.typ)
+		for _, spec := range blockKinds {
+			blocks, err := blocksOfType(fileBlob, config.body, spec.hclType)
 			if err != nil {
 				return nil, err
 			}
