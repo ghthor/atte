@@ -2,6 +2,7 @@
 package attehcl
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"os/exec"
@@ -191,6 +192,7 @@ func evaluateDeclarations(file *hclFile, expressions map[string]hcl.Expression, 
 }
 
 type evaluator struct {
+	ctx       context.Context
 	repo      *attegit.Repo
 	files     hclFiles
 	provider  detector.FunctionProvider
@@ -216,7 +218,7 @@ type evaluationPhase struct {
 	globals globalPhase
 }
 
-func newEvaluator(repo *attegit.Repo, provider detector.FunctionProvider) (*evaluator, error) {
+func newEvaluator(ctx context.Context, repo *attegit.Repo, provider detector.FunctionProvider) (*evaluator, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("repository is nil")
 	}
@@ -225,6 +227,7 @@ func newEvaluator(repo *attegit.Repo, provider detector.FunctionProvider) (*eval
 		return nil, err
 	}
 	return &evaluator{
+		ctx:       ctx,
 		repo:      repo,
 		files:     files,
 		provider:  provider,
@@ -236,7 +239,7 @@ func (e *evaluator) hclFunctions(file reference.Blob) (map[string]function.Funct
 	if functions, ok := e.functions[file]; ok {
 		return functions, nil
 	}
-	functions, err := mergedHCLFunctions(e.repo, file, e.provider)
+	functions, err := mergedHCLFunctions(e.ctx, e.repo, file, e.provider)
 	if err != nil {
 		return nil, err
 	}
@@ -457,12 +460,12 @@ func Selector(target Target) selector.Target {
 	}
 }
 
-func Targets(repo *attegit.Repo, provider detector.FunctionProvider) ([]Target, error) {
-	return targetsWithProvider(repo, provider)
+func Targets(ctx context.Context, repo *attegit.Repo, provider detector.FunctionProvider) ([]Target, error) {
+	return targetsWithProvider(ctx, repo, provider)
 }
 
-func targetsWithProvider(repo *attegit.Repo, provider detector.FunctionProvider) ([]Target, error) {
-	evaluator, err := newEvaluator(repo, provider)
+func targetsWithProvider(ctx context.Context, repo *attegit.Repo, provider detector.FunctionProvider) ([]Target, error) {
+	evaluator, err := newEvaluator(ctx, repo, provider)
 	if err != nil {
 		return nil, err
 	}
@@ -487,11 +490,11 @@ type Config struct {
 // ConfigFor evaluates the attehcl configuration for a repository-relative directory.
 // Global values are inherited from repository ancestors; local values and targets
 // are scoped to the requested directory.
-func ConfigFor(repo *attegit.Repo, relativePath string, provider detector.FunctionProvider) (Config, error) {
-	return configForWithProvider(repo, relativePath, provider)
+func ConfigFor(ctx context.Context, repo *attegit.Repo, relativePath string, provider detector.FunctionProvider) (Config, error) {
+	return configForWithProvider(ctx, repo, relativePath, provider)
 }
 
-func configForWithProvider(repo *attegit.Repo, relativePath string, provider detector.FunctionProvider) (Config, error) {
+func configForWithProvider(ctx context.Context, repo *attegit.Repo, relativePath string, provider detector.FunctionProvider) (Config, error) {
 	if repo == nil {
 		return Config{}, fmt.Errorf("repository is nil")
 	}
@@ -499,7 +502,7 @@ func configForWithProvider(repo *attegit.Repo, relativePath string, provider det
 	if err != nil {
 		return Config{}, fmt.Errorf("invalid repository directory %q: %w", relativePath, err)
 	}
-	evaluator, err := newEvaluator(repo, provider)
+	evaluator, err := newEvaluator(ctx, repo, provider)
 	if err != nil {
 		return Config{}, err
 	}
@@ -551,21 +554,27 @@ func WithFunctions(provider detector.FunctionProvider) detector.GraphOption {
 }
 
 // Graph builds the HCL detector graph using the supplied options.
-func Graph(repo *attegit.Repo, options ...detector.GraphOption) (*graph.Graph, error) {
+func Graph(ctx context.Context, repo *attegit.Repo, options ...detector.GraphOption) (*graph.Graph, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	config := detector.GraphOptions{}
 	for _, option := range options {
 		if option != nil {
 			option(&config)
 		}
 	}
-	return graphFor(repo, config)
+	return graphFor(ctx, repo, config)
 }
 
-func graphFor(repo *attegit.Repo, options detector.GraphOptions) (*graph.Graph, error) {
+func graphFor(ctx context.Context, repo *attegit.Repo, options detector.GraphOptions) (*graph.Graph, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if repo == nil {
 		return nil, fmt.Errorf("repository is nil")
 	}
-	evaluator, err := newEvaluator(repo, options.Functions)
+	evaluator, err := newEvaluator(ctx, repo, options.Functions)
 	if err != nil {
 		return nil, err
 	}
@@ -588,7 +597,10 @@ func graphFor(repo *attegit.Repo, options detector.GraphOptions) (*graph.Graph, 
 		entities = append(entities, e)
 	}
 	for _, block := range blocks {
-		r, err := addDecodedBlockGraph(repo, block, addEntity, options.AttachToTree)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		r, err := addDecodedBlockGraph(ctx, repo, block, addEntity, options.AttachToTree)
 		if err != nil {
 			return nil, err
 		}
@@ -598,7 +610,7 @@ func graphFor(repo *attegit.Repo, options detector.GraphOptions) (*graph.Graph, 
 }
 
 // addDecodedBlockGraph builds graph entities and relations for one decoded block.
-func addDecodedBlockGraph(repo *attegit.Repo, block decodedBlock, addEntity func(graph.Entity), containment bool) ([]graph.Relationship, error) {
+func addDecodedBlockGraph(ctx context.Context, repo *attegit.Repo, block decodedBlock, addEntity func(graph.Entity), containment bool) ([]graph.Relationship, error) {
 	relations := make([]graph.Relationship, 0, 1+len(block.deps)*2)
 	id := EntityID(block.kind, block.file, block.name)
 	addEntity(graph.Entity{ID: id, Kind: block.kind})
@@ -622,7 +634,7 @@ func addDecodedBlockGraph(repo *attegit.Repo, block decodedBlock, addEntity func
 	}
 	for _, dep := range block.deps {
 		if dep.entity != "" {
-			addEntity(graph.Entity{ID: dep.entity, Kind: dependencyKind(repo, dep.entity)})
+			addEntity(graph.Entity{ID: dep.entity, Kind: dependencyKind(ctx, repo, dep.entity)})
 			relations = append(relations, graph.Relationship{From: id, To: dep.entity, Kind: DependsOnRelation})
 			continue
 		}
@@ -641,8 +653,8 @@ func addDecodedBlockGraph(repo *attegit.Repo, block decodedBlock, addEntity func
 	return relations, nil
 }
 
-func dependencyKind(repo *attegit.Repo, id graph.EntityID) string {
-	g, err := attego.Graph(repo)
+func dependencyKind(ctx context.Context, repo *attegit.Repo, id graph.EntityID) string {
+	g, err := attego.Graph(ctx, repo)
 	if err == nil {
 		if e, ok := g.Entities[id]; ok {
 			return e.Kind
@@ -680,14 +692,14 @@ func blocksOfType(file reference.Blob, body *hclsyntax.Body, blockType string) (
 	return blocks, nil
 }
 
-func mergedHCLFunctions(repo *attegit.Repo, file reference.Blob, provider detector.FunctionProvider) (map[string]function.Function, error) {
+func mergedHCLFunctions(ctx context.Context, repo *attegit.Repo, file reference.Blob, provider detector.FunctionProvider) (map[string]function.Function, error) {
 	functions := map[string]function.Function{
-		"gopkg_test": gopkgTestFunction(repo),
+		"gopkg_test": gopkgTestFunction(ctx, repo),
 	}
 	if provider == nil {
 		return functions, nil
 	}
-	extra, err := provider(repo, file)
+	extra, err := provider(ctx, repo, file)
 	if err != nil {
 		return nil, err
 	}
@@ -700,12 +712,12 @@ func mergedHCLFunctions(repo *attegit.Repo, file reference.Blob, provider detect
 	return functions, nil
 }
 
-func gopkgTestFunction(repo *attegit.Repo) function.Function {
+func gopkgTestFunction(ctx context.Context, repo *attegit.Repo) function.Function {
 	return function.New(&function.Spec{
 		Params: []function.Parameter{{Name: "path", Type: cty.String}},
 		Type:   function.StaticReturnType(cty.String),
 		Impl: func(args []cty.Value, ret cty.Type) (cty.Value, error) {
-			g, err := attego.Graph(repo)
+			g, err := attego.Graph(ctx, repo)
 			if err != nil {
 				return cty.NilVal, err
 			}

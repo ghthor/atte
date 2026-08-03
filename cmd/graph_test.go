@@ -21,19 +21,19 @@ func TestRepositoryContext(t *testing.T) {
 	subdir := filepath.Join(git.Dir(), "nested", "working")
 	must.NoError(t, os.MkdirAll(subdir, 0o755))
 
-	root, relative, err := repositoryContext(git.Dir())
+	root, relative, err := repositoryContext(t.Context(), git.Dir())
 	must.NoError(t, err)
 	test.EqOp(t, git.Dir(), root)
 	test.EqOp(t, "", relative)
 
-	root, relative, err = repositoryContext(subdir)
+	root, relative, err = repositoryContext(t.Context(), subdir)
 	must.NoError(t, err)
 	test.EqOp(t, git.Dir(), root)
 	test.EqOp(t, "nested/working", relative)
 }
 
 func TestRepositoryContextRejectsNonRepository(t *testing.T) {
-	_, _, err := repositoryContext(t.TempDir())
+	_, _, err := repositoryContext(t.Context(), t.TempDir())
 	test.ErrorContains(t, err, "resolve repository root")
 }
 
@@ -179,7 +179,7 @@ import "unterminated
 `,
 	})
 	var got bytes.Buffer
-	err := printGraph(&got, repo, "")
+	err := printGraph(t.Context(), &got, repo, "")
 	test.ErrorContains(t, err, "build Go graph")
 }
 
@@ -273,6 +273,6 @@ func openTestRepo(t *testing.T, dir string) *attegit.Repo {
 func renderTestGraph(t *testing.T, repo *attegit.Repo, options ...PrintGraphOptions) string {
 	t.Helper()
 	var output bytes.Buffer
-	must.NoError(t, printGraph(&output, repo, "", options...))
+	must.NoError(t, printGraph(t.Context(), &output, repo, "", options...))
 	return output.String()
 }

@@ -2,13 +2,14 @@
 package detector
 
 import (
+	"context"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/reference"
 	"github.com/zclconf/go-cty/cty/function"
 )
 
 // FunctionProvider supplies additional HCL functions for a repository file.
-type FunctionProvider func(*attegit.Repo, reference.Blob) (map[string]function.Function, error)
+type FunctionProvider func(context.Context, *attegit.Repo, reference.Blob) (map[string]function.Function, error)
 
 // GraphOptions contains the options shared by detector graph builders.
 type GraphOptions struct {

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -81,13 +82,13 @@ func init() {
 	runCmd.Flags().BoolVar(&runList, "list", false, "List runnable targets")
 }
 
-func loadRunTargets() (root, cwd, relative string, targets []runTarget, err error) {
+func loadRunTargets(ctx context.Context) (root, cwd, relative string, targets []runTarget, err error) {
 	cwd, err = os.Getwd()
 	if err != nil {
 		err = fmt.Errorf("get working directory: %w", err)
 		return
 	}
-	root, relative, err = repositoryContext(cwd)
+	root, relative, err = repositoryContext(ctx, cwd)
 	if err != nil {
 		return
 	}
@@ -96,12 +97,13 @@ func loadRunTargets() (root, cwd, relative string, targets []runTarget, err erro
 		err = fmt.Errorf("open repository: %w", err)
 		return
 	}
-	targets, err = runTargets(repo, root, cwd, relative)
+	targets, err = runTargets(ctx, repo, root, cwd, relative)
 	return
 }
 
 func runCommand(cmd *cobra.Command, args []string) error {
-	_, _, relative, targets, err := loadRunTargets()
+	ctx := cmd.Context()
+	_, _, relative, targets, err := loadRunTargets(ctx)
 	if err != nil {
 		return err
 	}
@@ -132,7 +134,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		}
 		return nil
 	}
-	process := exec.Command(target.argv[0], target.argv[1:]...)
+	process := exec.CommandContext(ctx, target.argv[0], target.argv[1:]...)
 	process.Dir = target.dir
 	process.Stdin = cmd.InOrStdin()
 	process.Stdout = cmd.OutOrStdout()
@@ -148,7 +150,7 @@ func runCmdValidArgs(cmd *cobra.Command, args []string, toComplete string) ([]st
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 
-	root, cwd, _, targets, err := loadRunTargets()
+	root, cwd, _, targets, err := loadRunTargets(cmd.Context())
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveError
 	}
@@ -172,16 +174,16 @@ func runCmdValidArgsFromTargets(args []string, toComplete, root, cwd string, tar
 	return matches, cobra.ShellCompDirectiveNoFileComp
 }
 
-func runTargets(repo *attegit.Repo, root, cwd, relative string) ([]runTarget, error) {
+func runTargets(ctx context.Context, repo *attegit.Repo, root, cwd, relative string) ([]runTarget, error) {
 	builtIns, err := registry.NewBuiltIn()
 	if err != nil {
 		return nil, err
 	}
-	registeredTargets, err := builtIns.Targets(repo)
+	registeredTargets, err := builtIns.Targets(ctx, repo)
 	if err != nil {
 		return nil, err
 	}
-	hclTargets, err := attehcl.Targets(repo, builtIns.FunctionProvider())
+	hclTargets, err := attehcl.Targets(ctx, repo, builtIns.FunctionProvider())
 	if err != nil {
 		return nil, err
 	}

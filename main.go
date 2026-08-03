@@ -1,7 +1,19 @@
 package main
 
-import "github.com/ghthor/atte/cmd"
+import (
+	"context"
+	"log"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/ghthor/atte/cmd"
+)
 
 func main() {
-	cmd.Execute()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := cmd.ExecuteContext(ctx); err != nil {
+		log.Fatal(err)
+	}
 }

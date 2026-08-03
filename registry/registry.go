@@ -2,6 +2,7 @@
 package registry
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -33,23 +34,23 @@ type Target struct {
 // Detector contains capabilities supplied by a detector namespace.
 type Detector struct {
 	Namespace       string
-	Graph           func(*attegit.Repo, ...detector.GraphOption) (*graph.Graph, error)
-	Targets         func(*attegit.Repo) ([]Target, error)
+	Graph           func(context.Context, *attegit.Repo, ...detector.GraphOption) (*graph.Graph, error)
+	Targets         func(context.Context, *attegit.Repo) ([]Target, error)
 	Selectorize     func(Target) (selector.Target, bool)
 	MatchIdentifier func(Target, string) bool
 }
 
 // Plugin is the required base capability for a runtime plugin.
 type Plugin interface {
-	Graph(*attegit.Repo, ...detector.GraphOption) (*graph.Graph, error)
+	Graph(context.Context, *attegit.Repo, ...detector.GraphOption) (*graph.Graph, error)
 }
 
 // HCLFunctionFactory constructs a function for one repository and HCL file.
-type HCLFunctionFactory func(*attegit.Repo, reference.Blob) (function.Function, error)
+type HCLFunctionFactory func(context.Context, *attegit.Repo, reference.Blob) (function.Function, error)
 
 // HCLFunctionProvider is implemented by plugins that expose HCL functions.
 type HCLFunctionProvider interface {
-	HCLFunctions(*attegit.Repo, reference.Blob) (map[string]HCLFunctionFactory, error)
+	HCLFunctions(context.Context, *attegit.Repo, reference.Blob) (map[string]HCLFunctionFactory, error)
 }
 
 // HCLBlockHandler is a future extension point for named parsed HCL blocks.
@@ -120,13 +121,13 @@ func (r *Registry) RegisterHCLFunction(name string, factory HCLFunctionFactory) 
 
 // FunctionProvider adapts registry HCL functions to detector evaluation.
 func (r *Registry) FunctionProvider() detector.FunctionProvider {
-	return func(repo *attegit.Repo, file reference.Blob) (map[string]function.Function, error) {
-		return r.HCLFunctions(repo, file)
+	return func(ctx context.Context, repo *attegit.Repo, file reference.Blob) (map[string]function.Function, error) {
+		return r.HCLFunctions(ctx, repo, file)
 	}
 }
 
 // HCLFunctions returns fresh functions for the repository and file.
-func (r *Registry) HCLFunctions(repo *attegit.Repo, file reference.Blob) (map[string]function.Function, error) {
+func (r *Registry) HCLFunctions(ctx context.Context, repo *attegit.Repo, file reference.Blob) (map[string]function.Function, error) {
 	if r == nil {
 		return nil, fmt.Errorf("registry is nil")
 	}
@@ -143,7 +144,7 @@ func (r *Registry) HCLFunctions(repo *attegit.Repo, file reference.Blob) (map[st
 		if !ok {
 			continue
 		}
-		provided, err := provider.HCLFunctions(repo, file)
+		provided, err := provider.HCLFunctions(ctx, repo, file)
 		if err != nil {
 			return nil, err
 		}
@@ -155,7 +156,7 @@ func (r *Registry) HCLFunctions(repo *attegit.Repo, file reference.Blob) (map[st
 		}
 	}
 	for name, factory := range factories {
-		fn, err := factory(repo, file)
+		fn, err := factory(ctx, repo, file)
 		if err != nil {
 			return nil, fmt.Errorf("build HCL function %q: %w", name, err)
 		}
@@ -175,7 +176,9 @@ func (r *Registry) RegisterPlugin(namespace string, plugin Plugin) error {
 	if plugin == nil {
 		return fmt.Errorf("plugin %q is nil", namespace)
 	}
-	if err := r.Register(Detector{Namespace: namespace, Graph: plugin.Graph}); err != nil {
+	if err := r.Register(Detector{Namespace: namespace, Graph: func(ctx context.Context, repo *attegit.Repo, options ...detector.GraphOption) (*graph.Graph, error) {
+		return plugin.Graph(ctx, repo, options...)
+	}}); err != nil {
 		return err
 	}
 	r.mu.Lock()
@@ -185,13 +188,13 @@ func (r *Registry) RegisterPlugin(namespace string, plugin Plugin) error {
 }
 
 // Graph combines all registered detector graphs in namespace order.
-func (r *Registry) Graph(repo *attegit.Repo, options ...detector.GraphOption) (*graph.Graph, error) {
+func (r *Registry) Graph(ctx context.Context, repo *attegit.Repo, options ...detector.GraphOption) (*graph.Graph, error) {
 	var result *graph.Graph
 	for _, detector := range r.snapshot() {
 		if detector.Graph == nil {
 			continue
 		}
-		g, err := detector.Graph(repo, options...)
+		g, err := detector.Graph(ctx, repo, options...)
 		if err != nil {
 			return nil, fmt.Errorf("build %s graph: %w", detector.Namespace, err)
 		}
@@ -210,13 +213,13 @@ func (r *Registry) Graph(repo *attegit.Repo, options ...detector.GraphOption) (*
 }
 
 // Targets returns all registered detector targets in namespace order.
-func (r *Registry) Targets(repo *attegit.Repo) ([]Target, error) {
+func (r *Registry) Targets(ctx context.Context, repo *attegit.Repo) ([]Target, error) {
 	var targets []Target
 	for _, detector := range r.snapshot() {
 		if detector.Targets == nil {
 			continue
 		}
-		found, err := detector.Targets(repo)
+		found, err := detector.Targets(ctx, repo)
 		if err != nil {
 			return nil, fmt.Errorf("discover %s targets: %w", detector.Namespace, err)
 		}

@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"context"
 	"strings"
 
 	"github.com/ghthor/atte/detector"
@@ -10,6 +11,7 @@ import (
 	"github.com/ghthor/atte/graph"
 	"github.com/ghthor/atte/reference"
 	"github.com/ghthor/atte/reference/selector"
+	"github.com/zclconf/go-cty/cty/function"
 )
 
 // NewBuiltIn returns a registry containing atte's built-in detectors and HCL functions.
@@ -17,9 +19,11 @@ func NewBuiltIn() (*Registry, error) {
 	r := New()
 	if err := r.Register(Detector{
 		Namespace: attego.Namespace,
-		Graph:     attego.Graph,
-		Targets: func(repo *attegit.Repo) ([]Target, error) {
-			found, err := attego.Targets(repo)
+		Graph: func(ctx context.Context, repo *attegit.Repo, options ...detector.GraphOption) (*graph.Graph, error) {
+			return attego.Graph(ctx, repo, options...)
+		},
+		Targets: func(ctx context.Context, repo *attegit.Repo) ([]Target, error) {
+			found, err := attego.Targets(ctx, repo)
 			if err != nil {
 				return nil, err
 			}
@@ -53,7 +57,7 @@ func NewBuiltIn() (*Registry, error) {
 	}
 	if err := r.Register(Detector{
 		Namespace: attehcl.Namespace,
-		Graph: func(repo *attegit.Repo, options ...detector.GraphOption) (*graph.Graph, error) {
+		Graph: func(ctx context.Context, repo *attegit.Repo, options ...detector.GraphOption) (*graph.Graph, error) {
 			graphOptions := make([]detector.GraphOption, 0, len(options)+2)
 			graphOptions = append(graphOptions, detector.WithAttachToTree(), attehcl.WithFunctions(r.FunctionProvider()))
 			for _, option := range options {
@@ -61,10 +65,10 @@ func NewBuiltIn() (*Registry, error) {
 					graphOptions = append(graphOptions, option)
 				}
 			}
-			return attehcl.Graph(repo, graphOptions...)
+			return attehcl.Graph(ctx, repo, graphOptions...)
 		},
-		Targets: func(repo *attegit.Repo) ([]Target, error) {
-			found, err := attehcl.Targets(repo, r.FunctionProvider())
+		Targets: func(ctx context.Context, repo *attegit.Repo) ([]Target, error) {
+			found, err := attehcl.Targets(ctx, repo, r.FunctionProvider())
 			if err != nil {
 				return nil, err
 			}
@@ -100,7 +104,9 @@ func NewBuiltIn() (*Registry, error) {
 	}); err != nil {
 		return nil, err
 	}
-	if err := r.RegisterHCLFunction("path", attegit.PathHCLFunction); err != nil {
+	if err := r.RegisterHCLFunction("path", func(ctx context.Context, repo *attegit.Repo, file reference.Blob) (function.Function, error) {
+		return attegit.PathHCLFunction(ctx, repo, file)
+	}); err != nil {
 		return nil, err
 	}
 	return r, nil

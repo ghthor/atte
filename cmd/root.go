@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"os"
+	"context"
 
 	"github.com/spf13/cobra"
 )
@@ -22,10 +22,7 @@ deployment systems, and CI pipelines.`,
 	// Run: func(cmd *cobra.Command, args []string) { },
 }
 
-// Execute runs the atte command and exits with status 1 if it fails.
-func Execute() {
-	err := rootCmd.Execute()
-	if err != nil {
-		os.Exit(1)
-	}
+// ExecuteContext runs the atte command with ctx and exits with status 1 if it fails.
+func ExecuteContext(ctx context.Context) error {
+	return rootCmd.ExecuteContext(ctx)
 }

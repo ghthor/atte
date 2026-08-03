@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -46,11 +47,12 @@ var graphCmd = &cobra.Command{
 	Short: "Print the graph for the current directory",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
 		cwd, err := os.Getwd()
 		if err != nil {
 			return fmt.Errorf("get working directory: %w", err)
 		}
-		repoRoot, relative, err := repositoryContext(cwd)
+		repoRoot, relative, err := repositoryContext(ctx, cwd)
 		if err != nil {
 			return err
 		}
@@ -62,7 +64,7 @@ var graphCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return printGraph(cmd.OutOrStdout(), repo, relative, PrintGraphOptions{IncludeExternalImports: graphExternalImports, IncludeGoFiles: graphGoFiles, IncludeRunTargets: graphRunTargets})
+		return printGraph(ctx, cmd.OutOrStdout(), repo, relative, PrintGraphOptions{IncludeExternalImports: graphExternalImports, IncludeGoFiles: graphGoFiles, IncludeRunTargets: graphRunTargets})
 	},
 }
 
@@ -75,8 +77,8 @@ func init() {
 	graphCmd.Flags().BoolVar(&graphRunTargets, "run-targets", false, "Render runnable entities as atte run selectors")
 }
 
-func repositoryContext(cwd string) (string, string, error) {
-	cmd := exec.Command("git", "-C", cwd, "rev-parse", "--show-toplevel")
+func repositoryContext(ctx context.Context, cwd string) (string, string, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", cwd, "rev-parse", "--show-toplevel")
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
@@ -93,7 +95,7 @@ func repositoryContext(cwd string) (string, string, error) {
 	return root, filepath.ToSlash(relative), nil
 }
 
-func printGraph(w io.Writer, repo *attegit.Repo, relativePath string, options ...PrintGraphOptions) error {
+func printGraph(ctx context.Context, w io.Writer, repo *attegit.Repo, relativePath string, options ...PrintGraphOptions) error {
 	if relativePath != "" {
 		if _, err := reference.ParseTree(relativePath); err != nil {
 			return fmt.Errorf("invalid repository working directory %q: %w", relativePath, err)
@@ -111,7 +113,7 @@ func printGraph(w io.Writer, repo *attegit.Repo, relativePath string, options ..
 	if err != nil {
 		return fmt.Errorf("register detectors: %w", err)
 	}
-	detectorGraph, err := registry.Graph(repo, detector.WithAttachToTree())
+	detectorGraph, err := registry.Graph(ctx, repo, detector.WithAttachToTree())
 	if err != nil {
 		return fmt.Errorf("build Go graph: %w", err)
 	}
@@ -122,7 +124,7 @@ func printGraph(w io.Writer, repo *attegit.Repo, relativePath string, options ..
 	}
 	var runSelectors map[graph.EntityID]string
 	if printOptions.IncludeRunTargets {
-		runSelectors, err = graphRunTargetSelectors(repo)
+		runSelectors, err = graphRunTargetSelectors(ctx, repo)
 		if err != nil {
 			return fmt.Errorf("discover run targets: %w", err)
 		}
@@ -130,13 +132,13 @@ func printGraph(w io.Writer, repo *attegit.Repo, relativePath string, options ..
 	return printGitGraph(w, repo, gitGraph, relativePath, printOptions, runSelectors)
 }
 
-func graphRunTargetSelectors(repo *attegit.Repo) (map[graph.EntityID]string, error) {
+func graphRunTargetSelectors(ctx context.Context, repo *attegit.Repo) (map[graph.EntityID]string, error) {
 	selectors := make(map[graph.EntityID]string)
 	registry, err := registry.NewBuiltIn()
 	if err != nil {
 		return nil, err
 	}
-	targets, err := registry.Targets(repo)
+	targets, err := registry.Targets(ctx, repo)
 	if err != nil {
 		return nil, err
 	}

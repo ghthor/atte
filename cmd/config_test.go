@@ -47,7 +47,7 @@ test "child2" {
 `,
 		"child/child.sh": "#!/bin/sh\n",
 	})
-	config, err := attehcl.ConfigFor(repo, "child", attegit.PathHCLFunctions)
+	config, err := attehcl.ConfigFor(t.Context(), repo, "child", attegit.PathHCLFunctions)
 	test.NoError(t, err)
 	test.EqOp(t, "1.27", config.Global["go_ver"].AsString())
 	test.EqOp(t, "child/child.sh", (*config.Global["script"].EncapsulatedValue().(*reference.Blob)).String())
@@ -73,7 +73,7 @@ globals {
 `,
 		"child/file.txt": "child\n",
 	})
-	config, err := attehcl.ConfigFor(repo, "child", attegit.PathHCLFunctions)
+	config, err := attehcl.ConfigFor(t.Context(), repo, "child", attegit.PathHCLFunctions)
 	test.NoError(t, err)
 	test.EqOp(t, "1.26", config.Global["go_ver"].AsString())
 	test.EqOp(t, 0, len(config.Local))

@@ -6,6 +6,7 @@
 package attego
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
 	"go/parser"
@@ -108,8 +109,8 @@ func Selector(target Target) selector.Target {
 	return selector.Target{Path: target.PackageDir.String(), Kind: "go_test"}
 }
 
-func Targets(repo *attegit.Repo) ([]Target, error) {
-	g, err := Graph(repo, detector.WithAttachToTree())
+func Targets(ctx context.Context, repo *attegit.Repo) ([]Target, error) {
+	g, err := Graph(ctx, repo, detector.WithAttachToTree())
 	if err != nil {
 		return nil, err
 	}
@@ -153,26 +154,35 @@ func Targets(repo *attegit.Repo) ([]Target, error) {
 // Graph builds the dependency graph of Go packages and package tests found in
 // repo, related by ImportsRelation. Pass detector.WithAttachToTree to relate
 // package entities to the repository's filesystem tree and source files.
-func Graph(repo *attegit.Repo, options ...detector.GraphOption) (*graph.Graph, error) {
+func Graph(ctx context.Context, repo *attegit.Repo, options ...detector.GraphOption) (*graph.Graph, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	config := detector.GraphOptions{}
 	for _, option := range options {
 		if option != nil {
 			option(&config)
 		}
 	}
-	return graphFor(repo, config)
+	return graphFor(ctx, repo, config)
 }
 
-func graphFor(repo *attegit.Repo, options detector.GraphOptions) (*graph.Graph, error) {
+func graphFor(ctx context.Context, repo *attegit.Repo, options detector.GraphOptions) (*graph.Graph, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if repo == nil {
 		return nil, fmt.Errorf("nil repository")
 	}
-	mods, files, err := scan(repo)
+	mods, files, err := scan(ctx, repo)
 	if err != nil {
 		return nil, err
 	}
 	packages := make(map[string]*packageInfo)
 	for _, f := range files {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		m := owner(mods, f.dir)
 		if m == nil {
 			continue
@@ -217,6 +227,9 @@ func graphFor(repo *attegit.Repo, options detector.GraphOptions) (*graph.Graph, 
 	entities := map[graph.EntityID]graph.Entity{}
 	relations := map[graph.Relationship]struct{}{}
 	for _, p := range packages {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		pid := EntityID(PackageKind, p.module.dir, p.importPath)
 		entities[pid] = graph.Entity{ID: pid, Kind: PackageKind}
 		var treeID graph.EntityID
@@ -276,7 +289,7 @@ func graphFor(repo *attegit.Repo, options detector.GraphOptions) (*graph.Graph, 
 	return graph.New(el, rl)
 }
 
-func scan(repo *attegit.Repo) ([]*module, []goFile, error) {
+func scan(ctx context.Context, repo *attegit.Repo) ([]*module, []goFile, error) {
 	mods := make([]*module, 0, len(repo.ObjKeys))
 	files := make([]goFile, 0, len(repo.ObjKeys))
 	for _, p := range repo.ObjKeys {
@@ -287,7 +300,7 @@ func scan(repo *attegit.Repo) ([]*module, []goFile, error) {
 		if path.Base(name) != "go.mod" && !strings.HasSuffix(name, ".go") {
 			continue
 		}
-		contents, err := repo.Show(p)
+		contents, err := repo.ShowContext(ctx, p)
 		if err != nil {
 			return nil, nil, fmt.Errorf("read %q: %w", p, err)
 		}

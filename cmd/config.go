@@ -29,11 +29,12 @@ var configShowCmd = &cobra.Command{
 	Short: "Show evaluated configuration for the current directory",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
 		cwd, err := os.Getwd()
 		if err != nil {
 			return fmt.Errorf("get working directory: %w", err)
 		}
-		root, relative, err := repositoryContext(cwd)
+		root, relative, err := repositoryContext(ctx, cwd)
 		if err != nil {
 			return err
 		}
@@ -49,7 +50,7 @@ var configShowCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("register detectors: %w", err)
 		}
-		config, err := attehcl.ConfigFor(repo, relative, builtIns.FunctionProvider())
+		config, err := attehcl.ConfigFor(cmd.Context(), repo, relative, builtIns.FunctionProvider())
 		if err != nil {
 			return fmt.Errorf("evaluate attehcl configuration: %w", err)
 		}

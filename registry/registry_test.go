@@ -12,7 +12,7 @@ func TestNewBuiltIn(t *testing.T) {
 	test.NoError(t, err)
 	test.NotNil(t, r)
 
-	functions, err := r.HCLFunctions(nil, "")
+	functions, err := r.HCLFunctions(t.Context(), nil, "")
 	test.NoError(t, err)
 	test.NotNil(t, functions)
 	test.NotNil(t, functions["path"])

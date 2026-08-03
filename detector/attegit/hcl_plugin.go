@@ -1,6 +1,7 @@
 package attegit
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 
@@ -20,8 +21,8 @@ var RepositoryPathType = cty.CapsuleWithOps(
 )
 
 // PathHCLFunctions returns the Git-backed HCL functions for one file.
-func PathHCLFunctions(repo *Repo, file reference.Blob) (map[string]function.Function, error) {
-	fn, err := PathHCLFunction(repo, file)
+func PathHCLFunctions(ctx context.Context, repo *Repo, file reference.Blob) (map[string]function.Function, error) {
+	fn, err := PathHCLFunction(ctx, repo, file)
 	if err != nil {
 		return nil, err
 	}
@@ -29,7 +30,7 @@ func PathHCLFunctions(repo *Repo, file reference.Blob) (map[string]function.Func
 }
 
 // PathHCLFunction constructs the Git-backed path function for an HCL file.
-func PathHCLFunction(_ *Repo, file reference.Blob) (function.Function, error) {
+func PathHCLFunction(_ context.Context, _ *Repo, file reference.Blob) (function.Function, error) {
 	return function.New(&function.Spec{
 		Params: []function.Parameter{{Name: "path", Type: cty.String}},
 		Type:   function.StaticReturnType(RepositoryPathType),

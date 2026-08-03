@@ -2,7 +2,6 @@ package attego
 
 import (
 	"bytes"
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -204,7 +203,7 @@ func assertGraphsEqual(t *testing.T, want, got *graph.Graph) {
 
 func graphvizSnapshot(t *testing.T, g *graph.Graph) string {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	viz, err := graphviz.New(ctx)
 	must.NoError(t, err)
 	defer func() { must.NoError(t, viz.Close()) }()

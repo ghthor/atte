@@ -111,14 +111,14 @@ func openTestRepo(t *testing.T, dir string) *attegit.Repo {
 
 func openTestGraph(t *testing.T, dir string) *graph.Graph {
 	t.Helper()
-	got, err := Graph(openTestRepo(t, dir))
+	got, err := Graph(t.Context(), openTestRepo(t, dir))
 	must.NoError(t, err)
 	return got
 }
 
 func openTestGraphWithContainment(t *testing.T, dir string) *graph.Graph {
 	t.Helper()
-	got, err := Graph(openTestRepo(t, dir), detector.WithAttachToTree())
+	got, err := Graph(t.Context(), openTestRepo(t, dir), detector.WithAttachToTree())
 	must.NoError(t, err)
 	return got
 }
