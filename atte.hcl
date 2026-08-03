@@ -20,6 +20,10 @@ codegen "go" {
   script = path("./atte_codegen.sh")
 }
 
+codegen "rendered" {
+  script = path("./atte_codegen_rendered.sh")
+}
+
 lint "go" {
   script = path("./atte_lint.sh")
 }
