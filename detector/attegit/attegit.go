@@ -15,7 +15,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ghthor/atte/graph"
+	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/reference"
 	"github.com/go-git/go-billy/v5"
 	"github.com/go-git/go-billy/v5/osfs"

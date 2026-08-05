@@ -11,7 +11,7 @@ import (
 	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attehcl"
-	"github.com/ghthor/atte/graph"
+	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/reference"
 	"github.com/ghthor/atte/reference/selector"
 	"github.com/zclconf/go-cty/cty/function"

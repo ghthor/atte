@@ -4,7 +4,7 @@ package graphtest
 import (
 	"testing"
 
-	"github.com/ghthor/atte/graph"
+	"github.com/ghthor/atte/detector/graph"
 	"github.com/shoenig/test/must"
 )
 

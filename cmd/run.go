@@ -14,7 +14,7 @@ import (
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/attehcl"
-	"github.com/ghthor/atte/graph"
+	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/reference/selector"
 	"github.com/ghthor/atte/registry"
 	fzf "github.com/junegunn/fzf/src"

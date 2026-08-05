@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/ghthor/atte/detector/attegit"
-	"github.com/ghthor/atte/graph"
+	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/reference/selector"
 )
 

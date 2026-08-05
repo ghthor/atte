@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ghthor/atte/graph"
+	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/reference"
 	"github.com/goccy/go-graphviz"
 	"github.com/shoenig/test"

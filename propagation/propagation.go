@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/ghthor/atte/graph"
+	"github.com/ghthor/atte/detector/graph"
 )
 
 // Impulse identifies an entity from which propagation begins and records why it
