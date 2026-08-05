@@ -9,8 +9,8 @@ import (
 
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attehcl"
+	"github.com/ghthor/atte/detector/registry"
 	"github.com/ghthor/atte/reference"
-	"github.com/ghthor/atte/registry"
 	"github.com/hashicorp/hcl/v2/hclwrite"
 	"github.com/spf13/cobra"
 	"github.com/zclconf/go-cty/cty"

@@ -16,8 +16,8 @@ import (
 	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphtarget"
+	"github.com/ghthor/atte/detector/registry"
 	"github.com/ghthor/atte/reference/selector"
-	"github.com/ghthor/atte/registry"
 	fzf "github.com/junegunn/fzf/src"
 	"github.com/spf13/cobra"
 )

@@ -18,9 +18,9 @@ import (
 	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphset"
+	"github.com/ghthor/atte/detector/registry"
 	"github.com/ghthor/atte/reference"
 	"github.com/ghthor/atte/reference/selector"
-	"github.com/ghthor/atte/registry"
 	"github.com/spf13/cobra"
 	"github.com/xlab/treeprint"
 )
