@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -56,6 +57,7 @@ type Obj struct {
 }
 
 // OpenOption configures Open.
+
 type OpenOption func(*openConfig)
 
 type openConfig struct {
@@ -321,14 +323,19 @@ func (r *Repo) rebuildIndexes() {
 	}
 
 	clear(r.Tree)
+	r.BlobKeys = make([]reference.Blob, 0, len(r.Obj))
 	r.ObjKeys = make([]reference.Path, 0, len(r.Obj))
 	for p, obj := range r.Obj {
 		r.ObjKeys = append(r.ObjKeys, p)
+		if obj.Kind == Blob {
+			r.BlobKeys = append(r.BlobKeys, reference.Blob(p.String()))
+		}
 		tree := parentTree(p, obj.Kind)
 		r.Tree[tree] = append(r.Tree[tree], obj)
 		// TODO: r.Tree is not sorted
 	}
 	slices.SortFunc(r.ObjKeys, func(a, b reference.Path) int { return strings.Compare(a.String(), b.String()) })
+	slices.Sort(r.BlobKeys)
 
 	clear(r.DirTree)
 	r.TreeKeys = make([]reference.Tree, 0, len(r.Tree))
@@ -467,4 +474,17 @@ func (r *Repo) ShowContext(ctx context.Context, relativePath reference.Path) ([]
 	default:
 	}
 	return r.Show(relativePath)
+}
+
+// BlobsNamed returns repository blobs whose basename matches name in repository order.
+func (r *Repo) BlobsNamed(name string) []reference.Blob {
+	matches := make([]reference.Blob, 0)
+	for _, tree := range r.TreeKeys {
+		candidate := reference.Blob(path.Join(string(tree), name))
+		if obj, ok := r.Obj[candidate]; ok && obj.Kind == Blob {
+			matches = append(matches, candidate)
+		}
+	}
+	slices.Sort(matches)
+	return matches
 }

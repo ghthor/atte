@@ -634,7 +634,11 @@ func addDecodedBlockGraph(ctx context.Context, repo *attegit.Repo, block decoded
 	}
 	for _, dep := range block.deps {
 		if dep.entity != "" {
-			addEntity(graph.Entity{ID: dep.entity, Kind: dependencyKind(ctx, repo, dep.entity)})
+			kind, err := entityDependencyKind(dep.entity)
+			if err != nil {
+				return nil, err
+			}
+			addEntity(graph.Entity{ID: dep.entity, Kind: kind})
 			relations = append(relations, graph.Relationship{From: id, To: dep.entity, Kind: DependsOnRelation})
 			continue
 		}
@@ -653,14 +657,23 @@ func addDecodedBlockGraph(ctx context.Context, repo *attegit.Repo, block decoded
 	return relations, nil
 }
 
-func dependencyKind(ctx context.Context, repo *attegit.Repo, id graph.EntityID) string {
-	g, err := attego.Graph(ctx, repo)
-	if err == nil {
-		if e, ok := g.Entities[id]; ok {
-			return e.Kind
+func entityDependencyKind(id graph.EntityID) (string, error) {
+	value := string(id)
+	if strings.HasPrefix(value, "attego:") {
+		kind, _, _, err := attego.DecodeEntityID(id)
+		if err != nil {
+			return "", fmt.Errorf("decode Go dependency entity %q: %w", id, err)
 		}
+		return kind, nil
 	}
-	return attego.PackageTestKind
+	if strings.HasPrefix(value, Namespace+":") {
+		kind, _, _, err := DecodeEntityID(id)
+		if err != nil {
+			return "", fmt.Errorf("decode HCL dependency entity %q: %w", id, err)
+		}
+		return kind, nil
+	}
+	return "", fmt.Errorf("dependency entity %q has unknown namespace", id)
 }
 
 func parseFile(file reference.Blob, contents []byte) (*hclsyntax.Body, error) {
@@ -693,9 +706,7 @@ func blocksOfType(file reference.Blob, body *hclsyntax.Body, blockType string) (
 }
 
 func mergedHCLFunctions(ctx context.Context, repo *attegit.Repo, file reference.Blob, provider graphset.FunctionProvider) (map[string]function.Function, error) {
-	functions := map[string]function.Function{
-		"gopkg_test": gopkgTestFunction(ctx, repo),
-	}
+	functions := make(map[string]function.Function)
 	if provider == nil {
 		return functions, nil
 	}
@@ -710,28 +721,6 @@ func mergedHCLFunctions(ctx context.Context, repo *attegit.Repo, file reference.
 		functions[name] = fn
 	}
 	return functions, nil
-}
-
-func gopkgTestFunction(ctx context.Context, repo *attegit.Repo) function.Function {
-	return function.New(&function.Spec{
-		Params: []function.Parameter{{Name: "path", Type: cty.String}},
-		Type:   function.StaticReturnType(cty.String),
-		Impl: func(args []cty.Value, ret cty.Type) (cty.Value, error) {
-			g, err := attego.Graph(ctx, repo)
-			if err != nil {
-				return cty.NilVal, err
-			}
-			for id, entity := range g.Entities {
-				if entity.Kind == attego.PackageTestKind {
-					_, _, importPath, err := attego.DecodeEntityID(id)
-					if err == nil && importPath == args[0].AsString() {
-						return cty.StringVal("attehcl-id:" + string(id)), nil
-					}
-				}
-			}
-			return cty.NilVal, fmt.Errorf("go package-test %q not found", args[0].AsString())
-		},
-	})
 }
 
 func decodeTargetBlock(repo *attegit.Repo, file reference.Blob, body *hclsyntax.Body, ctx *hcl.EvalContext) (string, []dependency, error) {
@@ -781,6 +770,8 @@ func decodeTargetBlock(repo *attegit.Repo, file reference.Blob, body *hclsyntax.
 				}
 				if strings.HasPrefix(raw, "attehcl-id:") {
 					deps = append(deps, dependency{entity: graph.EntityID(strings.TrimPrefix(raw, "attehcl-id:"))})
+				} else if strings.HasPrefix(raw, "attego:") {
+					deps = append(deps, dependency{entity: graph.EntityID(raw)})
 				} else {
 					deps = append(deps, dependency{value: raw})
 				}

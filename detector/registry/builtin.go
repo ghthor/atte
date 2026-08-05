@@ -24,5 +24,13 @@ func NewBuiltIn() (*Registry, error) {
 	}); err != nil {
 		return nil, err
 	}
+	for _, name := range []string{"gopkg", "gopkg_test"} {
+		functionName := name
+		if err := r.RegisterHCLFunction(functionName, func(ctx context.Context, repo *attegit.Repo, file reference.Blob) (function.Function, error) {
+			return attego.HCLFunction(ctx, repo, file, functionName)
+		}); err != nil {
+			return nil, err
+		}
+	}
 	return r, nil
 }

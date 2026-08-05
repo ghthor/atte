@@ -19,4 +19,7 @@
 ├── test.sh
 ├── go package example.com/root
 │   └── import example.com/root/cmd
+├── //atte.hcl#codegen.go
+│   └── go package example.com/root/cmd
+│       └── import example.com/root/internal/value
 └── //atte.hcl#test.default

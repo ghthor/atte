@@ -165,6 +165,19 @@ func TestTreeIndex(t *testing.T) {
 	test.SliceEqOp(t, []reference.Tree{reference.Root, reference.Tree("nested"), reference.Tree("nested/deeper")}, repo.TreeKeys)
 }
 
+func TestBlobsNamed(t *testing.T) {
+	git := committedRepo(t, map[string]string{
+		"go.mod":         "root",
+		"nested/go.mod":  "nested",
+		"other/go.mod":   "other",
+		"nested/main.go": "main",
+	})
+	repo, err := Open(git.Dir(), "HEAD")
+	must.NoError(t, err)
+	test.SliceEqOp(t, []reference.Blob{reference.Blob("go.mod"), reference.Blob("nested/go.mod"), reference.Blob("other/go.mod")}, repo.BlobsNamed("go.mod"))
+	test.SliceEqOp(t, []reference.Blob{}, repo.BlobsNamed("missing"))
+}
+
 func assertTreeChildren(t *testing.T, got []Obj, want map[reference.Path]Kind) {
 	t.Helper()
 	must.MapLen(t, len(want), sliceToMap(got))

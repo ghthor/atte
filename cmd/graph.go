@@ -154,6 +154,8 @@ func graphRunTargetSelectors(ctx context.Context, repo *attegit.Repo) (map[graph
 
 var (
 	workingTreeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	plainStyle       = lipgloss.NewStyle().Faint(true)
+	atteHCLStyle     = lipgloss.NewStyle().Bold(true)
 	goPackageStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ADD8"))
 	stdlibStyle      = lipgloss.NewStyle().Faint(true)
 )
@@ -228,7 +230,7 @@ func addGraphChildren(parent treeprint.Tree, repo *attegit.Repo, g *graph.Graph,
 			if err != nil {
 				return fmt.Errorf("decode Git entity %q: %w", id, err)
 			}
-			branch := parent.AddBranch(path.Base(entityPath.String()) + "/")
+			branch := parent.AddBranch(plainStyle.Render(path.Base(entityPath.String()) + "/"))
 			if err := addGraphChildren(branch, repo, g, id, options, selectors); err != nil {
 				return err
 			}
@@ -251,34 +253,84 @@ func addGraphChildren(parent treeprint.Tree, repo *attegit.Repo, g *graph.Graph,
 				return err
 			}
 		case attehcl.TestKind:
+			label := "test " + string(id)
 			if options.IncludeRunTargets {
 				if value, ok := selectors[id]; ok {
-					parent.AddBranch(value)
-					break
+					label = value
 				}
 			}
-			parent.AddBranch("test " + string(id))
+			addTargetNode(parent, repo, g, id, label, options)
 		case attehcl.CodegenKind:
+			label := "codegen " + string(id)
 			if options.IncludeRunTargets {
 				if value, ok := selectors[id]; ok {
-					parent.AddBranch(value)
-					break
+					label = value
 				}
 			}
-			parent.AddBranch("codegen " + string(id))
+			addTargetNode(parent, repo, g, id, label, options)
 		case attehcl.LintKind:
+			label := "lint " + string(id)
 			if options.IncludeRunTargets {
 				if value, ok := selectors[id]; ok {
-					parent.AddBranch(value)
-					break
+					label = value
 				}
 			}
-			parent.AddBranch("lint " + string(id))
+			addTargetNode(parent, repo, g, id, label, options)
 		default:
 			return fmt.Errorf("unsupported entity kind %q for %q", entity.Kind, id)
 		}
 	}
 	return nil
+}
+
+func addTargetNode(parent treeprint.Tree, repo *attegit.Repo, g *graph.Graph, id graph.EntityID, label string, options PrintGraphOptions) {
+	dependencies := make([]graph.EntityID, 0)
+	for _, relation := range g.Out(id) {
+		if relation.Kind == attehcl.DependsOnRelation {
+			dependencies = append(dependencies, relation.To)
+		}
+	}
+	label = atteHCLStyle.Render(label)
+	if len(dependencies) == 0 {
+		parent.AddNode(label)
+		return
+	}
+
+	branch := parent.AddBranch(label)
+	for _, dependency := range dependencies {
+		if g.Entities[dependency].Kind == attego.PackageKind || g.Entities[dependency].Kind == attego.PackageTestKind {
+			if err := addPackageNode(branch, repo, g, dependency, options); err != nil {
+				branch.AddNode(graphDependencyLabel(g, dependency))
+			}
+			continue
+		}
+		branch.AddNode(graphDependencyLabel(g, dependency))
+	}
+}
+
+func graphDependencyLabel(g *graph.Graph, id graph.EntityID) string {
+	entity := g.Entities[id]
+	switch entity.Kind {
+	case attego.PackageKind, attego.PackageTestKind:
+		_, _, importPath, err := attego.DecodeEntityID(id)
+		if err == nil {
+			label := "go package"
+			if entity.Kind == attego.PackageTestKind {
+				label = "go package-test"
+			}
+			return goPackageStyle.Render(label + " " + importPath)
+		}
+	case attehcl.TestKind, attehcl.CodegenKind, attehcl.LintKind:
+		kind, _, name, err := attehcl.DecodeEntityID(id)
+		if err == nil {
+			return atteHCLStyle.Render(strings.TrimPrefix(kind, attehcl.Namespace+":") + " " + name)
+		}
+	case attegit.BlobKind:
+		if dependencyPath, err := entityPathString(id); err == nil {
+			return plainStyle.Render(dependencyPath)
+		}
+	}
+	return string(id)
 }
 
 func entityPath(id graph.EntityID) (reference.Path, error) {
@@ -305,6 +357,8 @@ func addBlobNode(parent treeprint.Tree, repo *attegit.Repo, id graph.EntityID) e
 	label := path.Base(blob.String())
 	if obj, ok := repo.Obj[blob]; ok && obj.Source == attegit.WorkingTreeSource {
 		label = workingTreeStyle.Render(label)
+	} else {
+		label = plainStyle.Render(label)
 	}
 	parent.AddNode(label)
 	return nil

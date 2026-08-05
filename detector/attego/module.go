@@ -334,6 +334,27 @@ func graphFor(ctx context.Context, repo *attegit.Repo, options graphset.Options)
 	return graph.New(el, rl)
 }
 
+func parseModule(dir, name string, contents []byte) (*module, error) {
+	f, err := modfile.Parse(name, contents, nil)
+	if err != nil {
+		return nil, fmt.Errorf("parse go.mod %q: %w", name, err)
+	}
+	var moduleDir reference.Tree
+	if dir != "" {
+		moduleDir, err = reference.ParseTree(dir)
+		if err != nil {
+			return nil, fmt.Errorf("invalid Go module directory %q: %w", dir, err)
+		}
+	}
+	m := &module{dir: moduleDir, name: f.Module.Mod.Path}
+	for _, r := range f.Replace {
+		if r.New.Version == "" {
+			m.replaces = append(m.replaces, replace{old: r.Old.Path, target: path.Clean(path.Join(dir, r.New.Path))})
+		}
+	}
+	return m, nil
+}
+
 func scan(ctx context.Context, repo *attegit.Repo) ([]*module, []goFile, error) {
 	mods := make([]*module, 0, len(repo.ObjKeys))
 	files := make([]goFile, 0, len(repo.ObjKeys))
@@ -354,22 +375,9 @@ func scan(ctx context.Context, repo *attegit.Repo) ([]*module, []goFile, error) 
 			dir = ""
 		}
 		if path.Base(name) == "go.mod" {
-			f, err := modfile.Parse(name, contents, nil)
+			m, err := parseModule(dir, name, contents)
 			if err != nil {
-				return nil, nil, fmt.Errorf("parse go.mod %q: %w", p, err)
-			}
-			var moduleDir reference.Tree
-			if dir != "" {
-				moduleDir, err = reference.ParseTree(dir)
-				if err != nil {
-					return nil, nil, fmt.Errorf("invalid Go module directory %q: %w", dir, err)
-				}
-			}
-			m := &module{dir: moduleDir, name: f.Module.Mod.Path}
-			for _, r := range f.Replace {
-				if r.New.Version == "" {
-					m.replaces = append(m.replaces, replace{old: r.Old.Path, target: path.Clean(path.Join(dir, r.New.Path))})
-				}
+				return nil, nil, err
 			}
 			mods = append(mods, m)
 			continue

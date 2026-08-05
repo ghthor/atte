@@ -6,7 +6,6 @@ import (
 
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attegittest"
-	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graph/graphtest"
 	"github.com/ghthor/atte/detector/graphset"
@@ -119,42 +118,6 @@ lint "vet" {
 	graphtest.MustHaveRelation(t, got, testTarget, attegit.EntityID(testPath("test.sh")), ScriptRelation)
 	graphtest.MustHaveRelation(t, got, codegen, attegit.EntityID(testPath("codegen.sh")), ScriptRelation)
 	graphtest.MustHaveRelation(t, got, lint, attegit.EntityID(testPath("lint.sh")), ScriptRelation)
-}
-
-func TestGraphGopkgTestDependency(t *testing.T) {
-	repo := newHCLFixture(t, map[string]string{
-		"go.mod": `
-module example.com/root
-
-go 1.24
-`,
-		"p/p.go": `
-package p
-`,
-		"p/p_test.go": `
-package p_test
-
-import "testing"
-
-func TestP(t *testing.T) {}
-`,
-		"atte.hcl": `
-
-test "go" {
-  script = path("./test.sh")
-  depends_on = [gopkg_test("example.com/root/p")]
-}
-`,
-		"test.sh": "#!/bin/sh\n",
-	})
-
-	got, err := Graph(t.Context(), repo, WithFunctions(attegit.PathHCLFunctions))
-	must.NoError(t, err)
-
-	testID := EntityID(TestKind, "atte.hcl", "go")
-	packageTestID := attego.EntityID(attego.PackageTestKind, "", "example.com/root/p")
-	test.EqOp(t, attego.PackageTestKind, got.Entities[packageTestID].Kind)
-	graphtest.MustHaveRelation(t, got, testID, packageTestID, DependsOnRelation)
 }
 
 func TestGraphRejectsInvalidConfiguration(t *testing.T) {

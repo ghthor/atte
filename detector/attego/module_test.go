@@ -11,6 +11,8 @@ import (
 	"github.com/ghthor/atte/reference"
 	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
+	"github.com/zclconf/go-cty/cty"
+	"github.com/zclconf/go-cty/cty/function"
 )
 
 // newBasicFixture creates a temporary Git repository with a root module
@@ -69,6 +71,30 @@ var _ = must.NoError
 	})
 	git.CommitAll(t, "init")
 	return git.Dir()
+}
+
+func TestHCLFunctionsResolvePackages(t *testing.T) {
+	repoPath := newBasicFixture(t)
+	repo, err := attegit.Open(repoPath, "HEAD")
+	must.NoError(t, err)
+	functions, err := HCLFunctions(t.Context(), repo, reference.Blob("atte.hcl"))
+	must.NoError(t, err)
+
+	resolve := func(t *testing.T, fn function.Function, value string, want graph.EntityID) {
+		t.Helper()
+		got, err := fn.Call([]cty.Value{cty.StringVal(value)})
+		test.NoError(t, err)
+		test.EqOp(t, string(want), got.AsString())
+	}
+	reject := func(t *testing.T, fn function.Function, value, message string) {
+		t.Helper()
+		_, err := fn.Call([]cty.Value{cty.StringVal(value)})
+		test.ErrorContains(t, err, message)
+	}
+
+	resolve(t, functions["gopkg"], "example.com/root/p", EntityID(PackageKind, reference.Root, "example.com/root/p"))
+	resolve(t, functions["gopkg_test"], "p", EntityID(PackageTestKind, reference.Root, "example.com/root/p"))
+	reject(t, functions["gopkg_test"], "p/p.go", "names a Go file")
 }
 
 func TestEntityIDRoundTrip(t *testing.T) {

@@ -18,6 +18,9 @@ codegen "fmt" {
 
 codegen "go" {
   script = path("./atte_codegen.sh")
+  depends_on = [
+    gopkg("./cmd"),
+  ]
 }
 
 codegen "rendered" {

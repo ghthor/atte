@@ -44,6 +44,11 @@ func TestPrintGraphGolden(t *testing.T) {
 			test "default" {
 				script = path("./test.sh")
 			}
+
+			codegen "go" {
+				script = path("./test.sh")
+				depends_on = [gopkg("./cmd")]
+			}
 		`,
 		"test.sh": "#!/bin/sh\n",
 		"pkg/pkg.go": `
@@ -211,6 +216,38 @@ var Value = 1
 	got := renderTestGraph(t, repo)
 	test.StrContains(t, got, "import example.com/root/detector")
 	test.StrNotContains(t, got, "attego:")
+}
+
+func TestPrintGraphTargetDependencies(t *testing.T) {
+	repo := repoWithFiles(t, map[string]string{
+		"atte.hcl": `
+codegen "go" {
+  script = path("./codegen.sh")
+  depends_on = [gopkg("./pkg")]
+}
+`,
+		"codegen.sh": "#!/bin/sh\n",
+		"go.mod": `module example.com/root
+
+go 1.20
+`,
+		"pkg/pkg.go": `package pkg
+
+import "example.com/root/dep"
+
+var _ = dep.Value
+`,
+		"dep/dep.go": `package dep
+
+const Value = 1
+`,
+	})
+
+	got := ansi.Strip(renderTestGraph(t, repo))
+	test.StrContains(t, got, "codegen attehcl:codegen:atte.hcl:go")
+	test.StrContains(t, got, "go package example.com/root/pkg")
+	test.StrContains(t, got, "import example.com/root/dep")
+	test.StrNotContains(t, got, "depends on")
 }
 
 func TestPrintGraphExternalImports(t *testing.T) {
