@@ -7,24 +7,25 @@ import (
 	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/graph"
+	"github.com/ghthor/atte/detector/graphset"
 	"github.com/ghthor/atte/reference"
 	"github.com/ghthor/atte/reference/selector"
 )
 
 // Detector adapts the HCL detector to the shared detector capabilities.
 type Detector struct {
-	Provider detector.FunctionProvider
+	Provider graphset.FunctionProvider
 }
 
-func NewDetector(provider detector.FunctionProvider) Detector {
+func NewDetector(provider graphset.FunctionProvider) Detector {
 	return Detector{Provider: provider}
 }
 
 func (d Detector) Namespace() string { return Namespace }
 
-func (d Detector) Graph(ctx context.Context, repo *attegit.Repo, options ...detector.GraphOption) (*graph.Graph, error) {
-	graphOptions := make([]detector.GraphOption, 0, len(options)+2)
-	graphOptions = append(graphOptions, detector.WithAttachToTree(), WithFunctions(d.Provider))
+func (d Detector) Graph(ctx context.Context, repo *attegit.Repo, options ...graphset.Option) (*graph.Graph, error) {
+	graphOptions := make([]graphset.Option, 0, len(options)+2)
+	graphOptions = append(graphOptions, graphset.WithAttachToTree(), WithFunctions(d.Provider))
 	for _, option := range options {
 		if option != nil {
 			graphOptions = append(graphOptions, option)

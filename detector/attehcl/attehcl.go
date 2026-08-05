@@ -11,10 +11,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/graph"
+	"github.com/ghthor/atte/detector/graphset"
 	"github.com/ghthor/atte/reference"
 	"github.com/ghthor/atte/reference/selector"
 	"github.com/hashicorp/hcl/v2"
@@ -195,7 +195,7 @@ type evaluator struct {
 	ctx       context.Context
 	repo      *attegit.Repo
 	files     hclFiles
-	provider  detector.FunctionProvider
+	provider  graphset.FunctionProvider
 	functions map[reference.Blob]map[string]function.Function
 }
 
@@ -218,7 +218,7 @@ type evaluationPhase struct {
 	globals globalPhase
 }
 
-func newEvaluator(ctx context.Context, repo *attegit.Repo, provider detector.FunctionProvider) (*evaluator, error) {
+func newEvaluator(ctx context.Context, repo *attegit.Repo, provider graphset.FunctionProvider) (*evaluator, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("repository is nil")
 	}
@@ -460,11 +460,11 @@ func Selector(target Target) selector.Target {
 	}
 }
 
-func Targets(ctx context.Context, repo *attegit.Repo, provider detector.FunctionProvider) ([]Target, error) {
+func Targets(ctx context.Context, repo *attegit.Repo, provider graphset.FunctionProvider) ([]Target, error) {
 	return targetsWithProvider(ctx, repo, provider)
 }
 
-func targetsWithProvider(ctx context.Context, repo *attegit.Repo, provider detector.FunctionProvider) ([]Target, error) {
+func targetsWithProvider(ctx context.Context, repo *attegit.Repo, provider graphset.FunctionProvider) ([]Target, error) {
 	evaluator, err := newEvaluator(ctx, repo, provider)
 	if err != nil {
 		return nil, err
@@ -490,11 +490,11 @@ type Config struct {
 // ConfigFor evaluates the attehcl configuration for a repository-relative directory.
 // Global values are inherited from repository ancestors; local values and targets
 // are scoped to the requested directory.
-func ConfigFor(ctx context.Context, repo *attegit.Repo, relativePath string, provider detector.FunctionProvider) (Config, error) {
+func ConfigFor(ctx context.Context, repo *attegit.Repo, relativePath string, provider graphset.FunctionProvider) (Config, error) {
 	return configForWithProvider(ctx, repo, relativePath, provider)
 }
 
-func configForWithProvider(ctx context.Context, repo *attegit.Repo, relativePath string, provider detector.FunctionProvider) (Config, error) {
+func configForWithProvider(ctx context.Context, repo *attegit.Repo, relativePath string, provider graphset.FunctionProvider) (Config, error) {
 	if repo == nil {
 		return Config{}, fmt.Errorf("repository is nil")
 	}
@@ -549,16 +549,16 @@ func configForWithProvider(ctx context.Context, repo *attegit.Repo, relativePath
 }
 
 // WithFunctions adds provider-supplied HCL functions.
-func WithFunctions(provider detector.FunctionProvider) detector.GraphOption {
-	return func(options *detector.GraphOptions) { options.Functions = provider }
+func WithFunctions(provider graphset.FunctionProvider) graphset.Option {
+	return func(options *graphset.Options) { options.Functions = provider }
 }
 
 // Graph builds the HCL detector graph using the supplied options.
-func Graph(ctx context.Context, repo *attegit.Repo, options ...detector.GraphOption) (*graph.Graph, error) {
+func Graph(ctx context.Context, repo *attegit.Repo, options ...graphset.Option) (*graph.Graph, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	config := detector.GraphOptions{}
+	config := graphset.Options{}
 	for _, option := range options {
 		if option != nil {
 			option(&config)
@@ -567,7 +567,7 @@ func Graph(ctx context.Context, repo *attegit.Repo, options ...detector.GraphOpt
 	return graphFor(ctx, repo, config)
 }
 
-func graphFor(ctx context.Context, repo *attegit.Repo, options detector.GraphOptions) (*graph.Graph, error) {
+func graphFor(ctx context.Context, repo *attegit.Repo, options graphset.Options) (*graph.Graph, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -692,7 +692,7 @@ func blocksOfType(file reference.Blob, body *hclsyntax.Body, blockType string) (
 	return blocks, nil
 }
 
-func mergedHCLFunctions(ctx context.Context, repo *attegit.Repo, file reference.Blob, provider detector.FunctionProvider) (map[string]function.Function, error) {
+func mergedHCLFunctions(ctx context.Context, repo *attegit.Repo, file reference.Blob, provider graphset.FunctionProvider) (map[string]function.Function, error) {
 	functions := map[string]function.Function{
 		"gopkg_test": gopkgTestFunction(ctx, repo),
 	}

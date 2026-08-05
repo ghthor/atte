@@ -4,12 +4,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attegittest"
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graph/graphtest"
+	"github.com/ghthor/atte/detector/graphset"
 	"github.com/ghthor/atte/reference"
 	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
@@ -46,7 +46,7 @@ test "unit" {
 		"trigger.yaml": "trigger\n",
 	})
 
-	got, err := Graph(t.Context(), repo, detector.WithAttachToTree(), WithFunctions(attegit.PathHCLFunctions))
+	got, err := Graph(t.Context(), repo, graphset.WithAttachToTree(), WithFunctions(attegit.PathHCLFunctions))
 	must.NoError(t, err)
 
 	first := EntityID(TestKind, "atte.hcl", "0")
@@ -95,7 +95,7 @@ lint "vet" {
 		"lint.sh":    "#!/bin/sh\n",
 	})
 
-	got, err := Graph(t.Context(), repo, detector.WithAttachToTree(), WithFunctions(attegit.PathHCLFunctions))
+	got, err := Graph(t.Context(), repo, graphset.WithAttachToTree(), WithFunctions(attegit.PathHCLFunctions))
 	must.NoError(t, err)
 
 	testTarget := EntityID(TestKind, "atte.hcl", "0")
@@ -362,7 +362,7 @@ func TestLocalExpressionsAcrossBlockKindsAndGraphConsistency(t *testing.T) {
 	test.Len(t, 3, targets)
 	graphWithoutContainment, err := Graph(t.Context(), repo, WithFunctions(attegit.PathHCLFunctions))
 	must.NoError(t, err)
-	graphWithContainment, err := Graph(t.Context(), repo, detector.WithAttachToTree(), WithFunctions(attegit.PathHCLFunctions))
+	graphWithContainment, err := Graph(t.Context(), repo, graphset.WithAttachToTree(), WithFunctions(attegit.PathHCLFunctions))
 	must.NoError(t, err)
 	for _, target := range targets {
 		_, inGraph := graphWithoutContainment.Entities[target.ID]

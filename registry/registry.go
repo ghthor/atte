@@ -12,6 +12,7 @@ import (
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/detector/graph"
+	"github.com/ghthor/atte/detector/graphset"
 	"github.com/ghthor/atte/reference"
 	"github.com/ghthor/atte/reference/selector"
 	"github.com/zclconf/go-cty/cty/function"
@@ -24,7 +25,7 @@ type Target = detector.Target
 // Detector contains capabilities supplied by a detector namespace.
 type Detector struct {
 	Namespace       string
-	Graph           func(context.Context, *attegit.Repo, ...detector.GraphOption) (*graph.Graph, error)
+	Graph           func(context.Context, *attegit.Repo, ...graphset.Option) (*graph.Graph, error)
 	Targets         func(context.Context, *attegit.Repo) ([]Target, error)
 	Selectorize     func(Target) (selector.Target, bool)
 	MatchIdentifier func(Target, string) bool
@@ -103,7 +104,7 @@ func (r *Registry) RegisterHCLFunction(name string, factory HCLFunctionFactory) 
 }
 
 // FunctionProvider adapts registry HCL functions to detector evaluation.
-func (r *Registry) FunctionProvider() detector.FunctionProvider {
+func (r *Registry) FunctionProvider() graphset.FunctionProvider {
 	return func(ctx context.Context, repo *attegit.Repo, file reference.Blob) (map[string]function.Function, error) {
 		return r.HCLFunctions(ctx, repo, file)
 	}
@@ -132,7 +133,7 @@ func (r *Registry) HCLFunctions(ctx context.Context, repo *attegit.Repo, file re
 }
 
 // Graph combines all registered detector graphs in namespace order.
-func (r *Registry) Graph(ctx context.Context, repo *attegit.Repo, options ...detector.GraphOption) (*graph.Graph, error) {
+func (r *Registry) Graph(ctx context.Context, repo *attegit.Repo, options ...graphset.Option) (*graph.Graph, error) {
 	var result *graph.Graph
 	for _, detector := range r.snapshot() {
 		if detector.Graph == nil {
