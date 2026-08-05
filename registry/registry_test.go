@@ -6,7 +6,6 @@ import (
 
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/graphtarget"
-	"github.com/ghthor/atte/reference/selector"
 	"github.com/shoenig/test"
 )
 
@@ -27,7 +26,7 @@ func TestRegisterValidation(t *testing.T) {
 
 	r := New()
 	test.Error(t, r.Register(Detector{}))
-	detector := Detector{Namespace: "test", Selectorize: func(graphtarget.ID) (selector.Target, bool) { return selector.Target{}, true }}
+	detector := Detector{Namespace: "test", Targets: func(context.Context, *attegit.Repo) ([]graphtarget.ID, error) { return nil, nil }}
 	test.NoError(t, r.Register(detector))
 	test.Error(t, r.Register(detector))
 }
@@ -42,12 +41,6 @@ type methodDetector struct{}
 
 func (methodDetector) Namespace() string { return "method" }
 
-func (methodDetector) Selector(target graphtarget.ID) (selector.Target, bool) {
-	return selector.Target{Kind: target.Kind}, true
-}
-
 func (methodDetector) Targets(context.Context, *attegit.Repo) ([]graphtarget.ID, error) {
 	return nil, nil
 }
-
-func (methodDetector) MatchIdentifier(graphtarget.ID, string) bool { return true }

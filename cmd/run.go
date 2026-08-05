@@ -15,6 +15,7 @@ import (
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/detector/graph"
+	"github.com/ghthor/atte/detector/graphtarget"
 	"github.com/ghthor/atte/reference/selector"
 	"github.com/ghthor/atte/registry"
 	fzf "github.com/junegunn/fzf/src"
@@ -193,7 +194,7 @@ func runTargets(ctx context.Context, repo *attegit.Repo, root, cwd, relative str
 	}
 	targets := make([]runTarget, 0, len(registeredTargets))
 	for _, target := range registeredTargets {
-		canonical, ok := builtIns.Selector(target)
+		canonical, ok := selector.String(target)
 		if !ok {
 			continue
 		}
@@ -206,7 +207,7 @@ func runTargets(ctx context.Context, repo *attegit.Repo, root, cwd, relative str
 			file := filepath.Join(root, filepath.FromSlash(native.Script.String()))
 			dir := filepath.Dir(filepath.Join(root, filepath.FromSlash(native.File.String())))
 			targets = append(targets, runTarget{
-				selector: canonical.String(),
+				selector: canonical,
 				kind:     native.Kind,
 				path:     native.File.String(),
 				name:     native.Name,
@@ -224,7 +225,7 @@ func runTargets(ctx context.Context, repo *attegit.Repo, root, cwd, relative str
 				dir = cwd
 			}
 			targets = append(targets, runTarget{
-				selector: canonical.String(),
+				selector: canonical,
 				kind:     target.Kind,
 				path:     target.Path,
 				name:     target.Name,
@@ -362,25 +363,17 @@ func runTargetPaths(target runTarget) (string, string) {
 	return parsed.Path, parsed.Tree().String()
 }
 
-func (target runTarget) selectorTarget() selector.Target {
-	canonicalPath, _ := runTargetPaths(target)
-	kind := strings.TrimPrefix(target.kind, attehcl.Namespace+":")
-	name := target.name
-	if target.kind == attego.PackageTestKind {
-		kind = "go_test"
-		name = ""
-	}
-	return selector.Target{
-		Path:    canonicalPath,
-		Kind:    kind,
-		Name:    name,
-		Index:   target.index,
-		Aliases: target.aliases,
-	}
-}
-
 func matchesRunTargetAt(input string, target runTarget, relative string) bool {
-	return target.selectorTarget().Matches(input, relative)
+	canonicalPath, _ := runTargetPaths(target)
+	namespace := strings.SplitN(target.kind, ":", 2)[0]
+	return selector.Matches(graphtarget.ID{
+		Namespace: graphtarget.Namespace(namespace),
+		Kind:      target.kind,
+		Path:      canonicalPath,
+		Name:      target.name,
+		Index:     target.index,
+		Aliases:   target.aliases,
+	}, input, relative)
 }
 
 func matchesRunTargetLabel(input string, target runTarget) bool {

@@ -3,6 +3,9 @@ package graphtarget
 
 import "github.com/ghthor/atte/detector/graph"
 
+// Namespace identifies the detector namespace responsible for a graph target.
+type Namespace string
+
 // ID is the detector-neutral, long-form identity of a graph node.
 //
 // It preserves the graph entity ID and detector namespace alongside the
@@ -14,7 +17,7 @@ import "github.com/ghthor/atte/detector/graph"
 // translates to the string format used as a graph node.
 type ID struct {
 	ID        graph.EntityID
-	Namespace string
+	Namespace Namespace
 	Kind      string
 	Path      string
 	Name      string

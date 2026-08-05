@@ -19,6 +19,7 @@ import (
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphset"
 	"github.com/ghthor/atte/reference"
+	"github.com/ghthor/atte/reference/selector"
 	"github.com/ghthor/atte/registry"
 	"github.com/spf13/cobra"
 	"github.com/xlab/treeprint"
@@ -143,9 +144,9 @@ func graphRunTargetSelectors(ctx context.Context, repo *attegit.Repo) (map[graph
 		return nil, err
 	}
 	for _, target := range targets {
-		value, ok := registry.Selector(target)
+		value, ok := selector.String(target)
 		if ok {
-			selectors[target.ID] = value.String()
+			selectors[target.ID] = value
 		}
 	}
 	return selectors, nil

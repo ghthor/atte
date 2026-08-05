@@ -7,7 +7,6 @@ import (
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphset"
 	"github.com/ghthor/atte/detector/graphtarget"
-	"github.com/ghthor/atte/reference/selector"
 )
 
 // Detector describes the capabilities used to register a detector.
@@ -23,10 +22,9 @@ type GraphDetector interface {
 	Graph(context.Context, *attegit.Repo, ...graphset.Option) (*graph.Graph, error)
 }
 
-// TargetDetector discovers and canonicalizes detector targets.
+// TargetDetector discovers detector targets. Selector mappings are registered
+// independently by the detector package with reference/selector.
 type TargetDetector interface {
 	Detector
 	Targets(context.Context, *attegit.Repo) ([]graphtarget.ID, error)
-	Selector(graphtarget.ID) (selector.Target, bool)
-	MatchIdentifier(graphtarget.ID, string) bool
 }

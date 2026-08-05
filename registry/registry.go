@@ -5,27 +5,22 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strings"
 	"sync"
 
 	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
-	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphset"
 	"github.com/ghthor/atte/detector/graphtarget"
 	"github.com/ghthor/atte/reference"
-	"github.com/ghthor/atte/reference/selector"
 	"github.com/zclconf/go-cty/cty/function"
 )
 
 // Detector contains capabilities supplied by a detector namespace.
 type Detector struct {
-	Namespace       string
-	Graph           func(context.Context, *attegit.Repo, ...graphset.Option) (*graph.Graph, error)
-	Targets         func(context.Context, *attegit.Repo) ([]graphtarget.ID, error)
-	Selectorize     func(graphtarget.ID) (selector.Target, bool)
-	MatchIdentifier func(graphtarget.ID, string) bool
+	Namespace string
+	Graph     func(context.Context, *attegit.Repo, ...graphset.Option) (*graph.Graph, error)
+	Targets   func(context.Context, *attegit.Repo) ([]graphtarget.ID, error)
 }
 
 // HCLFunctionFactory constructs a function for one repository and HCL file.
@@ -51,7 +46,7 @@ func (r *Registry) Register(detector Detector) error {
 	if detector.Namespace == "" {
 		return fmt.Errorf("detector namespace is empty")
 	}
-	if detector.Graph == nil && detector.Targets == nil && detector.Selectorize == nil {
+	if detector.Graph == nil && detector.Targets == nil {
 		return fmt.Errorf("detector %q has no capabilities", detector.Namespace)
 	}
 	r.mu.Lock()
@@ -74,8 +69,6 @@ func (r *Registry) RegisterDetector(value detector.Detector) error {
 	}
 	if targetDetector, ok := value.(detector.TargetDetector); ok {
 		adapted.Targets = targetDetector.Targets
-		adapted.Selectorize = targetDetector.Selector
-		adapted.MatchIdentifier = targetDetector.MatchIdentifier
 	}
 	return r.Register(adapted)
 }
@@ -168,59 +161,6 @@ func (r *Registry) Targets(ctx context.Context, repo *attegit.Repo) ([]graphtarg
 		targets = append(targets, found...)
 	}
 	return targets, nil
-}
-
-// Selector returns the canonical selector for a target when its detector provides one.
-func (r *Registry) Selector(target graphtarget.ID) (selector.Target, bool) {
-	r.mu.RLock()
-	detector, ok := r.detectors[target.Namespace]
-	r.mu.RUnlock()
-	if !ok || detector.Selectorize == nil {
-		return selector.Target{}, false
-	}
-	return detector.Selectorize(target)
-}
-
-// Matches reports whether input selects target from a repository-relative directory.
-// Path resolution is handled by the selector package; identifier interpretation is
-// delegated to the detector registered for target.Namespace.
-func (r *Registry) Matches(target graphtarget.ID, input, relative string) bool {
-	canonical, ok := r.Selector(target)
-	if !ok {
-		return false
-	}
-	parsed, err := selector.Resolve(input, relative)
-	if err != nil {
-		if !strings.Contains(input, "#") {
-			parsed, err = selector.Resolve("#"+input, relative)
-		}
-		if err != nil {
-			return false
-		}
-	}
-	candidateDir := strings.TrimSuffix(canonical.Path, "/"+attehcl.Filename)
-	pathless := strings.HasPrefix(strings.TrimSpace(input), "#") || !strings.Contains(input, "#")
-	if parsed.Path == "" && !pathless && candidateDir != "" {
-		return false
-	}
-	if !selector.PathMatches(parsed.Path, relative, canonical.Path, candidateDir) {
-		return false
-	}
-	if detector, ok := r.detector(target.Namespace); ok && detector.MatchIdentifier != nil {
-		return detector.MatchIdentifier(target, parsed.Identifier)
-	}
-	canonicalSelector, err := selector.Parse(canonical.String())
-	if err != nil {
-		return false
-	}
-	return parsed.Identifier == canonicalSelector.Identifier
-}
-
-func (r *Registry) detector(namespace string) (Detector, bool) {
-	r.mu.RLock()
-	detector, ok := r.detectors[namespace]
-	r.mu.RUnlock()
-	return detector, ok
 }
 
 func (r *Registry) snapshot() []Detector {

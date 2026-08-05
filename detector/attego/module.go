@@ -100,6 +100,22 @@ type Detector struct{}
 
 func (Detector) Namespace() string { return Namespace }
 
+func init() {
+	if err := selector.Register(Namespace, matchSelector, renderSelector); err != nil {
+		panic(err)
+	}
+}
+
+func matchSelector(target graphtarget.ID, identifier string) bool {
+	return selector.Target{Kind: "go_test", Aliases: target.Aliases}.Matches("#"+identifier, "")
+}
+
+func renderSelector(target graphtarget.ID) string {
+	result := Selector(Target{PackageDir: reference.Tree(target.Path)})
+	result.Aliases = target.Aliases
+	return result.String()
+}
+
 func (Detector) Graph(ctx context.Context, repo *attegit.Repo, options ...graphset.Option) (*graph.Graph, error) {
 	return Graph(ctx, repo, options...)
 }
@@ -121,16 +137,6 @@ func (Detector) Targets(ctx context.Context, repo *attegit.Repo) ([]graphtarget.
 		})
 	}
 	return result, nil
-}
-
-func (Detector) Selector(target graphtarget.ID) (selector.Target, bool) {
-	result := Selector(Target{PackageDir: reference.Tree(target.Path)})
-	result.Aliases = target.Aliases
-	return result, true
-}
-
-func (Detector) MatchIdentifier(target graphtarget.ID, identifier string) bool {
-	return selector.Target{Kind: "go_test", Aliases: target.Aliases}.Matches("#"+identifier, "")
 }
 
 // Target describes a runnable Go package test.
