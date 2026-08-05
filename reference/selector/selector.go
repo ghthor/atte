@@ -179,8 +179,15 @@ func normalizePath(raw string) (string, error) {
 	return clean, nil
 }
 
+// Target is the user-facing identity used to construct short CLI selectors.
+//
+// Unlike detector.Target, it intentionally omits graph identity and namespace
+// bookkeeping. Its fields describe the canonical path and the identifier users
+// can type, while Aliases lists additional accepted spellings. Use String or
+// StringShort to render the target for the CLI, and Matches to compare input.
 type Target struct {
 	// Path is the canonical repository path, including atte.hcl for HCL targets.
+	// It is the path component of a user-facing selector, not a graph entity ID.
 	Path  string
 	Kind  string
 	Name  string

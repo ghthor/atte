@@ -1,8 +1,11 @@
 package registry
 
 import (
+	"context"
 	"testing"
 
+	"github.com/ghthor/atte/detector"
+	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/reference/selector"
 	"github.com/shoenig/test"
 )
@@ -28,3 +31,23 @@ func TestRegisterValidation(t *testing.T) {
 	test.NoError(t, r.Register(detector))
 	test.Error(t, r.Register(detector))
 }
+
+func TestRegisterDetector(t *testing.T) {
+	r := New()
+	test.NoError(t, r.RegisterDetector(methodDetector{}))
+	test.Error(t, r.RegisterDetector(methodDetector{}))
+}
+
+type methodDetector struct{}
+
+func (methodDetector) Namespace() string { return "method" }
+
+func (methodDetector) Selector(target Target) (selector.Target, bool) {
+	return selector.Target{Kind: target.Kind}, true
+}
+
+func (methodDetector) Targets(context.Context, *attegit.Repo) ([]detector.Target, error) {
+	return nil, nil
+}
+
+func (methodDetector) MatchIdentifier(Target, string) bool { return true }

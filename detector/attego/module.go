@@ -94,6 +94,44 @@ func DecodeEntityID(id graph.EntityID) (string, reference.Tree, string, error) {
 	return kind, tree, importPath, nil
 }
 
+// Detector adapts the Go detector to the shared detector capabilities.
+type Detector struct{}
+
+func (Detector) Namespace() string { return Namespace }
+
+func (Detector) Graph(ctx context.Context, repo *attegit.Repo, options ...detector.GraphOption) (*graph.Graph, error) {
+	return Graph(ctx, repo, options...)
+}
+
+func (Detector) Targets(ctx context.Context, repo *attegit.Repo) ([]detector.Target, error) {
+	found, err := Targets(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]detector.Target, 0, len(found))
+	for _, target := range found {
+		result = append(result, detector.Target{
+			ID:        target.ID,
+			Namespace: Namespace,
+			Kind:      target.Kind,
+			Path:      target.PackageDir.String(),
+			Name:      "go_test",
+			Aliases:   selector.Aliases(Selector(target)),
+		})
+	}
+	return result, nil
+}
+
+func (Detector) Selector(target detector.Target) (selector.Target, bool) {
+	result := Selector(Target{PackageDir: reference.Tree(target.Path)})
+	result.Aliases = target.Aliases
+	return result, true
+}
+
+func (Detector) MatchIdentifier(target detector.Target, identifier string) bool {
+	return selector.Target{Kind: "go_test", Aliases: target.Aliases}.Matches("#"+identifier, "")
+}
+
 // Target describes a runnable Go package test.
 type Target struct {
 	ID         graph.EntityID

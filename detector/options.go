@@ -3,6 +3,7 @@ package detector
 
 import (
 	"context"
+
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/reference"
 	"github.com/zclconf/go-cty/cty/function"
