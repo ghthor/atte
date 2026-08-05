@@ -4,10 +4,10 @@ import (
 	"context"
 	"strings"
 
-	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphset"
+	"github.com/ghthor/atte/detector/graphtarget"
 	"github.com/ghthor/atte/reference"
 	"github.com/ghthor/atte/reference/selector"
 )
@@ -34,17 +34,17 @@ func (d Detector) Graph(ctx context.Context, repo *attegit.Repo, options ...grap
 	return Graph(ctx, repo, graphOptions...)
 }
 
-func (d Detector) Targets(ctx context.Context, repo *attegit.Repo) ([]detector.Target, error) {
+func (d Detector) Targets(ctx context.Context, repo *attegit.Repo) ([]graphtarget.ID, error) {
 	found, err := Targets(ctx, repo, d.Provider)
 	if err != nil {
 		return nil, err
 	}
-	result := make([]detector.Target, 0, len(found))
+	result := make([]graphtarget.ID, 0, len(found))
 	for _, target := range found {
 		if target.Script == "" {
 			continue
 		}
-		result = append(result, detector.Target{
+		result = append(result, graphtarget.ID{
 			ID:        target.ID,
 			Namespace: Namespace,
 			Kind:      target.Kind,
@@ -57,11 +57,11 @@ func (d Detector) Targets(ctx context.Context, repo *attegit.Repo) ([]detector.T
 	return result, nil
 }
 
-func (Detector) Selector(target detector.Target) (selector.Target, bool) {
+func (Detector) Selector(target graphtarget.ID) (selector.Target, bool) {
 	return Selector(Target{Kind: target.Kind, File: reference.Blob(target.Path), Name: target.Name, Index: target.Index, Aliases: target.Aliases}), true
 }
 
-func (Detector) MatchIdentifier(target detector.Target, identifier string) bool {
+func (Detector) MatchIdentifier(target graphtarget.ID, identifier string) bool {
 	kind := strings.TrimPrefix(target.Kind, Namespace+":")
 	return selector.Target{Kind: kind, Name: target.Name, Index: target.Index, Aliases: target.Aliases}.Matches("#"+identifier, "")
 }

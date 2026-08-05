@@ -15,10 +15,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphset"
+	"github.com/ghthor/atte/detector/graphtarget"
 	"github.com/ghthor/atte/reference"
 	"github.com/ghthor/atte/reference/selector"
 	"golang.org/x/mod/modfile"
@@ -104,14 +104,14 @@ func (Detector) Graph(ctx context.Context, repo *attegit.Repo, options ...graphs
 	return Graph(ctx, repo, options...)
 }
 
-func (Detector) Targets(ctx context.Context, repo *attegit.Repo) ([]detector.Target, error) {
+func (Detector) Targets(ctx context.Context, repo *attegit.Repo) ([]graphtarget.ID, error) {
 	found, err := Targets(ctx, repo)
 	if err != nil {
 		return nil, err
 	}
-	result := make([]detector.Target, 0, len(found))
+	result := make([]graphtarget.ID, 0, len(found))
 	for _, target := range found {
-		result = append(result, detector.Target{
+		result = append(result, graphtarget.ID{
 			ID:        target.ID,
 			Namespace: Namespace,
 			Kind:      target.Kind,
@@ -123,13 +123,13 @@ func (Detector) Targets(ctx context.Context, repo *attegit.Repo) ([]detector.Tar
 	return result, nil
 }
 
-func (Detector) Selector(target detector.Target) (selector.Target, bool) {
+func (Detector) Selector(target graphtarget.ID) (selector.Target, bool) {
 	result := Selector(Target{PackageDir: reference.Tree(target.Path)})
 	result.Aliases = target.Aliases
 	return result, true
 }
 
-func (Detector) MatchIdentifier(target detector.Target, identifier string) bool {
+func (Detector) MatchIdentifier(target graphtarget.ID, identifier string) bool {
 	return selector.Target{Kind: "go_test", Aliases: target.Aliases}.Matches("#"+identifier, "")
 }
 

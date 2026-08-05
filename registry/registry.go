@@ -13,22 +13,19 @@ import (
 	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphset"
+	"github.com/ghthor/atte/detector/graphtarget"
 	"github.com/ghthor/atte/reference"
 	"github.com/ghthor/atte/reference/selector"
 	"github.com/zclconf/go-cty/cty/function"
 )
 
-// Target is detector-neutral runnable target metadata.
-
-type Target = detector.Target
-
 // Detector contains capabilities supplied by a detector namespace.
 type Detector struct {
 	Namespace       string
 	Graph           func(context.Context, *attegit.Repo, ...graphset.Option) (*graph.Graph, error)
-	Targets         func(context.Context, *attegit.Repo) ([]Target, error)
-	Selectorize     func(Target) (selector.Target, bool)
-	MatchIdentifier func(Target, string) bool
+	Targets         func(context.Context, *attegit.Repo) ([]graphtarget.ID, error)
+	Selectorize     func(graphtarget.ID) (selector.Target, bool)
+	MatchIdentifier func(graphtarget.ID, string) bool
 }
 
 // HCLFunctionFactory constructs a function for one repository and HCL file.
@@ -158,8 +155,8 @@ func (r *Registry) Graph(ctx context.Context, repo *attegit.Repo, options ...gra
 }
 
 // Targets returns all registered detector targets in namespace order.
-func (r *Registry) Targets(ctx context.Context, repo *attegit.Repo) ([]Target, error) {
-	var targets []Target
+func (r *Registry) Targets(ctx context.Context, repo *attegit.Repo) ([]graphtarget.ID, error) {
+	var targets []graphtarget.ID
 	for _, detector := range r.snapshot() {
 		if detector.Targets == nil {
 			continue
@@ -174,7 +171,7 @@ func (r *Registry) Targets(ctx context.Context, repo *attegit.Repo) ([]Target, e
 }
 
 // Selector returns the canonical selector for a target when its detector provides one.
-func (r *Registry) Selector(target Target) (selector.Target, bool) {
+func (r *Registry) Selector(target graphtarget.ID) (selector.Target, bool) {
 	r.mu.RLock()
 	detector, ok := r.detectors[target.Namespace]
 	r.mu.RUnlock()
@@ -187,7 +184,7 @@ func (r *Registry) Selector(target Target) (selector.Target, bool) {
 // Matches reports whether input selects target from a repository-relative directory.
 // Path resolution is handled by the selector package; identifier interpretation is
 // delegated to the detector registered for target.Namespace.
-func (r *Registry) Matches(target Target, input, relative string) bool {
+func (r *Registry) Matches(target graphtarget.ID, input, relative string) bool {
 	canonical, ok := r.Selector(target)
 	if !ok {
 		return false

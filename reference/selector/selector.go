@@ -181,7 +181,7 @@ func normalizePath(raw string) (string, error) {
 
 // Target is the user-facing identity used to construct short CLI selectors.
 //
-// Unlike detector.Target, it intentionally omits graph identity and namespace
+// Unlike graphtarget.ID, it intentionally omits graph identity and namespace
 // bookkeeping. Its fields describe the canonical path and the identifier users
 // can type, while Aliases lists additional accepted spellings. Use String or
 // StringShort to render the target for the CLI, and Matches to compare input.
