@@ -6,6 +6,7 @@ import (
 
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attegittest"
+	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graph/graphtest"
 	"github.com/ghthor/atte/detector/graphset"
@@ -118,6 +119,23 @@ lint "vet" {
 	graphtest.MustHaveRelation(t, got, testTarget, attegit.EntityID(testPath("test.sh")), ScriptRelation)
 	graphtest.MustHaveRelation(t, got, codegen, attegit.EntityID(testPath("codegen.sh")), ScriptRelation)
 	graphtest.MustHaveRelation(t, got, lint, attegit.EntityID(testPath("lint.sh")), ScriptRelation)
+}
+
+func TestGraphFormatsFunctionDiagnostics(t *testing.T) {
+	repo := newHCLFixture(t, map[string]string{
+		"atte.hcl": `
+codegen "go" {
+  script = "echo"
+  depends_on = [gopkg("./cmd/mis")]
+}
+`,
+		"go.mod": "module example.com/root\n",
+	})
+
+	_, err := Graph(t.Context(), repo, WithFunctions(attego.HCLFunctions))
+	test.ErrorContains(t, err, `decode HCL "atte.hcl": atte.hcl:3,17-23:`)
+	test.ErrorContains(t, err, "  3 |   depends_on = [gopkg(\"./cmd/mis\")]\n")
+	test.ErrorContains(t, err, "Call to function \"gopkg\" failed")
 }
 
 func TestGraphRejectsInvalidConfiguration(t *testing.T) {

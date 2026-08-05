@@ -48,6 +48,7 @@ var graphCmd = &cobra.Command{
 	Short: "Print the graph for the current directory",
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
 		ctx := cmd.Context()
 		cwd, err := os.Getwd()
 		if err != nil {

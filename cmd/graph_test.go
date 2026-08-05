@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
@@ -171,6 +172,34 @@ func TestPrintGraphFallsBackToGitPerspective(t *testing.T) {
 	got := renderTestGraph(t, repo)
 	test.StrContains(t, got, "root.txt")
 	test.StrNotContains(t, got, "attego:")
+}
+
+func TestPrintGraphReportsHCLFunctionErrorGolden(t *testing.T) {
+	repo := repoWithFiles(t, map[string]string{
+		"atte.hcl": strings.TrimLeft(`
+codegen "go" {
+  script = "echo"
+  depends_on = [gopkg("./cmd/mis")]
+}
+`, "\n"),
+		"go.mod": "module example.com/root\n",
+	})
+	var output bytes.Buffer
+	err := printGraph(t.Context(), &output, repo, "")
+	test.Error(t, err)
+	assertGraphErrorGolden(t, "hcl-function-error", err.Error())
+}
+
+func assertGraphErrorGolden(t *testing.T, name, got string) {
+	t.Helper()
+	goldenPath := filepath.Join(graphTestdataDir(), name+".golden")
+	if os.Getenv("ATTE_CODEGEN") != "" {
+		must.NoError(t, os.WriteFile(goldenPath, []byte(got), 0o644))
+		return
+	}
+	want, err := os.ReadFile(goldenPath)
+	must.NoError(t, err)
+	test.EqOp(t, string(want), got)
 }
 
 func TestPrintGraphReportsGoParseError(t *testing.T) {

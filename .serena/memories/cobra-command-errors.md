@@ -1,0 +1,3 @@
+# Cobra command error handling
+
+For Cobra commands that should show usage for flag-parsing and argument-validation errors but suppress usage for runtime errors, do not set `SilenceUsage` on the command at declaration time. Set `cmd.SilenceUsage = true` at the beginning of the command's `RunE` function. Cobra parses flags and validates arguments before entering `RunE`, so this preserves usage for those early errors while suppressing usage after successful parsing and validation.

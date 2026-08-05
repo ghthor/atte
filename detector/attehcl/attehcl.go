@@ -3,6 +3,7 @@ package attehcl
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"os/exec"
@@ -723,17 +724,71 @@ func mergedHCLFunctions(ctx context.Context, repo *attegit.Repo, file reference.
 	return functions, nil
 }
 
+func hclDiagnosticError(repo *attegit.Repo, file reference.Blob, diags hcl.Diagnostics) error {
+	if len(diags) == 0 {
+		return fmt.Errorf("decode HCL %q: no diagnostics", file)
+	}
+
+	parts := make([]string, 0, len(diags))
+	for _, diag := range diags {
+		if diag == nil {
+			continue
+		}
+		location := file.String()
+		context := ""
+		if diag.Subject != nil {
+			location = diag.Subject.String()
+			context = hclDiagnosticContext(repo, file, *diag.Subject)
+		}
+		message := diag.Summary
+		if diag.Detail != "" {
+			message += ": " + diag.Detail
+		}
+		if context != "" {
+			message = context + "\n" + message
+		}
+		parts = append(parts, fmt.Sprintf("decode HCL %q: %s:\n%s", file, location, message))
+	}
+	if len(parts) == 0 {
+		return fmt.Errorf("decode HCL %q: no diagnostics", file)
+	}
+	return errors.New(strings.Join(parts, "\n"))
+}
+
+func hclDiagnosticContext(repo *attegit.Repo, file reference.Blob, subject hcl.Range) string {
+	if repo == nil || subject.Start.Line < 1 {
+		return ""
+	}
+	contents, err := repo.Show(file)
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(string(contents), "\n")
+	lineIndex := subject.Start.Line - 1
+	if lineIndex >= len(lines) {
+		return ""
+	}
+	line := lines[lineIndex]
+	start := max(subject.Start.Column-1, 0)
+	end := subject.End.Column - 1
+	if end <= start {
+		end = start + 1
+	}
+	marker := strings.Repeat(" ", start) + strings.Repeat("^", end-start)
+	return fmt.Sprintf("  %d | %s\n    | %s", subject.Start.Line, line, marker)
+}
+
 func decodeTargetBlock(repo *attegit.Repo, file reference.Blob, body *hclsyntax.Body, ctx *hcl.EvalContext) (string, []dependency, error) {
 	deps := make([]dependency, 0)
 	content, diags := body.Content(&hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "script", Required: true}, {Name: "depends_on"}, {Name: "triggered_by"}}})
 	if diags.HasErrors() {
-		return "", nil, fmt.Errorf("decode HCL %q: %s", file, diags.Error())
+		return "", nil, hclDiagnosticError(repo, file, diags)
 	}
 	script := ""
 	if value, ok := content.Attributes["script"]; ok {
 		v, d := value.Expr.Value(ctx)
 		if d.HasErrors() {
-			return "", nil, fmt.Errorf("decode HCL %q: %s", file, d.Error())
+			return "", nil, hclDiagnosticError(repo, file, d)
 		}
 		if !v.IsKnown() {
 			return "", nil, fmt.Errorf("decode HCL %q: script must be known", file)
@@ -751,7 +806,7 @@ func decodeTargetBlock(repo *attegit.Repo, file reference.Blob, body *hclsyntax.
 		if attr, ok := content.Attributes[name]; ok {
 			values, d := attr.Expr.Value(ctx)
 			if d.HasErrors() {
-				return "", nil, fmt.Errorf("decode HCL %q: %s", file, d.Error())
+				return "", nil, hclDiagnosticError(repo, file, d)
 			}
 			if !values.IsKnown() || !values.CanIterateElements() {
 				return "", nil, fmt.Errorf("decode HCL %q: %s must be a list", file, name)
