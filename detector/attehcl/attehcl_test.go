@@ -1,6 +1,8 @@
 package attehcl
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -11,8 +13,11 @@ import (
 	"github.com/ghthor/atte/detector/graph/graphtest"
 	"github.com/ghthor/atte/detector/graphset"
 	"github.com/ghthor/atte/reference"
+	"github.com/ghthor/atte/reference/selector"
+	"github.com/hashicorp/hcl/v2"
 	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
+	"github.com/zclconf/go-cty/cty/function"
 )
 
 func testPath(raw string) reference.Path {
@@ -172,264 +177,194 @@ func TestGraphRejectsInvalidConfiguration(t *testing.T) {
 	}
 }
 
-func TestGlobalInheritanceAndLocalScope(t *testing.T) {
+func TestGlobalsAreRejected(t *testing.T) {
+	repo := newHCLFixture(t, map[string]string{
+		"atte.hcl": `globals { value = "unsupported" }`,
+	})
+	_, err := Targets(t.Context(), repo, nil)
+	test.ErrorContains(t, err, "globals are not supported")
+}
+
+func TestLocalExpressionsAreFileLocal(t *testing.T) {
 	repo := newHCLFixture(t, map[string]string{
 		"atte.hcl": `
-globals {
-  go_ver = "1.26"
+locals {
   script = path("./root.sh")
 }
-`,
-		"detector/atte.hcl": `
-locals {
-  script = path("./detector.sh")
-  version = global.go_ver
-}
 
-test "nested" {
-  script = local.script
-  depends_on = ["./go.mod"]
-}
-`,
-		"detector/attego/atte.hcl": `
-globals {
-  go_ver = "1.27"
-}
-
-test "override" {
-  script = path("./override.sh")
-}
-`,
-		"detector/dummy.sh":           "#!/bin/sh\n",
-		"detector/detector.sh":        "#!/bin/sh\n",
-		"detector/attego/override.sh": "#!/bin/sh\n",
-		"go.mod":                      "module example.com/root\n",
-	})
-	targets, err := Targets(t.Context(), repo, attegit.PathHCLFunctions)
-	must.NoError(t, err)
-	test.EqOp(t, 2, len(targets))
-	test.EqOp(t, reference.Blob("detector/detector.sh"), targets[0].Script)
-	test.EqOp(t, reference.Blob("detector/attego/override.sh"), targets[1].Script)
-}
-
-func TestGlobalsCannotDependOnLocals(t *testing.T) {
-	repo := newHCLFixture(t, map[string]string{
-		"atte.hcl": `
-locals {
-  script = "./root.sh"
-}
-
-globals {
-  inherited_script = local.script
-}
-
-test { script = global.inherited_script }
-`,
-		"root.sh": "#!/bin/sh\n",
-	})
-
-	_, err := Targets(t.Context(), repo, nil)
-	test.Error(t, err)
-
-	_, err = Graph(t.Context(), repo)
-	test.Error(t, err)
-}
-
-func TestGlobalInheritanceAcrossDirectories(t *testing.T) {
-	repo := newHCLFixture(t, map[string]string{
-		"atte.hcl": strings.TrimLeft(`
-			globals { base = "root" }
-			test { script = path("./root.sh") }
-		`, "\t"),
-		"child/atte.hcl": strings.TrimLeft(`
-			globals { child = "${global.base}-child" }
-		`, "\t"),
-		"child/no-atte/marker.txt": "directory without atte.hcl\n",
-		"child/deeper/atte.hcl": strings.TrimLeft(`
-			globals { deep = "${global.child}-deep" }
-		`, "\t"),
-		"root.sh": "#!/bin/sh\n",
-	})
-
-	root, err := ConfigFor(t.Context(), repo, "", attegit.PathHCLFunctions)
-	must.NoError(t, err)
-	test.EqOp(t, "root", root.Global["base"].AsString())
-
-	child, err := ConfigFor(t.Context(), repo, "child", attegit.PathHCLFunctions)
-	must.NoError(t, err)
-	test.EqOp(t, "root", child.Global["base"].AsString())
-	test.EqOp(t, "root-child", child.Global["child"].AsString())
-
-	inherited, err := ConfigFor(t.Context(), repo, "child/no-atte", attegit.PathHCLFunctions)
-	must.NoError(t, err)
-	test.EqOp(t, "root-child", inherited.Global["child"].AsString())
-
-	deep, err := ConfigFor(t.Context(), repo, "child/deeper", attegit.PathHCLFunctions)
-	must.NoError(t, err)
-	test.EqOp(t, "root-child-deep", deep.Global["deep"].AsString())
-
-	targets, err := Targets(t.Context(), repo, attegit.PathHCLFunctions)
-	must.NoError(t, err)
-	test.Len(t, 1, targets)
-	_, err = Graph(t.Context(), repo, WithFunctions(attegit.PathHCLFunctions))
-	must.NoError(t, err)
-}
-
-func TestGlobalEvaluationRejectsUnresolvedDeclarations(t *testing.T) {
-	repo := newHCLFixture(t, map[string]string{
-		"atte.hcl": `
-globals {
-  first = global.second
-  second = global.first
-}
-
-test { script = path("./root.sh") }
-`,
-		"root.sh": "#!/bin/sh\n",
-	})
-
-	_, err := Targets(t.Context(), repo, nil)
-	test.Error(t, err)
-	test.ErrorContains(t, err, "global")
-
-	_, err = Graph(t.Context(), repo)
-	test.Error(t, err)
-}
-
-func TestLocalDoesNotPropagate(t *testing.T) {
-	repo := newHCLFixture(t, map[string]string{
-		"atte.hcl": `
-locals { script = path("./root.sh") }
+test { script = local.script }
 `,
 		"child/atte.hcl": `
 test { script = local.script }
 `,
 		"root.sh": "#!/bin/sh\n",
 	})
-	_, err := Targets(t.Context(), repo, nil)
+	_, err := Targets(t.Context(), repo, attegit.PathHCLFunctions)
 	test.Error(t, err)
 }
 
-func TestLocalExpressionsAcrossBlockKindsAndGraphConsistency(t *testing.T) {
+func TestTargetRegistrySupportsCustomKindAndWrapperForm(t *testing.T) {
+	type packageTarget struct {
+		Command string
+	}
+	schema := hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "command", Required: true}}}
+	must.NoError(t, Register("package_test", func(content *hcl.BodyContent, ctx *hcl.EvalContext) (any, error) {
+		value, diagnostics := content.Attributes["command"].Expr.Value(ctx)
+		if diagnostics.HasErrors() {
+			return nil, fmt.Errorf("command: %s", diagnostics.Error())
+		}
+		return packageTarget{Command: value.AsString()}, nil
+	}, &schema))
+
 	repo := newHCLFixture(t, map[string]string{
-		"atte.hcl": strings.TrimLeft(`
-			globals { base = "./shared.sh" }
-			locals {
-				prefix = "./"
-				test_script = "${local.prefix}test.sh"
-				codegen_script = "${local.prefix}codegen.sh"
-				lint_script = "${local.prefix}lint.sh"
-				shared = global.base
-			}
-			test "one" {
-				script = local.test_script
-				depends_on = [local.shared]
-			}
-			codegen "two" {
-				script = local.codegen_script
-				triggered_by = [local.shared]
-			}
-			lint "three" {
-				script = local.lint_script
-			}
-		`, "\t"),
-		"shared.sh":  "#!/bin/sh\n",
+		"atte.hcl": `target "package_test" "go" {
+  command = "go test ./..."
+}
+`,
+	})
+	config, err := ConfigFor(t.Context(), repo, "", nil)
+	must.NoError(t, err)
+	test.Len(t, 1, SortedTargets(config.Targets))
+	test.EqOp(t, "package_test", strings.TrimPrefix(SortedTargets(config.Targets)[0].Kind, Namespace+":"))
+	test.EqOp(t, "go", SortedTargets(config.Targets)[0].Name)
+	got, ok := SortedTargets(config.Targets)[0].Decoded.(packageTarget)
+	test.True(t, ok, test.Sprintf("custom decoder value should be preserved"))
+	test.EqOp(t, "go test ./...", got.Command)
+}
+
+func TestTargetRegistryRegistrationValidation(t *testing.T) {
+	decoder := func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
+		return struct{}{}, nil
+	}
+	test.Error(t, Register("test", decoder))
+	test.Error(t, Register("bad name", decoder))
+	test.Error(t, Register("valid_registration", nil))
+}
+
+func TestTargetRegistryCopiesSchema(t *testing.T) {
+	schema := hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "command", Required: true}}}
+	kind := "schema_copy_test"
+	must.NoError(t, Register(kind, func(content *hcl.BodyContent, _ *hcl.EvalContext) (any, error) {
+		return content.Attributes["command"].Name, nil
+	}, &schema))
+	schema.Attributes[0].Name = "changed"
+
+	repo := newHCLFixture(t, map[string]string{
+		"atte.hcl": `schema_copy_test { command = "kept" }`,
+	})
+	config, err := ConfigFor(t.Context(), repo, "", nil)
+	must.NoError(t, err)
+	test.EqOp(t, "command", SortedTargets(config.Targets)[0].Decoded)
+}
+
+func TestTargetRegistryRejectsInvalidTargetNames(t *testing.T) {
+	repo := newHCLFixture(t, map[string]string{
+		"atte.hcl": `test "0" { script = "echo" }`,
+	})
+	_, err := Targets(t.Context(), repo, nil)
+	test.ErrorContains(t, err, "must not be numeric")
+}
+
+func TestTargetRegistrySupportsShortAndWrapperForms(t *testing.T) {
+	repo := newHCLFixture(t, map[string]string{
+		"atte.hcl": `
+test "short" { script = "echo short" }
+target "test" "wrapper" { script = "echo wrapper" }
+`,
+	})
+	got, err := ConfigFor(t.Context(), repo, "", nil)
+	must.NoError(t, err)
+	test.Len(t, 2, SortedTargets(got.Targets))
+	test.EqOp(t, "short", SortedTargets(got.Targets)[0].Name)
+	test.EqOp(t, "wrapper", SortedTargets(got.Targets)[1].Name)
+	test.EqOp(t, 0, SortedTargets(got.Targets)[0].Index)
+	test.EqOp(t, 1, SortedTargets(got.Targets)[1].Index)
+}
+
+func TestTargetRegistryRejectsUnknownAndMalformedBlocks(t *testing.T) {
+	reject := func(file, want string) {
+		t.Helper()
+		repo := newHCLFixture(t, map[string]string{"atte.hcl": file})
+		_, err := Targets(t.Context(), repo, nil)
+		test.ErrorContains(t, err, want)
+	}
+
+	reject(`package { script = "echo" }`, `unknown target kind "package"`)
+	reject(`target { script = "echo" }`, "target block must have one or two labels")
+	reject(`target "test" "one" "two" { script = "echo" }`, "target block must have one or two labels")
+	reject(`test "one" "two" { script = "echo" }`, "target test has too many labels")
+}
+
+func TestTargetEvaluationPreservesTraversalsAndProjectsConsistently(t *testing.T) {
+	repo := newHCLFixture(t, map[string]string{
+		"atte.hcl": `test {
+  script = path("./test.sh")
+  depends_on = [codegen.generate]
+}
+
+target "codegen" "generate" {
+  script = path("./codegen.sh")
+}
+
+lint {
+  script = path("./lint.sh")
+}
+`,
 		"test.sh":    "#!/bin/sh\n",
 		"codegen.sh": "#!/bin/sh\n",
 		"lint.sh":    "#!/bin/sh\n",
 	})
-	targets, err := Targets(t.Context(), repo, attegit.PathHCLFunctions)
+	grouped, err := Targets(t.Context(), repo, attegit.PathHCLFunctions)
 	must.NoError(t, err)
+	targets := SortedTargets(grouped)
 	test.Len(t, 3, targets)
-	graphWithoutContainment, err := Graph(t.Context(), repo, WithFunctions(attegit.PathHCLFunctions))
+	test.EqOp(t, "", grouped[KindTest][0].Name)
+	test.EqOp(t, 0, grouped[KindTest][0].Index)
+	test.EqOp(t, "generate", grouped[KindCodegen][0].Name)
+	test.EqOp(t, 0, grouped[KindCodegen][0].Index)
+	test.EqOp(t, "", grouped[KindLint][0].Name)
+	test.EqOp(t, 0, grouped[KindLint][0].Index)
+	decoded := grouped[KindTest][0].Decoded.(decodedTarget)
+	must.Len(t, 1, decoded.Deps)
+	test.Len(t, 2, decoded.Deps[0].traversal)
+
+	config, err := ConfigFor(t.Context(), repo, "", attegit.PathHCLFunctions)
 	must.NoError(t, err)
-	graphWithContainment, err := Graph(t.Context(), repo, graphset.WithAttachToTree(), WithFunctions(attegit.PathHCLFunctions))
+	configTargets := SortedTargets(config.Targets)
+	test.Len(t, len(targets), configTargets)
+	for index := range targets {
+		test.EqOp(t, targets[index].ID, configTargets[index].ID)
+		test.EqOp(t, targets[index].Kind, configTargets[index].Kind)
+		test.EqOp(t, targets[index].Name, configTargets[index].Name)
+		test.EqOp(t, targets[index].Index, configTargets[index].Index)
+	}
+
+	graph, err := Graph(t.Context(), repo, WithFunctions(attegit.PathHCLFunctions))
 	must.NoError(t, err)
 	for _, target := range targets {
-		_, inGraph := graphWithoutContainment.Entities[target.ID]
-		test.True(t, inGraph, test.Sprintf("target should be present in graph"))
-		_, inContainedGraph := graphWithContainment.Entities[target.ID]
-		test.True(t, inContainedGraph, test.Sprintf("target should be present in containment graph"))
+		test.EqOp(t, target.Kind, graph.Entities[target.ID].Kind)
+		canonical := Selector(target).String()
+		test.EqOp(t, canonical, selector.Render(target.File.String(), strings.TrimPrefix(target.Kind, Namespace+":")+"."+target.DisplayName()))
+		test.True(t, Selector(target).Matches(canonical, ""), test.Sprintf("canonical selector should match %s", canonical))
+		test.True(t, contains(target.Aliases, target.DisplayName()), test.Sprintf("display name should be an alias for %s", canonical))
 	}
 }
 
-func TestRepeatedDeclarationsAndDuplicateDeclarationErrors(t *testing.T) {
+func TestTargetEvaluationProviderIsFileLocal(t *testing.T) {
+	calls := make([]reference.Blob, 0, 1)
+	provider := func(_ context.Context, _ *attegit.Repo, file reference.Blob) (map[string]function.Function, error) {
+		calls = append(calls, file)
+		return nil, nil
+	}
 	repo := newHCLFixture(t, map[string]string{
-		"atte.hcl": strings.TrimLeft(`
-			globals { script = path("./one.sh") }
-			globals { version = "one" }
-			locals { selected = global.script }
-			locals { version = "local" }
-			test { script = local.selected }
-			`, "\t"),
-		"one.sh": "#!/bin/sh\n",
+		"atte.hcl":         `test { script = "root" }`,
+		"child/atte.hcl":   `test { script = "child" }`,
+		"sibling/atte.hcl": `test { script = "sibling" }`,
 	})
-	_, err := Targets(t.Context(), repo, attegit.PathHCLFunctions)
+	_, err := ConfigFor(t.Context(), repo, "child", provider)
 	must.NoError(t, err)
-
-	duplicate := newHCLFixture(t, map[string]string{
-		"atte.hcl": strings.TrimLeft(`
-			globals { value = "one" }
-			globals { value = "two" }
-			test { script = path("./one.sh") }
-			`, "\t"),
-		"one.sh": "#!/bin/sh\n",
-	})
-	_, err = Targets(t.Context(), duplicate, nil)
-	test.Error(t, err)
-}
-
-func TestTargetScriptsFromInheritedGlobals(t *testing.T) {
-	repo := newHCLFixture(t, map[string]string{
-		"atte.hcl": `
-
-globals {
-  version = "root"
-  shared_path = path("./root.sh")
-}
-
-test "root" { script = path("./root.sh") }
-`,
-		"child/atte.hcl": `
-
-globals {
-  version = "child"
-  shared_path = path("./child.sh")
-}
-
-test "inherited" { script = path("./child.sh") }
-`,
-		"child/deeper/atte.hcl": `
-
-globals {
-  version = "deep"
-  shared_path = path("./deep.sh")
-}
-
-test "overridden" { script = path("./deep.sh") }
-`,
-		"root.sh":              "#!/bin/sh\\n",
-		"child/child.sh":       "#!/bin/sh\\n",
-		"child/deeper/deep.sh": "#!/bin/sh\\n",
-	})
-	targets, err := Targets(t.Context(), repo, attegit.PathHCLFunctions)
-	must.NoError(t, err)
-	test.EqOp(t, 3, len(targets))
-	test.EqOp(t, reference.Blob("root.sh"), targets[0].Script)
-	test.EqOp(t, reference.Blob("child/child.sh"), targets[1].Script)
-	test.EqOp(t, reference.Blob("child/deeper/deep.sh"), targets[2].Script)
-	root, err := ConfigFor(t.Context(), repo, "", attegit.PathHCLFunctions)
-	must.NoError(t, err)
-	test.EqOp(t, "root", root.Global["version"].AsString())
-	test.EqOp(t, reference.Blob("root.sh"), *root.Global["shared_path"].EncapsulatedValue().(*reference.Blob))
-	child, err := ConfigFor(t.Context(), repo, "child", attegit.PathHCLFunctions)
-	must.NoError(t, err)
-	test.EqOp(t, "child", child.Global["version"].AsString())
-	test.EqOp(t, reference.Blob("child/child.sh"), *child.Global["shared_path"].EncapsulatedValue().(*reference.Blob))
-	deep, err := ConfigFor(t.Context(), repo, "child/deeper", attegit.PathHCLFunctions)
-	must.NoError(t, err)
-	test.EqOp(t, "deep", deep.Global["version"].AsString())
-	test.EqOp(t, reference.Blob("child/deeper/deep.sh"), *deep.Global["shared_path"].EncapsulatedValue().(*reference.Blob))
+	test.Len(t, 1, calls)
+	test.EqOp(t, reference.Blob("child/atte.hcl"), calls[0])
 }
 
 func TestEntityIDRoundTrip(t *testing.T) {
@@ -443,6 +378,15 @@ func TestEntityIDRoundTrip(t *testing.T) {
 			test.EqOp(t, "unit", name)
 		})
 	}
+}
+
+func contains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func newHCLFixture(t *testing.T, files map[string]string) *attegit.Repo {

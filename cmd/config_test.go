@@ -9,76 +9,41 @@ import (
 
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attehcl"
-	"github.com/ghthor/atte/reference"
 	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
 )
 
-func TestConfigShowGlobalInheritanceGolden(t *testing.T) {
+func TestConfigShowTargetCentric(t *testing.T) {
 	repo := repoWithFiles(t, map[string]string{
-		"atte.hcl": `
-
-globals {
-  go_ver = "1.26"
-  script = path("./root.sh")
-  root_path = path("./root.sh")
-}
-`,
-		"root.sh": "#!/bin/sh\n",
 		"child/atte.hcl": `
-
-globals {
-  script = path("./child.sh")
-  go_ver = "1.27"
-}
-
 locals {
-  version = global.go_ver
+  inline_script = <<-EOF
+    echo inline
+  EOF
+  file_script = path("./child.sh")
 }
 
 test "child" {
-  script = <<-EOF
-    echo inline
-  EOF
+  script = local.inline_script
 }
 test "child2" {
-  script = path("./child.sh")
+  script = local.file_script
 }
 `,
 		"child/child.sh": "#!/bin/sh\n",
 	})
 	config, err := attehcl.ConfigFor(t.Context(), repo, "child", attegit.PathHCLFunctions)
 	test.NoError(t, err)
-	test.EqOp(t, "1.27", config.Global["go_ver"].AsString())
-	test.EqOp(t, "child/child.sh", (*config.Global["script"].EncapsulatedValue().(*reference.Blob)).String())
-	test.Len(t, 2, config.Targets)
-	test.EqOp(t, "child", config.Targets[0].Name)
-	test.EqOp(t, "echo inline\n", config.Targets[0].Inline)
-	test.EqOp(t, reference.Blob(""), config.Targets[0].Script)
-	test.EqOp(t, "child2", config.Targets[1].Name)
-	test.EqOp(t, "", config.Targets[1].Inline)
-	test.EqOp(t, reference.Blob("child/child.sh"), config.Targets[1].Script)
+	targets := attehcl.SortedTargets(config.Targets)
+	test.Len(t, 2, targets)
+	test.EqOp(t, "child", targets[0].Name)
+	test.EqOp(t, "echo inline\n", targets[0].Inline)
+	test.EqOp(t, "", targets[0].Script.String())
+	test.EqOp(t, "child2", targets[1].Name)
+	test.EqOp(t, "child/child.sh", targets[1].Script.String())
 	var got bytes.Buffer
 	must.NoError(t, writeConfig(&got, config, "hcl"))
-	assertConfigGolden(t, "global-inheritance", got.String())
-}
-
-func TestConfigShowGlobalInheritanceWithoutLocalConfig(t *testing.T) {
-	repo := repoWithFiles(t, map[string]string{
-		"atte.hcl": `
-
-globals {
-  go_ver = "1.26"
-}
-`,
-		"child/file.txt": "child\n",
-	})
-	config, err := attehcl.ConfigFor(t.Context(), repo, "child", attegit.PathHCLFunctions)
-	test.NoError(t, err)
-	test.EqOp(t, "1.26", config.Global["go_ver"].AsString())
-	test.EqOp(t, 0, len(config.Local))
-	test.EqOp(t, 0, len(config.Targets))
-
+	assertConfigGolden(t, "target-centric", got.String())
 }
 
 func assertConfigGolden(t *testing.T, name, got string) {

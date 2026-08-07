@@ -1,7 +1,3 @@
-globals {
-  go_ver = "1.26.5"
-}
-
 test "go" {
   script     = path("./atte_test.sh")
   depends_on = ["//go.mod"]

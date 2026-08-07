@@ -31,11 +31,11 @@ When initializing a Go struct with more than two fields, format the fields acros
 
 All current usage of the Go packages in this repository is within this repository. When refactoring, do not assume unknown external usages need to be preserved.
 
-## Code navigation
+## Code navigation and editing
 
 When working with Go code, always try using the LSP to obtain structural information about the code before editing, such as definitions, references, symbols, types, and call hierarchies.
 
-The LSP is read-only; use the repository editing tools to make changes.
+**Strong editing rule: all file edits in this repository MUST be performed through Serena editing tools. Do not use the generic `edit`, `write`, shell redirection, scripting, or other non-Serena tools to modify repository files. Use Serena symbol-level editors for Go declarations and Serena content/file editors for other changes. The generic repository tools remain available for reading and executing commands, but they must not be used to write or edit files.**
 
 ## Go dependencies
 

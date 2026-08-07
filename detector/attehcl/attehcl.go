@@ -38,38 +38,20 @@ const (
 	DecodingPathPrefix = "attehcl-path:"
 )
 
-var blockKinds = []struct {
-	hclType string
-	kind    string
-}{
-	{hclType: "test", kind: TestKind},
-	{hclType: "codegen", kind: CodegenKind},
-	{hclType: "lint", kind: LintKind},
-}
-
-// rawBlock is a parsed HCL block body with its labels, before any
-// kind-specific attribute decoding. It carries no schema information, so it
-// is shared across every block kind.
-type rawBlock struct {
-	body   *hclsyntax.Body
-	labels []string
-}
-
 type dependency struct {
-	value  string
-	entity graph.EntityID
+	value     string
+	entity    graph.EntityID
+	traversal hcl.Traversal
 }
 
 type hclFile struct {
-	file    reference.Blob
-	body    *hclsyntax.Body
-	globals map[string]hcl.Expression
-	locals  map[string]hcl.Expression
+	file   reference.Blob
+	body   *hclsyntax.Body
+	locals map[string]hcl.Expression
 }
 
 type hclScope struct {
-	global cty.Value
-	local  cty.Value
+	local cty.Value
 }
 
 func objectValue(values map[string]cty.Value) cty.Value {
@@ -79,27 +61,23 @@ func objectValue(values map[string]cty.Value) cty.Value {
 	return cty.ObjectVal(values)
 }
 
-func declarationBlocks(file reference.Blob, body *hclsyntax.Body) (map[string]hcl.Expression, map[string]hcl.Expression, error) {
-	globals := make(map[string]hcl.Expression)
+func declarationBlocks(file reference.Blob, body *hclsyntax.Body) (map[string]hcl.Expression, error) {
 	locals := make(map[string]hcl.Expression)
 	for _, block := range body.Blocks {
-		var dst map[string]hcl.Expression
-		switch block.Type {
-		case "globals":
-			dst = globals
-		case "locals":
-			dst = locals
-		default:
+		if block.Type == "globals" {
+			return nil, fmt.Errorf("decode HCL %q: globals are not supported; targets are file-local", file)
+		}
+		if block.Type != "locals" {
 			continue
 		}
 		for name, attr := range block.Body.Attributes {
-			if _, exists := dst[name]; exists {
-				return nil, nil, fmt.Errorf("decode HCL %q: duplicate %s attribute %q", file, block.Type, name)
+			if _, exists := locals[name]; exists {
+				return nil, fmt.Errorf("decode HCL %q: duplicate locals attribute %q", file, name)
 			}
-			dst[name] = attr.Expr
+			locals[name] = attr.Expr
 		}
 	}
-	return globals, locals, nil
+	return locals, nil
 }
 
 type hclFiles map[reference.Blob]*hclFile
@@ -114,53 +92,46 @@ func readHCLFiles(repo *attegit.Repo) (hclFiles, error) {
 		if repo.Obj[file].Kind != attegit.Blob || path.Base(file.String()) != Filename {
 			continue
 		}
-		contents, err := repo.Show(file)
-		if err != nil {
-			return nil, fmt.Errorf("read %q: %w", file, err)
-		}
 		fileBlob, err := reference.ParseBlob(file.String())
 		if err != nil {
 			return nil, fmt.Errorf("invalid HCL file path %q: %w", file, err)
 		}
-		body, err := parseFile(fileBlob, contents)
+		parsed, err := readHCLFile(repo, fileBlob)
 		if err != nil {
 			return nil, err
 		}
-		globals, locals, err := declarationBlocks(fileBlob, body)
-		if err != nil {
-			return nil, err
-		}
-		files[fileBlob] = &hclFile{file: fileBlob, body: body, globals: globals, locals: locals}
+		files[fileBlob] = parsed
 	}
 	return files, nil
 }
 
-func declarationContext(namespace string, inherited, values map[string]cty.Value, functions map[string]function.Function) *hcl.EvalContext {
-	global := inherited
-	if namespace == "global" {
-		global = make(map[string]cty.Value, len(inherited)+len(values))
-		for key, value := range inherited {
-			global[key] = value
-		}
-		for key, value := range values {
-			global[key] = value
-		}
+func readHCLFile(repo *attegit.Repo, file reference.Blob) (*hclFile, error) {
+	contents, err := repo.Show(file)
+	if err != nil {
+		return nil, fmt.Errorf("read %q: %w", file, err)
 	}
-	variables := map[string]cty.Value{"global": objectValue(global)}
-	if namespace == "local" {
-		variables["local"] = objectValue(values)
+	body, err := parseFile(file, contents)
+	if err != nil {
+		return nil, err
 	}
-	return &hcl.EvalContext{Variables: variables, Functions: functions}
+	locals, err := declarationBlocks(file, body)
+	if err != nil {
+		return nil, err
+	}
+	return &hclFile{file: file, body: body, locals: locals}, nil
+}
+
+func localContext(values map[string]cty.Value, functions map[string]function.Function) *hcl.EvalContext {
+	return &hcl.EvalContext{Variables: map[string]cty.Value{"local": objectValue(values)}, Functions: functions}
 }
 
 func evaluateDeclaration(expression hcl.Expression, context *hcl.EvalContext) (cty.Value, hcl.Diagnostics) {
 	return expression.Value(context)
 }
 
-// evaluateDeclarations resolves declarations within one HCL file. Cross-file
-// target dependencies will need a repository-wide target index or dependency
-// resolution phase rather than extending this file-local retry loop.
-func evaluateDeclarations(file *hclFile, expressions map[string]hcl.Expression, inherited map[string]cty.Value, namespace string, functions map[string]function.Function) (map[string]cty.Value, error) {
+// evaluateLocals resolves file-local declarations without consulting another
+// atte.hcl file. Cross-file target dependencies are a later graph phase.
+func evaluateLocals(file *hclFile, expressions map[string]hcl.Expression, functions map[string]function.Function) (map[string]cty.Value, error) {
 	values := make(map[string]cty.Value, len(expressions))
 	pending := make(map[string]hcl.Expression, len(expressions))
 	for name, expr := range expressions {
@@ -172,21 +143,21 @@ func evaluateDeclarations(file *hclFile, expressions map[string]hcl.Expression, 
 		var lastDiags hcl.Diagnostics
 		for name, expr := range pending {
 			lastName = name
-			ctx := declarationContext(namespace, inherited, values, functions)
+			ctx := localContext(values, functions)
 			value, diags := evaluateDeclaration(expr, ctx)
 			if diags.HasErrors() {
 				lastDiags = diags
 				continue
 			}
 			if !value.IsKnown() {
-				return nil, fmt.Errorf("decode HCL %q: %s.%s must be known", file.file, namespace, name)
+				return nil, fmt.Errorf("decode HCL %q: local.%s must be known", file.file, name)
 			}
 			values[name] = value
 			delete(pending, name)
 			progress = true
 		}
 		if !progress {
-			return nil, fmt.Errorf("decode HCL %q %s.%s: %s", file.file, namespace, lastName, lastDiags.Error())
+			return nil, fmt.Errorf("decode HCL %q local.%s: %s", file.file, lastName, lastDiags.Error())
 		}
 	}
 	return values, nil
@@ -198,25 +169,28 @@ type evaluator struct {
 	files     hclFiles
 	provider  graphset.FunctionProvider
 	functions map[reference.Blob]map[string]function.Function
+	kindSpecs map[Kind]targetKindSpec
 }
 
-type decodedBlock struct {
-	kind   string
-	file   reference.Blob
-	name   string
-	label  string
-	index  int
-	script string
-	deps   []dependency
+type normalizedBlock struct {
+	block *hclsyntax.Block
+	kind  Kind
+	name  string
+	index int
 }
 
-type globalPhase struct {
+type evaluatedTarget struct {
+	Kind    Kind
+	File    reference.Blob
+	Name    string
+	Label   string
+	Index   int
+	Decoded any
+	Source  hcl.Range
+}
+
+type targetsPhase struct {
 	evaluator *evaluator
-	scopes    map[reference.Tree]map[string]cty.Value
-}
-
-type evaluationPhase struct {
-	globals globalPhase
 }
 
 func newEvaluator(ctx context.Context, repo *attegit.Repo, provider graphset.FunctionProvider) (*evaluator, error) {
@@ -233,6 +207,33 @@ func newEvaluator(ctx context.Context, repo *attegit.Repo, provider graphset.Fun
 		files:     files,
 		provider:  provider,
 		functions: make(map[reference.Blob]map[string]function.Function),
+		kindSpecs: targetRegistrySnapshot(),
+	}, nil
+}
+
+func newEvaluatorForFile(ctx context.Context, repo *attegit.Repo, file reference.Blob, provider graphset.FunctionProvider) (*evaluator, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("repository is nil")
+	}
+	parsed := &hclFile{
+		file:   file,
+		body:   &hclsyntax.Body{},
+		locals: make(map[string]hcl.Expression),
+	}
+	if object, ok := repo.Obj[file]; ok && object.Kind == attegit.Blob {
+		var err error
+		parsed, err = readHCLFile(repo, file)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &evaluator{
+		ctx:       ctx,
+		repo:      repo,
+		files:     hclFiles{file: parsed},
+		provider:  provider,
+		functions: make(map[reference.Blob]map[string]function.Function),
+		kindSpecs: targetRegistrySnapshot(),
 	}, nil
 }
 
@@ -248,66 +249,16 @@ func (e *evaluator) hclFunctions(file reference.Blob) (map[string]function.Funct
 	return functions, nil
 }
 
-func (e *evaluator) resolveGlobals() (globalPhase, error) {
-	phase := globalPhase{
-		evaluator: e,
-		scopes:    make(map[reference.Tree]map[string]cty.Value),
-	}
-
-	var visit func(reference.Tree) error
-	visit = func(dir reference.Tree) error {
-		inherited := phase.scopes[dir.Parent()]
-		globals := make(map[string]cty.Value, len(inherited))
-		for name, value := range inherited {
-			globals[name] = value
-		}
-		candidate, err := dir.Blob(Filename)
-		if err != nil {
-			return err
-		}
-		if file, ok := e.files[candidate]; ok {
-			functions, err := e.hclFunctions(file.file)
-			if err != nil {
-				return err
-			}
-			values, err := evaluateDeclarations(file, file.globals, globals, "global", functions)
-			if err != nil {
-				return err
-			}
-			for name, value := range values {
-				globals[name] = value
-			}
-		}
-		phase.scopes[dir] = globals
-
-		for _, child := range e.repo.DirTree[dir] {
-			if err := visit(child); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	if err := visit(reference.Root); err != nil {
-		return globalPhase{}, err
-	}
-	return phase, nil
-}
-
-func (p globalPhase) scopeFor(file *hclFile) (hclScope, error) {
-	globals := p.scopes[file.file.Tree()]
+func (p targetsPhase) scopeFor(file *hclFile) (hclScope, error) {
 	functions, err := p.evaluator.hclFunctions(file.file)
 	if err != nil {
 		return hclScope{}, err
 	}
-	locals, err := evaluateDeclarations(file, file.locals, globals, "local", functions)
+	locals, err := evaluateLocals(file, file.locals, functions)
 	if err != nil {
 		return hclScope{}, err
 	}
-	return hclScope{global: objectValue(globals), local: objectValue(locals)}, nil
-}
-
-func (p evaluationPhase) scopeFor(file *hclFile) (hclScope, error) {
-	return p.globals.scopeFor(file)
+	return hclScope{local: objectValue(locals)}, nil
 }
 
 func (e *evaluator) evalContext(file reference.Blob, scope hclScope) (*hcl.EvalContext, error) {
@@ -315,79 +266,118 @@ func (e *evaluator) evalContext(file reference.Blob, scope hclScope) (*hcl.EvalC
 	if err != nil {
 		return nil, err
 	}
-	return &hcl.EvalContext{Variables: map[string]cty.Value{"global": scope.global, "local": scope.local}, Functions: functions}, nil
+	return &hcl.EvalContext{Variables: map[string]cty.Value{"local": scope.local}, Functions: functions}, nil
 }
 
-func (e *evaluator) decodedBlocks(globals globalPhase) ([]decodedBlock, error) {
-	blocks := make([]decodedBlock, 0)
-	phase := evaluationPhase{globals: globals}
-	for _, file := range e.files.sortedBlobs() {
-		config := e.files[file]
-		scope, err := phase.scopeFor(config)
+func (e *evaluator) evaluatedTargets(only ...reference.Blob) ([]evaluatedTarget, error) {
+	files := e.files.sortedBlobs()
+	if len(only) > 0 {
+		files = only
+	}
+	blocks := make([]evaluatedTarget, 0)
+	phase := targetsPhase{evaluator: e}
+	for _, file := range files {
+		config, ok := e.files[file]
+		if !ok {
+			continue
+		}
+		fileBlocks, err := phase.evaluatedTargets(config)
 		if err != nil {
 			return nil, err
 		}
-		ctx, err := e.evalContext(file, scope)
-		if err != nil {
-			return nil, err
-		}
-		for _, spec := range blockKinds {
-			raw, err := blocksOfType(file, config.body, spec.hclType)
-			if err != nil {
-				return nil, err
-			}
-			labels := make(map[string]struct{}, len(raw))
-			for index, block := range raw {
-				name := fmt.Sprintf("%d", index)
-				label := ""
-				if len(block.labels) == 1 {
-					label = block.labels[0]
-					name = label
-					if _, exists := labels[name]; exists {
-						return nil, fmt.Errorf("parse HCL %q: duplicate %s label %q", file, spec.hclType, name)
-					}
-					labels[name] = struct{}{}
-				}
-				script, deps, err := decodeTargetBlock(e.repo, file, block.body, ctx)
-				if err != nil {
-					return nil, err
-				}
-				blocks = append(blocks, decodedBlock{kind: spec.kind, file: file, name: name, label: label, index: index, script: script, deps: deps})
-			}
-		}
+		blocks = append(blocks, fileBlocks...)
 	}
 	return blocks, nil
 }
 
-func targetsFromDecoded(repo *attegit.Repo, blocks []decodedBlock) ([]Target, error) {
-	targets := make([]Target, 0, len(blocks))
-	for _, block := range blocks {
-		scriptBlob := reference.Blob("")
-		inline := ""
-		if strings.HasPrefix(block.script, DecodingPathPrefix) {
-			scriptBlob = reference.Blob(strings.TrimPrefix(block.script, DecodingPathPrefix))
-		} else if block.script != "" {
-			trimmed := strings.TrimSpace(block.script)
-			if object, ok := repo.Obj[reference.Blob(trimmed)]; ok {
-				return nil, fmt.Errorf("decode HCL %q: script string resolves to repository %q %q; use path(%q) for an external script", block.file, object.Kind, trimmed, trimmed)
-			}
-			inline = block.script
+func (p targetsPhase) evaluatedTargets(file *hclFile) ([]evaluatedTarget, error) {
+	scope, err := p.scopeFor(file)
+	if err != nil {
+		return nil, err
+	}
+	ctx, err := p.evaluator.evalContext(file.file, scope)
+	if err != nil {
+		return nil, err
+	}
+	targets := make([]evaluatedTarget, 0)
+	normalized, err := p.normalizeBlocks(file)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range normalized {
+		kind, name, body, index := item.kind, item.name, item.block.Body, item.index
+		spec := p.evaluator.kindSpecs[kind]
+		content, diagnostics := body.Content(&spec.schema)
+		if diagnostics.HasErrors() {
+			return nil, fmt.Errorf("decode HCL %q target %s.%s at %s: %w", file.file, kind, displayName(name, index), item.block.Range().String(), hclDiagnosticError(p.evaluator.repo, file.file, diagnostics))
 		}
-		kind := strings.TrimPrefix(block.kind, Namespace+":")
-		aliases := selector.Aliases(selector.Target{Path: block.file.String(), Kind: kind, Name: block.name, Index: block.index})
-		targets = append(targets, Target{
-			ID:      EntityID(block.kind, block.file, block.name),
-			Kind:    block.kind,
-			File:    block.file,
-			Name:    block.name,
-			Label:   block.label,
-			Index:   block.index,
-			Aliases: aliases,
-			Script:  scriptBlob,
-			Inline:  inline,
+		decoded, err := spec.decoder(content, ctx)
+		if err != nil {
+			var diagnostic targetDiagnosticsError
+			if errors.As(err, &diagnostic) {
+				return nil, fmt.Errorf("decode HCL %q target %s.%s at %s: %w", file.file, kind, displayName(name, index), item.block.Range().String(), hclDiagnosticError(p.evaluator.repo, file.file, diagnostic.diagnostics))
+			}
+			return nil, fmt.Errorf("decode HCL %q target %s.%s at %s: %w", file.file, kind, displayName(name, index), item.block.Range().String(), err)
+		}
+		if err := validateDecoderResult(kind, decoded); err != nil {
+			return nil, fmt.Errorf("decode HCL %q target %s.%s at %s: %w", file.file, kind, displayName(name, index), item.block.Range().String(), err)
+		}
+		targets = append(targets, evaluatedTarget{
+			Kind:    kind,
+			File:    file.file,
+			Name:    name,
+			Label:   name,
+			Index:   index,
+			Decoded: decoded,
+			Source:  item.block.Range(),
 		})
 	}
 	return targets, nil
+}
+
+func targetsFromEvaluated(repo *attegit.Repo, evaluated []evaluatedTarget) (map[Kind][]Target, error) {
+	targets := make(map[Kind][]Target, len(evaluated))
+	for _, item := range evaluated {
+		script, inline, err := targetScript(repo, item.File, item.Decoded)
+		if err != nil {
+			return nil, err
+		}
+		kind := string(item.Kind)
+		display := displayName(item.Name, item.Index)
+		aliases := selector.Aliases(selector.Target{Path: item.File.String(), Kind: kind, Name: display, Index: item.Index})
+		targets[item.Kind] = append(targets[item.Kind], Target{
+			ID:      EntityID(Namespace+":"+kind, item.File, display),
+			Kind:    Namespace + ":" + kind,
+			File:    item.File,
+			Name:    item.Name,
+			Label:   item.Label,
+			Index:   item.Index,
+			Aliases: aliases,
+			Script:  script,
+			Inline:  inline,
+			Decoded: item.Decoded,
+			Source:  item.Source,
+		})
+	}
+	return targets, nil
+}
+
+func targetScript(repo *attegit.Repo, file reference.Blob, decoded any) (reference.Blob, string, error) {
+	target, ok := decoded.(decodedTarget)
+	if !ok {
+		return "", "", nil
+	}
+	if strings.HasPrefix(target.Script, DecodingPathPrefix) {
+		return reference.Blob(strings.TrimPrefix(target.Script, DecodingPathPrefix)), "", nil
+	}
+	if target.Script == "" {
+		return "", "", nil
+	}
+	trimmed := strings.TrimSpace(target.Script)
+	if object, ok := repo.Obj[reference.Blob(trimmed)]; ok {
+		return "", "", fmt.Errorf("decode HCL %q: script string resolves to repository %q %q; use path(%q) for an external script", file, object.Kind, trimmed, trimmed)
+	}
+	return "", target.Script, nil
 }
 
 func EntityID(kind string, file reference.Blob, name string) graph.EntityID {
@@ -400,9 +390,7 @@ func DecodeEntityID(id graph.EntityID) (string, reference.Blob, string, error) {
 		return "", "", "", fmt.Errorf("invalid attehcl entity ID %q", id)
 	}
 	kind := parts[0] + ":" + parts[1]
-	switch kind {
-	case TestKind, CodegenKind, LintKind:
-	default:
+	if _, registered := targetRegistrySnapshot()[Kind(parts[1])]; !registered {
 		return "", "", "", fmt.Errorf("invalid attehcl entity ID %q", id)
 	}
 	file, err := reference.ParseBlob(parts[2])
@@ -412,20 +400,21 @@ func DecodeEntityID(id graph.EntityID) (string, reference.Blob, string, error) {
 	return kind, file, parts[3], nil
 }
 
-// Target describes one executable target declared by a test, codegen, or lint
-// block in an atte.hcl file. Targets are returned in repository order, with
-// unlabeled blocks assigned a zero-based numeric Name within their block kind
-// and labeled blocks using the label as Name. Script is a repository-relative
-// path resolved from an explicit path expression.
+// Target describes one target declared by a registered kind in an atte.hcl
+// file. Targets are returned in repository order. Named targets retain their
+// source label in Name; anonymous targets retain an empty Name and use Index
+// for their kind-local source position. Script is a repository-relative path
+// resolved from an explicit path expression.
 //
 // Script is the repository-relative path resolved from an explicit path
 // expression; Inline contains ordinary string script content. Both are empty
 // only when the corresponding value is not present. ID is the corresponding graph entity
 // identifier, and Selector converts the target to the canonical CLI selector.
 //
-// Kind is one of TestKind, CodegenKind, or LintKind. File identifies the
-// declaring atte.hcl file. Label preserves the HCL block label, when present,
-// while Index records the block's zero-based position within its kind.
+// Kind identifies the registered target kind. File identifies the declaring
+// atte.hcl file. Label preserves the HCL block label, when present, while Index
+// records the block's zero-based position within its kind. Decoded contains the
+// value returned by the kind's registered decoder.
 type Target struct {
 	ID      graph.EntityID
 	Kind    string
@@ -436,6 +425,14 @@ type Target struct {
 	Aliases []string
 	Script  reference.Blob
 	Inline  string
+	Decoded any
+	Source  hcl.Range
+}
+
+// DisplayName returns the stable display identifier component for the target.
+// Anonymous targets use their kind-local source index.
+func (target Target) DisplayName() string {
+	return displayName(target.Name, target.Index)
 }
 
 // Command constructs the command used to execute the target from a repository root.
@@ -449,48 +446,54 @@ func (target Target) Command(root string) (*exec.Cmd, error) {
 	return nil, fmt.Errorf("target %q has no script", target.ID)
 }
 
-// Targets returns executable test, codegen, and lint blocks in repository order.
-// Selector returns the canonical selector for an HCL runnable target.
+// Selector converts a target to its selector-facing identity.
 func Selector(target Target) selector.Target {
 	return selector.Target{
 		Path:    target.File.String(),
 		Kind:    strings.TrimPrefix(target.Kind, Namespace+":"),
-		Name:    target.Name,
+		Name:    target.DisplayName(),
 		Index:   target.Index,
 		Aliases: target.Aliases,
 	}
 }
 
-func Targets(ctx context.Context, repo *attegit.Repo, provider graphset.FunctionProvider) ([]Target, error) {
+// Targets evaluates all atte.hcl files independently and groups declarations by kind.
+func Targets(ctx context.Context, repo *attegit.Repo, provider graphset.FunctionProvider) (map[Kind][]Target, error) {
 	return targetsWithProvider(ctx, repo, provider)
 }
 
-func targetsWithProvider(ctx context.Context, repo *attegit.Repo, provider graphset.FunctionProvider) ([]Target, error) {
+// SortedTargets returns the targets grouped by kind in deterministic source order.
+func SortedTargets(grouped map[Kind][]Target) []Target {
+	kinds := make([]Kind, 0, len(grouped))
+	for kind := range grouped {
+		kinds = append(kinds, kind)
+	}
+	slices.Sort(kinds)
+	targets := make([]Target, 0)
+	for _, kind := range kinds {
+		targets = append(targets, grouped[kind]...)
+	}
+	return targets
+}
+
+func targetsWithProvider(ctx context.Context, repo *attegit.Repo, provider graphset.FunctionProvider) (map[Kind][]Target, error) {
 	evaluator, err := newEvaluator(ctx, repo, provider)
 	if err != nil {
 		return nil, err
 	}
-	globals, err := evaluator.resolveGlobals()
+	blocks, err := evaluator.evaluatedTargets()
 	if err != nil {
 		return nil, err
 	}
-	blocks, err := evaluator.decodedBlocks(globals)
-	if err != nil {
-		return nil, err
-	}
-	return targetsFromDecoded(repo, blocks)
+	return targetsFromEvaluated(repo, blocks)
 }
 
-// Config is the evaluated attehcl configuration for a repository directory.
+// Config is the evaluated target configuration for a repository directory.
 type Config struct {
-	Global  map[string]cty.Value
-	Local   map[string]cty.Value
-	Targets []Target
+	Targets map[Kind][]Target
 }
 
-// ConfigFor evaluates the attehcl configuration for a repository-relative directory.
-// Global values are inherited from repository ancestors; local values and targets
-// are scoped to the requested directory.
+// ConfigFor evaluates the file-local target configuration for a repository-relative directory.
 func ConfigFor(ctx context.Context, repo *attegit.Repo, relativePath string, provider graphset.FunctionProvider) (Config, error) {
 	return configForWithProvider(ctx, repo, relativePath, provider)
 }
@@ -503,50 +506,31 @@ func configForWithProvider(ctx context.Context, repo *attegit.Repo, relativePath
 	if err != nil {
 		return Config{}, fmt.Errorf("invalid repository directory %q: %w", relativePath, err)
 	}
-	evaluator, err := newEvaluator(ctx, repo, provider)
-	if err != nil {
-		return Config{}, err
-	}
-	globals, err := evaluator.resolveGlobals()
-	if err != nil {
-		return Config{}, err
-	}
 	currentBlob, err := tree.Blob(Filename)
 	if err != nil {
 		return Config{}, err
 	}
-	current, ok := evaluator.files[currentBlob]
-	if !ok {
-		current = &hclFile{file: currentBlob, globals: make(map[string]hcl.Expression), locals: make(map[string]hcl.Expression)}
-	}
-	phase := evaluationPhase{globals: globals}
-	scope, err := phase.scopeFor(current)
+	evaluator, err := newEvaluatorForFile(ctx, repo, currentBlob, provider)
 	if err != nil {
 		return Config{}, err
 	}
-	blocks, err := evaluator.decodedBlocks(globals)
+	blocks, err := evaluator.evaluatedTargets(currentBlob)
 	if err != nil {
 		return Config{}, err
 	}
-	allTargets, err := targetsFromDecoded(repo, blocks)
+	allTargets, err := targetsFromEvaluated(repo, blocks)
 	if err != nil {
 		return Config{}, err
 	}
-	targets := make([]Target, 0)
-	for _, target := range allTargets {
-		if target.File.Tree() == tree {
-			targets = append(targets, target)
+	targets := make(map[Kind][]Target, len(allTargets))
+	for kind, kindTargets := range allTargets {
+		for _, target := range kindTargets {
+			if target.File.Tree() == tree {
+				targets[kind] = append(targets[kind], target)
+			}
 		}
 	}
-	global := make(map[string]cty.Value)
-	for key, value := range scope.global.AsValueMap() {
-		global[key] = value
-	}
-	local := make(map[string]cty.Value)
-	for key, value := range scope.local.AsValueMap() {
-		local[key] = value
-	}
-	return Config{Global: global, Local: local, Targets: targets}, nil
+	return Config{Targets: targets}, nil
 }
 
 // WithFunctions adds provider-supplied HCL functions.
@@ -579,29 +563,25 @@ func graphFor(ctx context.Context, repo *attegit.Repo, options graphset.Options)
 	if err != nil {
 		return nil, err
 	}
-	globals, err := evaluator.resolveGlobals()
-	if err != nil {
-		return nil, err
-	}
-	blocks, err := evaluator.decodedBlocks(globals)
+	blocks, err := evaluator.evaluatedTargets()
 	if err != nil {
 		return nil, err
 	}
 	entities := make([]graph.Entity, 0)
+	seenEntities := make(map[graph.EntityID]struct{})
 	relations := make([]graph.Relationship, 0)
 	addEntity := func(e graph.Entity) {
-		for _, x := range entities {
-			if x.ID == e.ID {
-				return
-			}
+		if _, exists := seenEntities[e.ID]; exists {
+			return
 		}
+		seenEntities[e.ID] = struct{}{}
 		entities = append(entities, e)
 	}
 	for _, block := range blocks {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		r, err := addDecodedBlockGraph(ctx, repo, block, addEntity, options.AttachToTree)
+		r, err := addEvaluatedTargetGraph(ctx, repo, block, addEntity, options.AttachToTree)
 		if err != nil {
 			return nil, err
 		}
@@ -610,30 +590,46 @@ func graphFor(ctx context.Context, repo *attegit.Repo, options graphset.Options)
 	return graph.New(entities, relations)
 }
 
-// addDecodedBlockGraph builds graph entities and relations for one decoded block.
-func addDecodedBlockGraph(ctx context.Context, repo *attegit.Repo, block decodedBlock, addEntity func(graph.Entity), containment bool) ([]graph.Relationship, error) {
-	relations := make([]graph.Relationship, 0, 1+len(block.deps)*2)
-	id := EntityID(block.kind, block.file, block.name)
-	addEntity(graph.Entity{ID: id, Kind: block.kind})
+// addEvaluatedTargetGraph builds graph entities and relations for one decoded block.
+func addEvaluatedTargetGraph(ctx context.Context, repo *attegit.Repo, target evaluatedTarget, addEntity func(graph.Entity), containment bool) ([]graph.Relationship, error) {
+	relations := make([]graph.Relationship, 0)
+	id := EntityID(Namespace+":"+string(target.Kind), target.File, displayName(target.Name, target.Index))
+	addEntity(graph.Entity{ID: id, Kind: Namespace + ":" + string(target.Kind)})
 	if containment {
-		addEntity(graph.Entity{ID: attegit.EntityID(block.file.Tree()), Kind: attegit.TreeKind})
-		addEntity(graph.Entity{ID: attegit.EntityID(block.file), Kind: attegit.BlobKind})
-		relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(block.file), Kind: SourceFileRelation})
-		relations = append(relations, graph.Relationship{From: attegit.EntityID(block.file.Tree()), To: id, Kind: attegit.ContainsRelation})
+		addEntity(graph.Entity{ID: attegit.EntityID(target.File.Tree()), Kind: attegit.TreeKind})
+		addEntity(graph.Entity{ID: attegit.EntityID(target.File), Kind: attegit.BlobKind})
+		relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(target.File), Kind: SourceFileRelation})
+		relations = append(relations, graph.Relationship{From: attegit.EntityID(target.File.Tree()), To: id, Kind: attegit.ContainsRelation})
 	}
-	script := strings.TrimPrefix(block.script, DecodingPathPrefix)
+	decoded, ok := target.Decoded.(decodedTarget)
+	if !ok {
+		return relations, nil
+	}
+	if decoded.Script == "" {
+		return nil, fmt.Errorf("target %q has no script", target.Name)
+	}
+	relations = make([]graph.Relationship, 0, 2+len(decoded.Deps)*2)
+	if containment {
+		relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(target.File), Kind: SourceFileRelation})
+		relations = append(relations, graph.Relationship{From: attegit.EntityID(target.File.Tree()), To: id, Kind: attegit.ContainsRelation})
+	}
+	script := strings.TrimPrefix(decoded.Script, DecodingPathPrefix)
 	if script != "" {
-		targetBlob, err := reference.ResolveBlobFromBlob(block.file, reference.SomePath(script))
+		targetBlob, err := reference.ResolveBlobFromBlob(target.File, reference.SomePath(script))
 		if err != nil {
-			return nil, fmt.Errorf("%q: %w", block.file, err)
+			return nil, fmt.Errorf("%q: %w", target.File, err)
 		}
 		if obj, ok := repo.Obj[targetBlob]; !ok || obj.Kind != attegit.Blob {
-			return nil, fmt.Errorf("%q: script %q not found", block.file, targetBlob)
+			return nil, fmt.Errorf("%q: script %q not found", target.File, targetBlob)
 		}
 		addEntity(graph.Entity{ID: attegit.EntityID(targetBlob), Kind: attegit.BlobKind})
 		relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(targetBlob), Kind: ScriptRelation})
 	}
-	for _, dep := range block.deps {
+	for _, dep := range decoded.Deps {
+		if dep.traversal != nil {
+			// Symbolic target traversals are preserved for the later graph-assembly phase.
+			continue
+		}
 		if dep.entity != "" {
 			kind, err := entityDependencyKind(dep.entity)
 			if err != nil {
@@ -643,14 +639,14 @@ func addDecodedBlockGraph(ctx context.Context, repo *attegit.Repo, block decoded
 			relations = append(relations, graph.Relationship{From: id, To: dep.entity, Kind: DependsOnRelation})
 			continue
 		}
-		value := dep.value
-		targetBlob, err := reference.ResolveBlobFromBlob(block.file, reference.SomePath(value))
+		value := strings.TrimPrefix(dep.value, DecodingPathPrefix)
+		targetBlob, err := reference.ResolveBlobFromBlob(target.File, reference.SomePath(value))
 		if err != nil {
-			return nil, fmt.Errorf("%q: %w", block.file, err)
+			return nil, fmt.Errorf("%q: %w", target.File, err)
 		}
 		obj, ok := repo.Obj[targetBlob]
 		if !ok || obj.Kind != attegit.Blob {
-			return nil, fmt.Errorf("%q: dependency %q not found", block.file, targetBlob)
+			return nil, fmt.Errorf("%q: dependency %q not found", target.File, targetBlob)
 		}
 		addEntity(graph.Entity{ID: attegit.EntityID(targetBlob), Kind: attegit.BlobKind})
 		relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(targetBlob), Kind: DependsOnRelation})
@@ -689,21 +685,72 @@ func parseFile(file reference.Blob, contents []byte) (*hclsyntax.Body, error) {
 	return body, nil
 }
 
-// blocksOfType extracts the top-level blocks of the given HCL block type
-// (e.g. "test", "codegen", "lint") from an already-parsed file body. It
-// carries no schema knowledge, so it works unmodified for any block kind.
-func blocksOfType(file reference.Blob, body *hclsyntax.Body, blockType string) ([]rawBlock, error) {
-	blocks := make([]rawBlock, 0)
-	for _, block := range body.Blocks {
-		if block.Type != blockType {
+// normalizeBlocks discovers target declarations in source order and assigns
+// kind-local indices before any target body is decoded.
+func (p targetsPhase) normalizeBlocks(file *hclFile) ([]normalizedBlock, error) {
+	blocks := make([]normalizedBlock, 0, len(file.body.Blocks))
+	kindIndexes := make(map[Kind]int, len(p.evaluator.kindSpecs))
+	named := make(map[Kind]map[string]struct{}, len(p.evaluator.kindSpecs))
+	for _, block := range file.body.Blocks {
+		if block.Type == "locals" {
 			continue
 		}
-		if len(block.Labels) > 1 {
-			return nil, fmt.Errorf("parse HCL %q: %s has too many labels", file, blockType)
+		kind, name, _, err := p.normalizeBlock(block)
+		if err != nil {
+			return nil, fmt.Errorf("parse HCL %q target at %s: %w", file.file, block.Range().String(), err)
 		}
-		blocks = append(blocks, rawBlock{body: block.Body, labels: block.Labels})
+		index := kindIndexes[kind]
+		kindIndexes[kind]++
+		if name != "" {
+			if named[kind] == nil {
+				named[kind] = make(map[string]struct{})
+			}
+			if _, exists := named[kind][name]; exists {
+				return nil, fmt.Errorf("parse HCL %q: duplicate %s label %q at %s", file.file, kind, name, block.Range().String())
+			}
+			named[kind][name] = struct{}{}
+		}
+		blocks = append(blocks, normalizedBlock{block: block, kind: kind, name: name, index: index})
 	}
 	return blocks, nil
+}
+
+func (p targetsPhase) normalizeBlock(block *hclsyntax.Block) (Kind, string, *hclsyntax.Body, error) {
+	kindName := block.Type
+	labelOffset := 0
+	if block.Type == "target" {
+		if len(block.Labels) < 1 || len(block.Labels) > 2 {
+			return "", "", nil, fmt.Errorf("target block must have one or two labels")
+		}
+		kindName = block.Labels[0]
+		labelOffset = 1
+	}
+	kind := Kind(kindName)
+	if _, registered := p.evaluator.kindSpecs[kind]; !registered {
+		return "", "", nil, fmt.Errorf("unknown target kind %q", kindName)
+	}
+	if len(block.Labels)-labelOffset > 1 {
+		return "", "", nil, fmt.Errorf("target %s has too many labels", kindName)
+	}
+	name := ""
+	if len(block.Labels) > labelOffset {
+		name = block.Labels[labelOffset]
+		if isNumericName(name) {
+			return "", "", nil, fmt.Errorf("target %s name %q must not be numeric", kindName, name)
+		}
+	}
+	return kind, name, block.Body, nil
+}
+
+func displayName(name string, index int) string {
+	if name != "" {
+		return name
+	}
+	return fmt.Sprintf("%d", index)
+}
+
+func isNumericName(name string) bool {
+	return name != "" && strings.Trim(name, "0123456789") == ""
 }
 
 func mergedHCLFunctions(ctx context.Context, repo *attegit.Repo, file reference.Blob, provider graphset.FunctionProvider) (map[string]function.Function, error) {
@@ -776,62 +823,4 @@ func hclDiagnosticContext(repo *attegit.Repo, file reference.Blob, subject hcl.R
 	}
 	marker := strings.Repeat(" ", start) + strings.Repeat("^", end-start)
 	return fmt.Sprintf("  %d | %s\n    | %s", subject.Start.Line, line, marker)
-}
-
-func decodeTargetBlock(repo *attegit.Repo, file reference.Blob, body *hclsyntax.Body, ctx *hcl.EvalContext) (string, []dependency, error) {
-	deps := make([]dependency, 0)
-	content, diags := body.Content(&hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "script", Required: true}, {Name: "depends_on"}, {Name: "triggered_by"}}})
-	if diags.HasErrors() {
-		return "", nil, hclDiagnosticError(repo, file, diags)
-	}
-	script := ""
-	if value, ok := content.Attributes["script"]; ok {
-		v, d := value.Expr.Value(ctx)
-		if d.HasErrors() {
-			return "", nil, hclDiagnosticError(repo, file, d)
-		}
-		if !v.IsKnown() {
-			return "", nil, fmt.Errorf("decode HCL %q: script must be known", file)
-		}
-		if v.Type() == attegit.RepositoryPathType {
-			blob := *v.EncapsulatedValue().(*reference.Blob)
-			script = DecodingPathPrefix + blob.String()
-		} else if v.Type() == cty.String {
-			script = v.AsString()
-		} else {
-			return "", nil, fmt.Errorf("decode HCL %q: script must be a string or path", file)
-		}
-	}
-	for _, name := range []string{"depends_on", "triggered_by"} {
-		if attr, ok := content.Attributes[name]; ok {
-			values, d := attr.Expr.Value(ctx)
-			if d.HasErrors() {
-				return "", nil, hclDiagnosticError(repo, file, d)
-			}
-			if !values.IsKnown() || !values.CanIterateElements() {
-				return "", nil, fmt.Errorf("decode HCL %q: %s must be a list", file, name)
-			}
-			it := values.ElementIterator()
-			for it.Next() {
-				_, v := it.Element()
-				raw := ""
-				if v.Type() == attegit.RepositoryPathType {
-					blob := *v.EncapsulatedValue().(*reference.Blob)
-					raw = DecodingPathPrefix + blob.String()
-				} else if v.Type() == cty.String {
-					raw = v.AsString()
-				} else {
-					return "", nil, fmt.Errorf("decode HCL %q: %s values must be strings or paths", file, name)
-				}
-				if strings.HasPrefix(raw, "attehcl-id:") {
-					deps = append(deps, dependency{entity: graph.EntityID(strings.TrimPrefix(raw, "attehcl-id:"))})
-				} else if strings.HasPrefix(raw, "attego:") {
-					deps = append(deps, dependency{entity: graph.EntityID(raw)})
-				} else {
-					deps = append(deps, dependency{value: raw})
-				}
-			}
-		}
-	}
-	return script, deps, nil
 }

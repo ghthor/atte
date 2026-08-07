@@ -1,7 +1,3 @@
-global = {
-  go_ver = "1.26.5"
-}
-local = {}
 target = {
   "//atte.hcl#codegen.fmt" = {
     file   = "atte.hcl"

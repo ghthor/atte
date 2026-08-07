@@ -189,7 +189,7 @@ func runTargets(ctx context.Context, repo *attegit.Repo, root, cwd, relative str
 		return nil, err
 	}
 	hclByID := make(map[graph.EntityID]attehcl.Target, len(hclTargets))
-	for _, target := range hclTargets {
+	for _, target := range attehcl.SortedTargets(hclTargets) {
 		hclByID[target.ID] = target
 	}
 	targets := make([]runTarget, 0, len(registeredTargets))
@@ -210,7 +210,7 @@ func runTargets(ctx context.Context, repo *attegit.Repo, root, cwd, relative str
 				selector: canonical,
 				kind:     native.Kind,
 				path:     native.File.String(),
-				name:     native.Name,
+				name:     native.DisplayName(),
 				index:    native.Index,
 				aliases:  native.Aliases,
 				label:    native.Label,

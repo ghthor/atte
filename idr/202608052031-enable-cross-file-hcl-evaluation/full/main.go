@@ -610,22 +610,6 @@ func rootedPath(file string) string {
 	return "//" + strings.TrimSuffix(file, "/atte.hcl")
 }
 
-func sortedByTree(files map[string]*hclFile) []*hclFile {
-	result := make([]*hclFile, 0, len(files))
-	for _, file := range files {
-		result = append(result, file)
-	}
-	sort.Slice(result, func(i, j int) bool {
-		leftDepth := strings.Count(dirOf(result[i].name), "/")
-		rightDepth := strings.Count(dirOf(result[j].name), "/")
-		if leftDepth != rightDepth {
-			return leftDepth < rightDepth
-		}
-		return result[i].name < result[j].name
-	})
-	return result
-}
-
 func cloneValues(values map[string]cty.Value) map[string]cty.Value {
 	clone := make(map[string]cty.Value, len(values))
 	for name, value := range values {

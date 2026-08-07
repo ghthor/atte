@@ -61,8 +61,7 @@ kind identities.
   compatibility review.
 - Adding imports, inheritance, globals, locals, or arbitrary HCL modules to
   the target-spec experiment.
-- Migrating the production `detector/attehcl` implementation.
-- Defining production graph entity IDs, CLI aliases, or selector behavior.
+- Redesigning production graph entity IDs, CLI aliases, or selector behavior.
 - Defining kind-specific execution behavior beyond caller-supplied decoding.
 - Defining cross-file graph assembly or cross-file dependency resolution.
 - Defining post-evaluation validation of dependency references.
@@ -273,10 +272,13 @@ kind-specific execution behavior. A kind can initially share the test schema
 by omitting the schema argument. Shared schema does not imply shared selector,
 graph, or execution identity.
 
-Existing `detector/attehcl` behavior should be migrated in a later change with
-compatibility tests for `test`, `codegen`, and `lint`, including labels, scripts,
-dependency paths, aliases, and graph IDs. This IDR's experimental program is
-not itself a production API migration.
+The production `detector/attehcl` implementation will transition to this
+file-local, target-centric model as part of this IDR. The transition must
+preserve the existing graph entity IDs, selector aliases, and the distinct
+`test`, `codegen`, and `lint` kinds unless a separate compatibility decision
+changes them. The migration plan is recorded in `## Implementation
+(ephemeral)` below; the executable experiment remains a design reference and
+is not itself the production API.
 
 ### Diagnostics
 
@@ -284,6 +286,24 @@ Errors should distinguish malformed HCL, unknown kind, invalid label count,
 duplicate named target, ID collision, unsupported attribute, invalid script
 type, and invalid dependency collection/member. HCL diagnostics should retain
 source ranges from the original block body.
+
+### Production transition boundary
+
+The production detector adopts the target evaluator as its source of truth for
+HCL target declarations. It remains responsible for adapting evaluated targets
+to the existing graph and selector APIs until those APIs are revisited by a
+separate decision. In particular, the adapter preserves the current
+`attehcl:<kind>:<file>:<name>` entity ID encoding and selector aliases while
+using `Target.Kind`, `Target.Name`, and `Target.Index` from the new evaluator.
+
+The transition removes inherited `globals` from the production configuration
+model. A target in one `atte.hcl` file is not evaluated with declarations from
+an ancestor, sibling, or child file. File-local `locals`, if retained during
+this transition, are evaluated only for the file containing the target and are
+not a separate repository-wide phase. No target may depend on a global value.
+The public configuration surface must not continue to expose effective global
+values after this transition; callers needing targets use the target-centric
+result instead.
 
 ## Alternatives considered
 
@@ -316,8 +336,6 @@ assembly can resolve file and target dependencies after isolated evaluation.
 
 ## Future plans
 
-- Move the registry and normalized target evaluator into `detector/attehcl`.
-- Integrate the existing repository-path capsule and HCL function provider.
 - Define the production representation of target references versus path
   dependencies and validate symbolic references after enumeration.
 - Add repository-wide graph assembly and cross-file dependency resolution as a
@@ -344,25 +362,156 @@ assembly can resolve file and target dependencies after isolated evaluation.
 
 ## Implementation (ephemeral)
 
-Status: design updated with the target-kind, block-form, identity, registry,
-and file-local evaluation requirements. An executable experiment is included
-at `idr/202608061806-attehcl-spec-redesign/target-spec/main.go`.
+Status: implemented. Phases 1–5 are complete in production. The production
+registry, schema selection, wrapper/short-form normalization, decoder-owned
+values, file-local evaluation, grouped target results, typed and symbolic
+dependency preservation, compatibility projections, source-aware diagnostics,
+cleanup, and documentation now use the target-centric decoding path. The
+executable experiment remains at
+`idr/202608061806-attehcl-spec-redesign/target-spec/main.go` and is the
+behavioral reference for registration, normalization, schema selection, and
+file-local evaluation.
 
-The experiment currently demonstrates:
+The production migration is complete and is centered on the evaluated target
+model rather than the existing graph projection. Anonymous core targets
+retain an empty Name and expose their kind-local Index; adapters derive the
+display name from that index. Target names remain intentionally open pending a
+separate grammar decision.
 
-- built-in `test`, `codegen`, and `lint` registration with shared test schema;
-- wrapper and short-form blocks;
-- named and anonymous target display IDs with deterministic kind-local source
-  indices;
-- duplicate `(kind, name)` rejection and numeric-name rejection;
-- unknown short-form kind rejection;
-- caller-supplied kind-specific schemas and decoders, demonstrated by the
-  `package` kind;
-- isolated evaluation into `map[Kind][]Target` with deterministic output; and
-- HCL target identifier dependencies preserved as unresolved traversals while
-  repository paths remain typed path dependencies.
+### Completed implementation phases
 
-Verification:
+1. Remove `globals` parsing, inheritance, and evaluation from
+   `detector/attehcl`.
+   - Delete the `globals` fields from `hclFile` and the `global` field from
+     `hclScope`.
+   - Remove `declarationContext`, the generic declaration retry loop where it
+     exists only to resolve globals, `globalPhase`, `evaluationPhase`, and
+     `resolveGlobals`.
+   - Stop walking the repository directory tree to construct inherited
+     scopes.
+   - A `globals` block is no longer a supported target declaration. It must
+     not silently become a target or be evaluated as configuration.
+2. Remove or update the public global configuration surface. `ConfigFor` must
+   not return effective inherited globals after this change. If `Config` is
+   retained for callers that need file-local values, it contains only the
+   supported local/file metadata and the targets for the requested directory.
+3. Remove tests whose behavior is specifically global inheritance,
+   global/local ordering, global cycles, or propagation across directories.
+   This includes the current global inheritance and global-versus-local test
+   cases in `detector/attehcl/attehcl_test.go`. Replace mixed fixtures with
+   direct target expressions or explicitly file-local setup. Add one focused
+   unsupported-`globals` regression only if rejection is part of the final
+   diagnostic contract.
+4. Rewrite `detector/attehcl/README.md` to remove the globals section and
+   describe targets as directory-local declarations. Any retained `locals`
+   behavior must be documented as file-local input to target evaluation, not
+   as a repository phase. The cross-file HCL IDR and its README references to
+   preserving global semantics must be reconciled before implementation is
+   considered complete.
+
+### Phase 2: introduce the target evaluation phase
+
+1. Make target evaluation file-local. Add an evaluator-owned `targetsPhase`
+   (or equivalent) whose unit of work is one `atte.hcl` file and whose output
+   is the normalized/decoded targets from that file. A repository-wide caller
+   may parse or enumerate files to assemble a repository result, but that
+   orchestration must not become an input to evaluating one file's targets.
+2. Build the HCL evaluation context for a target from only:
+   - the registered kind's schema and decoder;
+   - the file's permitted file-local values, if locals are retained;
+   - the provider functions for that file; and
+   - the later target-reference namespace, when that separate graph/index
+     phase is introduced.
+   It must not contain inherited values from another `atte.hcl` file.
+3. Discover and normalize every target block in source order before decoding
+   any target in that file. Assign kind-local indices during this discovery
+   pass, enforce duplicate `(kind, name)` checks, and select the registered
+   schema for each block.
+4. Expose a single evaluator method that evaluates one file to
+   `map[Kind][]Target`. `Targets` invokes it for files in deterministic
+   repository order; `ConfigFor` invokes it only for the requested file; and
+   `Graph` projects the same evaluated results rather than decoding blocks a
+   second time.
+5. Preserve the isolation boundary with tests proving that evaluating a file
+   does not read or evaluate an ancestor, sibling, or child `atte.hcl` file.
+   Use a provider/function fixture that records the files requested during
+   evaluation, so the test detects accidental cross-file setup rather than
+   only checking the decoded values. Tests should also prove that target
+   discovery order and kind-local indices do not depend on map iteration or
+   the order in which other files are evaluated.
+
+### Phase 3: move production decoding to the registered target model
+
+1. Move the registry, normalized-block model, built-in schemas, and target
+   decoders from the experiment into `detector/attehcl`. Resolve the concrete
+   registration API before implementation: every registered kind must have a
+   decoder, built-ins must explicitly register the shared test decoder, and
+   each evaluation must use a stable registry snapshot.
+2. Deep-copy caller-provided schemas when registering a kind. Validate kind
+   identifiers, registration duplicates, label counts, target-name syntax,
+   and numeric-name collisions according to the final API contract.
+3. Replace `blockKinds`, `blocksOfType`, and the shared production body schema
+   with registry lookup and block normalization. Support both
+   `target "kind" ["name"] {}` and registered short-form blocks. Keep
+   `globals` out of the registered target namespace.
+4. Preserve the experiment's typed decoding rules for scripts, paths, and
+   unresolved target traversals. A target reference is retained for later
+   graph assembly; target enumeration does not resolve it or require the
+   referenced target to be declared in the same file.
+5. Use a shared evaluated-target projection for all consumers:
+   - `Targets` adapts the result to `graphtarget.ID`;
+   - `ConfigFor` returns the targets for one directory; and
+   - `Graph` adapts the same targets and dependencies to graph entities and
+     relationships.
+
+### Phase 4: preserve compatibility at the graph and selector boundary
+
+1. Keep existing `Target` adapter fields needed by callers during the
+   migration, but derive them from the new model. In particular, preserve
+   `Kind`, `Name`, `Index`, `File`, selector aliases, and the existing graph
+   entity ID format. Anonymous target IDs must continue to match the current
+   `kind.<index>`/graph-name behavior even though the evaluated model stores
+   an empty optional name plus a source index.
+2. Keep `test`, `codegen`, and `lint` as distinct production kinds even when
+   they share the test schema and decoder. Add compatibility tests proving
+   that schema sharing does not collapse graph kinds, selectors, aliases, or
+   reporting.
+3. Make `Graph`, `Targets`, and `ConfigFor` consume the same evaluated target
+   data. Add regression tests comparing scripts, dependencies, labels,
+   indices, aliases, and graph IDs across all three projections.
+4. Keep repository-path resolution in the existing provider/capsule adapter
+   until the production target decoder can use it directly. Do not introduce
+   cross-file target resolution in this migration; that remains a later graph
+   assembly phase.
+
+### Completed cleanup and verification
+
+1. Delete the old global/evaluation phase code and any duplicate block
+   decoding after the new target phase is used by every public entry point.
+2. Remove obsolete analysis and comments that describe inherited globals or
+   repository-wide configuration evaluation, and update package comments,
+   README examples, and error expectations.
+3. Add focused tests for malformed blocks, unknown kinds, invalid labels,
+   duplicate names, unsupported attributes, invalid scripts, invalid
+   dependency collections/members, isolated file evaluation, deterministic
+   indices, and target/graph projection consistency.
+4. Run the repository verification commands from `AGENTS.md`, plus the target
+   experiment, before updating this section with factual implementation notes.
+
+### Final acceptance status
+
+The migration is complete:
+
+- no production code evaluates or exposes inherited `globals`;
+- target enumeration for one file can complete without evaluating another
+  `atte.hcl` file;
+- one normalized/evaluated target representation feeds `Targets`, `ConfigFor`,
+  and `Graph`;
+- built-in kinds remain distinct while sharing schemas where intended;
+- existing graph IDs and selector behavior remain unchanged; and
+- tests and documentation describe only the target-centric production model.
+
+### Verification
 
 ```text
 gofmt -w idr/202608061806-attehcl-spec-redesign/target-spec/main.go

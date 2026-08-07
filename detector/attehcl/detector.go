@@ -55,16 +55,17 @@ func (d Detector) Targets(ctx context.Context, repo *attegit.Repo) ([]graphtarge
 		return nil, err
 	}
 	result := make([]graphtarget.ID, 0, len(found))
-	for _, target := range found {
-		if target.Script == "" {
+	for _, target := range SortedTargets(found) {
+		if target.Script == "" && target.Inline == "" {
 			continue
 		}
+		name := target.DisplayName()
 		result = append(result, graphtarget.ID{
 			ID:        target.ID,
 			Namespace: Namespace,
 			Kind:      target.Kind,
 			Path:      target.File.String(),
-			Name:      target.Name,
+			Name:      name,
 			Index:     target.Index,
 			Aliases:   target.Aliases,
 		})

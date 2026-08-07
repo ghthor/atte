@@ -1,4 +1,4 @@
-build Go graph: build attehcl graph: decode HCL "atte.hcl": atte.hcl:3,17-23:
+build Go graph: build attehcl graph: decode HCL "atte.hcl" target codegen.go at atte.hcl:1,1-4,2: decode HCL "atte.hcl": atte.hcl:3,17-23:
   3 |   depends_on = [gopkg("./cmd/mis")]
     |                 ^^^^^^
 Error in function call: Call to function "gopkg" failed: resolve "./cmd/mis": module for import path "./cmd/mis" from source file "atte.hcl" not found.

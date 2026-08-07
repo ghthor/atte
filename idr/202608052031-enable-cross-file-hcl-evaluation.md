@@ -1,4 +1,4 @@
-# 2026-08-05: Enable cross-file HCL evaluation
+# 2026-08-05: Rejected — enable cross-file HCL evaluation
 
 Owner: Will Owens <ghthor@gmail.com>
 
@@ -10,6 +10,11 @@ Atte currently evaluates each `atte.hcl` file with a context containing only
 that file's `global` and `local` values. It has no repository-wide HCL
 identifier scope, so an expression in one file cannot refer to a declaration
 in another file.
+
+This design is rejected. Cross-file HCL evaluation is not part of the target-centric
+HCL model; target evaluation remains file-local and cross-file references are
+not supported by this design. The remainder of this document is retained as
+archival rejected design material.
 
 The HCL detector should support relationships such as:
 
