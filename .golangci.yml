@@ -7,12 +7,17 @@ linters:
   default: none
   enable:
     - errcheck
+    - exptostd
+    - fatcontext
     - govet
     - gocritic
     - ineffassign
     - modernize
     - staticcheck
     - unused
+    - usestdlibvars
+    - usetesting
+    - whitespace
   settings:
     gocritic:
       enable-all: true
