@@ -161,7 +161,17 @@ func TestTreeIndex(t *testing.T) {
 	})
 
 	must.MapLen(t, 0, sliceToMap(repo.Tree["nested/child.txt"]))
-	test.SliceEqOp(t, []reference.Path{reference.Tree("nested"), reference.Blob("nested/child.txt"), reference.Tree("nested/deeper"), reference.Blob("nested/deeper/leaf.txt"), reference.Blob("root.txt")}, repo.ObjKeys)
+	test.SliceEqOp(
+		t,
+		[]reference.Path{
+			reference.Tree("nested"),
+			reference.Blob("nested/child.txt"),
+			reference.Tree("nested/deeper"),
+			reference.Blob("nested/deeper/leaf.txt"),
+			reference.Blob("root.txt"),
+		},
+		repo.ObjKeys,
+	)
 	test.SliceEqOp(t, []reference.Tree{reference.Root, reference.Tree("nested"), reference.Tree("nested/deeper")}, repo.TreeKeys)
 }
 

@@ -430,13 +430,27 @@ func (p targetsPhase) evaluatedTargets(file *hclFile) ([]evaluatedTarget, error)
 		spec := p.evaluator.kindSpecs[kind]
 		content, diagnostics := body.Content(&spec.schema)
 		if diagnostics.HasErrors() {
-			return nil, fmt.Errorf("decode HCL %q target %s.%s at %s: %w", file.file, kind, displayName(name, index), item.block.Range().String(), hclDiagnosticError(p.evaluator.repo, file.file, diagnostics))
+			return nil, fmt.Errorf(
+				"decode HCL %q target %s.%s at %s: %w",
+				file.file,
+				kind,
+				displayName(name, index),
+				item.block.Range().String(),
+				hclDiagnosticError(p.evaluator.repo, file.file, diagnostics),
+			)
 		}
 		decoded, err := spec.decoder(content, ctx)
 		if err != nil {
 			var diagnostic targetDiagnosticsError
 			if errors.As(err, &diagnostic) {
-				return nil, fmt.Errorf("decode HCL %q target %s.%s at %s: %w", file.file, kind, displayName(name, index), item.block.Range().String(), hclDiagnosticError(p.evaluator.repo, file.file, diagnostic.diagnostics))
+				return nil, fmt.Errorf(
+					"decode HCL %q target %s.%s at %s: %w",
+					file.file,
+					kind,
+					displayName(name, index),
+					item.block.Range().String(),
+					hclDiagnosticError(p.evaluator.repo, file.file, diagnostic.diagnostics),
+				)
 			}
 			return nil, fmt.Errorf("decode HCL %q target %s.%s at %s: %w", file.file, kind, displayName(name, index), item.block.Range().String(), err)
 		}
@@ -496,7 +510,13 @@ func targetScript(repo *attegit.Repo, file reference.Blob, decoded any) (referen
 	}
 	trimmed := strings.TrimSpace(target.Script)
 	if object, ok := repo.Obj[reference.Blob(trimmed)]; ok {
-		return "", "", fmt.Errorf("decode HCL %q: script string resolves to repository %q %q; use path(%q) for an external script", file, object.Kind, trimmed, trimmed)
+		return "", "", fmt.Errorf(
+			"decode HCL %q: script string resolves to repository %q %q; use path(%q) for an external script",
+			file,
+			object.Kind,
+			trimmed,
+			trimmed,
+		)
 	}
 	return "", target.Script, nil
 }
@@ -741,7 +761,14 @@ func graphFor(ctx context.Context, repo *attegit.Repo, options graphset.Options)
 }
 
 // addEvaluatedTargetGraph builds graph entities and relations for one decoded block.
-func addEvaluatedTargetGraph(ctx context.Context, repo *attegit.Repo, target evaluatedTarget, declarations declarationIndex, addEntity func(graph.Entity), containment bool) ([]graph.Relationship, error) {
+func addEvaluatedTargetGraph(
+	ctx context.Context,
+	repo *attegit.Repo,
+	target evaluatedTarget,
+	declarations declarationIndex,
+	addEntity func(graph.Entity),
+	containment bool,
+) ([]graph.Relationship, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -942,7 +969,12 @@ func isNumericName(name string) bool {
 	return name != "" && strings.Trim(name, "0123456789") == ""
 }
 
-func mergedHCLFunctions(ctx context.Context, repo *attegit.Repo, file reference.Blob, provider graphset.FunctionProvider) (map[string]function.Function, error) {
+func mergedHCLFunctions(
+	ctx context.Context,
+	repo *attegit.Repo,
+	file reference.Blob,
+	provider graphset.FunctionProvider,
+) (map[string]function.Function, error) {
 	functions := make(map[string]function.Function)
 	if provider == nil {
 		return functions, nil

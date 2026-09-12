@@ -96,7 +96,13 @@ func resolveTryRelPath(repo *attegit.Repo, srcFile reference.Blob, path string) 
 
 	targetTree, ok := resolveTreePath(repo, target)
 	if !ok {
-		return "", nil, fmt.Errorf("path %q relative to source file %q resolves to repository path %q, which does not exist as a tree or file: %w", path, srcFile, target, errNotFound)
+		return "", nil, fmt.Errorf(
+			"path %q relative to source file %q resolves to repository path %q, which does not exist as a tree or file: %w",
+			path,
+			srcFile,
+			target,
+			errNotFound,
+		)
 	}
 	mod, err := moduleForTree(repo, targetTree)
 	if err != nil {
@@ -170,7 +176,13 @@ func resolveParamToTree(repo *attegit.Repo, srcFile reference.Blob, importPath s
 		return "", nil, err
 	}
 
-	return "", nil, fmt.Errorf("resolve %q as repository path, relative path, or Go import path: repository path: %w; relative path: %v; import path: %v", importPath, pathErr, relPathErr, err)
+	return "", nil, fmt.Errorf(
+		"resolve %q as repository path, relative path, or Go import path: repository path: %w; relative path: %v; import path: %v",
+		importPath,
+		pathErr,
+		relPathErr,
+		err,
+	)
 }
 
 func resolvePackage(repo *attegit.Repo, file reference.Blob, value, kind string) (graph.EntityID, error) {

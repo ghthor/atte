@@ -67,7 +67,13 @@ var graphCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		return printGraph(ctx, cmd.OutOrStdout(), repo, relative, PrintGraphOptions{IncludeExternalImports: graphExternalImports, IncludeGoFiles: graphGoFiles, IncludeRunTargets: graphRunTargets})
+		return printGraph(
+			ctx,
+			cmd.OutOrStdout(),
+			repo,
+			relative,
+			PrintGraphOptions{IncludeExternalImports: graphExternalImports, IncludeGoFiles: graphGoFiles, IncludeRunTargets: graphRunTargets},
+		)
 	},
 }
 
@@ -162,7 +168,14 @@ var (
 	stdlibStyle      = lipgloss.NewStyle().Faint(true)
 )
 
-func printGitGraph(w io.Writer, repo *attegit.Repo, g *graph.Graph, relativePath string, options PrintGraphOptions, runSelectors ...map[graph.EntityID]string) error {
+func printGitGraph(
+	w io.Writer,
+	repo *attegit.Repo,
+	g *graph.Graph,
+	relativePath string,
+	options PrintGraphOptions,
+	runSelectors ...map[graph.EntityID]string,
+) error {
 	var selectors map[graph.EntityID]string
 	if len(runSelectors) > 0 {
 		selectors = runSelectors[0]
@@ -190,7 +203,14 @@ func isGraphChildKind(kind string) bool {
 	}
 }
 
-func addGraphChildren(parent treeprint.Tree, repo *attegit.Repo, g *graph.Graph, parentID graph.EntityID, options PrintGraphOptions, runSelectors ...map[graph.EntityID]string) error {
+func addGraphChildren(
+	parent treeprint.Tree,
+	repo *attegit.Repo,
+	g *graph.Graph,
+	parentID graph.EntityID,
+	options PrintGraphOptions,
+	runSelectors ...map[graph.EntityID]string,
+) error {
 	var selectors map[graph.EntityID]string
 	if len(runSelectors) > 0 {
 		selectors = runSelectors[0]

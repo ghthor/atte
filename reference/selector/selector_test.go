@@ -34,7 +34,11 @@ func TestResolveRejectsRepositoryEscape(t *testing.T) {
 func TestPathMatchesFileAndContainingDirectory(t *testing.T) {
 	test.True(t, PathMatches("detector/atte.hcl", "", "detector/atte.hcl", "detector"), test.Sprintf("full HCL file path should match"))
 	test.True(t, PathMatches("detector", "", "detector/atte.hcl", "detector"), test.Sprintf("HCL containing directory should match"))
-	test.True(t, PathMatches("../atte.hcl", "detector/attego", "detector/atte.hcl", "detector"), test.Sprintf("relative HCL file path should resolve and match"))
+	test.True(
+		t,
+		PathMatches("../atte.hcl", "detector/attego", "detector/atte.hcl", "detector"),
+		test.Sprintf("relative HCL file path should resolve and match"),
+	)
 	test.False(t, PathMatches("../outside", "detector", "detector/atte.hcl", "detector"), test.Sprintf("path outside the target should not match"))
 }
 
@@ -112,7 +116,11 @@ func TestTargetMatchesGoTest(t *testing.T) {
 	test.True(t, target.Matches("attego#go_test", "detector"), test.Sprintf("relative package selector should match from the current directory"))
 	test.True(t, target.Matches("go_test", "detector/attego"), test.Sprintf("bare go_test alias should match from the package directory"))
 	test.True(t, target.Matches("go_test.0", "unrelated"), test.Sprintf("indexed go_test alias should remain path-independent"))
-	test.False(t, target.Matches("attego#go_test", "detector/attegox"), test.Sprintf("a sibling package sharing a string prefix must not match a path-qualified selector"))
+	test.False(
+		t,
+		target.Matches("attego#go_test", "detector/attegox"),
+		test.Sprintf("a sibling package sharing a string prefix must not match a path-qualified selector"),
+	)
 }
 
 func TestSelectorNoHCLFile(t *testing.T) {

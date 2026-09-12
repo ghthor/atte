@@ -29,4 +29,10 @@ linters:
 
 formatters:
   enable:
+    - gofumpt
     - goimports
+    - golines
+  settings:
+    golines:
+      # Default: 100
+      max-len: 160

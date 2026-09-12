@@ -99,7 +99,15 @@ func configOutputFor(config attehcl.Config) (configOutput, error) {
 	target := make(map[string]configTarget, len(config.Targets))
 	for _, item := range attehcl.SortedTargets(config.Targets) {
 		key := fmt.Sprintf("//%s#%s.%s", item.File, strings.TrimPrefix(item.Kind, attehcl.Namespace+":"), item.DisplayName())
-		target[key] = configTarget{Kind: item.Kind, File: item.File.String(), Name: item.DisplayName(), Label: item.Label, Index: item.Index, Script: item.Script.String(), Inline: item.Inline}
+		target[key] = configTarget{
+			Kind:   item.Kind,
+			File:   item.File.String(),
+			Name:   item.DisplayName(),
+			Label:  item.Label,
+			Index:  item.Index,
+			Script: item.Script.String(),
+			Inline: item.Inline,
+		}
 	}
 	return configOutput{Target: target}, nil
 }
@@ -145,7 +153,17 @@ func anyCty(value any) (cty.Value, error) {
 	case map[string]configTarget:
 		values := make(map[string]cty.Value, len(value))
 		for key, item := range value {
-			converted, err := anyCty(map[string]any{"kind": item.Kind, "file": item.File, "name": item.Name, "label": item.Label, "index": item.Index, "script": item.Script, "inline": item.Inline})
+			converted, err := anyCty(
+				map[string]any{
+					"kind":   item.Kind,
+					"file":   item.File,
+					"name":   item.Name,
+					"label":  item.Label,
+					"index":  item.Index,
+					"script": item.Script,
+					"inline": item.Inline,
+				},
+			)
 			if err != nil {
 				return cty.NilVal, err
 			}

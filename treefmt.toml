@@ -1,6 +1,6 @@
 [formatter.go]
-command = "goimports"
-options = ["-w"]
+command = "golangci-lint"
+options = ["fmt"]
 includes = ["*.go"]
 
 [formatter.nix]

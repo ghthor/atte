@@ -414,7 +414,15 @@ func sortedSet(m map[string]struct{}) []string {
 	return out
 }
 
-func addImport(p *packageInfo, from graph.EntityID, imp string, packages map[string]*packageInfo, byPath map[string][]*module, entities map[graph.EntityID]graph.Entity, relations map[graph.Relationship]struct{}) {
+func addImport(
+	p *packageInfo,
+	from graph.EntityID,
+	imp string,
+	packages map[string]*packageInfo,
+	byPath map[string][]*module,
+	entities map[graph.EntityID]graph.Entity,
+	relations map[graph.Relationship]struct{},
+) {
 	var target graph.EntityID
 	if q := resolveLocal(p, imp, packages); q != nil {
 		target = EntityID(PackageKind, q.module.dir, q.importPath)

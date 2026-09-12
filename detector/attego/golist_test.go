@@ -102,7 +102,13 @@ func runGoList(t *testing.T, moduleDir string) []goListPackage {
 	return packages
 }
 
-func addGoListPackages(t *testing.T, repositoryDir string, listed []goListPackage, entities map[graph.EntityID]graph.Entity, relations map[graph.Relationship]struct{}) {
+func addGoListPackages(
+	t *testing.T,
+	repositoryDir string,
+	listed []goListPackage,
+	entities map[graph.EntityID]graph.Entity,
+	relations map[graph.Relationship]struct{},
+) {
 	t.Helper()
 	packages := make(map[string]goListPackage)
 	for _, pkg := range listed {
@@ -137,7 +143,15 @@ func addGoListPackages(t *testing.T, repositoryDir string, listed []goListPackag
 	}
 }
 
-func addGoListImport(repositoryDir string, pkg goListPackage, from graph.EntityID, imported string, packages map[string]goListPackage, entities map[graph.EntityID]graph.Entity, relations map[graph.Relationship]struct{}) {
+func addGoListImport(
+	repositoryDir string,
+	pkg goListPackage,
+	from graph.EntityID,
+	imported string,
+	packages map[string]goListPackage,
+	entities map[graph.EntityID]graph.Entity,
+	relations map[graph.Relationship]struct{},
+) {
 	moduleDir := relativeModuleDir(repositoryDir, pkg.Module.Dir)
 	moduleTree := reference.Tree(moduleDir)
 	if moduleDir != "" {
