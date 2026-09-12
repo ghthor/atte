@@ -10,9 +10,13 @@ import (
 )
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	if err := cmd.ExecuteContext(ctx); err != nil {
+	if err := execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+func execute() error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return cmd.ExecuteContext(ctx)
 }

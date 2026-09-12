@@ -344,8 +344,8 @@ func preferLocalRunTargets(candidates []runTarget, relative string) []runTarget 
 
 func ambiguousRunTargetError(input string, candidates []runTarget) error {
 	ids := make([]string, len(candidates))
-	for i, target := range candidates {
-		ids[i] = target.selector
+	for i := range candidates {
+		ids[i] = candidates[i].selector
 	}
 	sort.Strings(ids)
 	commands := make([]string, len(ids))

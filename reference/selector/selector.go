@@ -216,7 +216,7 @@ func (t Target) String() string {
 
 // GoTest returns a Go package-test selector target.
 func Render(path, target string) string {
-	return "//" + strings.Join([]string{path, target}, "#")
+	return "//" + path + "#" + target
 }
 
 func GoTest(packagePath string) Target {
@@ -243,7 +243,7 @@ func (t Target) Matches(input, relative string) bool {
 }
 
 func (t Target) identifierAliases() []string {
-	canonical := strings.Join([]string{t.Kind, t.Name}, ".")
+	canonical := t.Kind + "." + t.Name
 	if t.Name == "" {
 		canonical = t.Kind
 	}

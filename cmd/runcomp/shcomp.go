@@ -103,7 +103,7 @@ func matchRepoPath(toMatch string, targets []string) []string {
 	return matches
 }
 
-func matchToDirectory(wd string, toComplete string, targets []string) []string {
+func matchToDirectory(wd, toComplete string, targets []string) []string {
 	matches := make([]string, 0, len(targets))
 	for _, t := range targets {
 		tt := strings.TrimPrefix(t, "//")

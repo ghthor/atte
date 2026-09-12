@@ -595,8 +595,8 @@ func DeclaredTargets(ctx context.Context, repo *attegit.Repo) ([]graphtarget.ID,
 		return nil, err
 	}
 	targets := make([]graphtarget.ID, 0, len(declarations))
-	for _, declaration := range declarations {
-		targets = append(targets, targetIDFromDeclaration(declaration))
+	for i := range declarations {
+		targets = append(targets, targetIDFromDeclaration(declarations[i]))
 	}
 	return targets, nil
 }
@@ -713,8 +713,8 @@ func graphFor(ctx context.Context, repo *attegit.Repo, options graphset.Options)
 		byReference: make(map[targetReference]targetDeclaration, len(blocks)),
 		byID:        make(map[graph.EntityID]targetDeclaration, len(blocks)),
 	}
-	for _, block := range blocks {
-		declaration := declarationFromEvaluated(block)
+	for i := range blocks {
+		declaration := declarationFromEvaluated(blocks[i])
 		declarations.byID[declaration.ID] = declaration
 		if declaration.Name != "" {
 			declarations.byReference[targetReference{file: declaration.File, kind: declaration.Kind, name: declaration.Name}] = declaration
@@ -751,8 +751,10 @@ func addEvaluatedTargetGraph(ctx context.Context, repo *attegit.Repo, target eva
 	if containment {
 		addEntity(graph.Entity{ID: attegit.EntityID(target.File.Tree()), Kind: attegit.TreeKind})
 		addEntity(graph.Entity{ID: attegit.EntityID(target.File), Kind: attegit.BlobKind})
-		relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(target.File), Kind: SourceFileRelation})
-		relations = append(relations, graph.Relationship{From: attegit.EntityID(target.File.Tree()), To: id, Kind: attegit.ContainsRelation})
+		relations = append(relations,
+			graph.Relationship{From: id, To: attegit.EntityID(target.File), Kind: SourceFileRelation},
+			graph.Relationship{From: attegit.EntityID(target.File.Tree()), To: id, Kind: attegit.ContainsRelation},
+		)
 	}
 	decoded, ok := target.Decoded.(decodedTarget)
 	if !ok {
@@ -763,8 +765,10 @@ func addEvaluatedTargetGraph(ctx context.Context, repo *attegit.Repo, target eva
 	}
 	relations = make([]graph.Relationship, 0, 2+len(decoded.Deps)*2)
 	if containment {
-		relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(target.File), Kind: SourceFileRelation})
-		relations = append(relations, graph.Relationship{From: attegit.EntityID(target.File.Tree()), To: id, Kind: attegit.ContainsRelation})
+		relations = append(relations,
+			graph.Relationship{From: id, To: attegit.EntityID(target.File), Kind: SourceFileRelation},
+			graph.Relationship{From: attegit.EntityID(target.File.Tree()), To: id, Kind: attegit.ContainsRelation},
+		)
 	}
 	script := strings.TrimPrefix(decoded.Script, DecodingPathPrefix)
 	if script != "" {

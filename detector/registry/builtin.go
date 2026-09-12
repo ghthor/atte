@@ -19,9 +19,7 @@ func NewBuiltIn() (*Registry, error) {
 	if err := r.RegisterDetector(attehcl.NewDetector(r.FunctionProvider())); err != nil {
 		return nil, err
 	}
-	if err := r.RegisterHCLFunction("path", func(ctx context.Context, repo *attegit.Repo, file reference.Blob) (function.Function, error) {
-		return attegit.PathHCLFunction(ctx, repo, file)
-	}); err != nil {
+	if err := r.RegisterHCLFunction("path", attegit.PathHCLFunction); err != nil {
 		return nil, err
 	}
 	for _, name := range []string{"gopkg", "gopkg_test"} {

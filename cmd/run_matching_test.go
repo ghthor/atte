@@ -74,9 +74,10 @@ func TestRunCmdValidArgs(t *testing.T) {
 		{selector: "//detector/attego#go_test", kind: attego.PackageTestKind, path: "detector/attego", name: "go_test"},
 		{selector: "//reference#go_test", kind: attego.PackageTestKind, path: "reference", name: "go_test"},
 	}
+	repoRoot := filepath.FromSlash("/repo")
 	complete := func(relative, prefix string, want []string) {
 		t.Helper()
-		matches, directive := runCmdValidArgsFromTargets(nil, prefix, "/repo", filepath.Join("/repo", relative), targets)
+		matches, directive := runCmdValidArgsFromTargets(nil, prefix, repoRoot, filepath.Join(repoRoot, relative), targets)
 		test.SliceEqOp(t, want, matches)
 		test.EqOp(t, cobra.ShellCompDirectiveNoFileComp, directive)
 		for _, want := range want {

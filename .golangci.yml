@@ -8,10 +8,19 @@ linters:
   enable:
     - errcheck
     - govet
+    - gocritic
     - ineffassign
     - modernize
     - staticcheck
     - unused
+  settings:
+    gocritic:
+      enable-all: true
+      disabled-checks:
+        - unnamedResult
+        - hugeParam
+        - importShadow
+        - rangeValCopy
 
 formatters:
   enable:

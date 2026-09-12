@@ -75,9 +75,6 @@ func TestMatchCompletionCorpus(t *testing.T) {
 	})
 
 	t.Run("relative (not supported at this time)", func(t *testing.T) {
-		// complete("/repo/detector", "../r", []string{"../reference#go_test"})
-		// complete("/repo/detector", "../", []string{"../atte.hcl#test.go", "../reference#go_test"})
-		// complete("/repo/detector/attego", "../../detector/", []string{"../../detector/atte.hcl#test.py", "../../detector/attego#go_test"})
-		// complete("/repo/detector/attego", "../../atte.hcl#", []string{"../../atte.hcl#test.go"})
+		// Relative completion is not supported at this time.
 	})
 }
