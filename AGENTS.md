@@ -31,6 +31,10 @@ When initializing a Go struct with more than two fields, format the fields acros
 
 All current usage of the Go packages in this repository is within this repository. When refactoring, do not assume unknown external usages need to be preserved.
 
+## Repository usage
+
+This repository is the only consumer of `atte` and its packages. Do not plan for unknown external users or preserve compatibility and migration paths for hypothetical consumers. When behavior changes, update the in-repository call sites, tests, fixtures, documentation, and IDRs directly.
+
 ## Code navigation and editing
 
 When working with Go code, always try using the LSP to obtain structural information about the code before editing, such as definitions, references, symbols, types, and call hierarchies.
