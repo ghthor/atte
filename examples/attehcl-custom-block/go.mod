@@ -7,6 +7,7 @@ replace github.com/ghthor/atte => ../..
 require (
 	github.com/ghthor/atte v0.0.0
 	github.com/hashicorp/hcl/v2 v2.24.0
+	github.com/shoenig/test v1.13.2
 )
 
 require (

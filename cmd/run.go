@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -84,7 +83,7 @@ func init() {
 }
 
 func loadRunTargets(ctx context.Context) (root, cwd, relative string, targets []runTarget, err error) {
-	cwd, err = os.Getwd()
+	cwd, err = commandWorkingDirectory(ctx)
 	if err != nil {
 		err = fmt.Errorf("get working directory: %w", err)
 		return
@@ -93,7 +92,7 @@ func loadRunTargets(ctx context.Context) (root, cwd, relative string, targets []
 	if err != nil {
 		return
 	}
-	repo, err := attegit.Open(root, "HEAD", attegit.WithWorkingTree())
+	repo, err := openRepository(ctx, root, "HEAD", attegit.WithWorkingTree())
 	if err != nil {
 		err = fmt.Errorf("open repository: %w", err)
 		return

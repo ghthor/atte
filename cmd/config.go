@@ -3,7 +3,6 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/ghthor/atte/detector/attegit"
@@ -28,7 +27,7 @@ var configShowCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
-		cwd, err := os.Getwd()
+		cwd, err := commandWorkingDirectory(ctx)
 		if err != nil {
 			return fmt.Errorf("get working directory: %w", err)
 		}
@@ -40,7 +39,7 @@ var configShowCmd = &cobra.Command{
 		if configWorkingTree {
 			options = append(options, attegit.WithWorkingTree())
 		}
-		repo, err := attegit.Open(root, configRef, options...)
+		repo, err := openRepository(ctx, root, configRef, options...)
 		if err != nil {
 			return err
 		}

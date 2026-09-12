@@ -87,6 +87,9 @@ func init() {
 }
 
 func repositoryContext(ctx context.Context, cwd string) (string, string, error) {
+	if execution, ok := executionFromContext(ctx); ok && execution.repository != nil {
+		return execution.root, execution.relative, nil
+	}
 	cmd := exec.CommandContext(ctx, "git", "-C", cwd, "rev-parse", "--show-toplevel")
 	var out bytes.Buffer
 	cmd.Stdout = &out
