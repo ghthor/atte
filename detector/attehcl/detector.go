@@ -50,25 +50,5 @@ func (d Detector) Graph(ctx context.Context, repo *attegit.Repo, options ...grap
 }
 
 func (d Detector) Targets(ctx context.Context, repo *attegit.Repo) ([]graphtarget.ID, error) {
-	found, err := Targets(ctx, repo, d.Provider)
-	if err != nil {
-		return nil, err
-	}
-	result := make([]graphtarget.ID, 0, len(found))
-	for _, target := range SortedTargets(found) {
-		if target.Script == "" && target.Inline == "" {
-			continue
-		}
-		name := target.DisplayName()
-		result = append(result, graphtarget.ID{
-			ID:        target.ID,
-			Namespace: Namespace,
-			Kind:      target.Kind,
-			Path:      target.File.String(),
-			Name:      name,
-			Index:     target.Index,
-			Aliases:   target.Aliases,
-		})
-	}
-	return result, nil
+	return DeclaredTargets(ctx, repo)
 }

@@ -50,7 +50,7 @@ Parse each `atte.hcl` independently and reject a `globals` block as an unsupport
 3. **Target decoding:** Apply local values to target attributes, decode scripts and dependencies, and invoke custom target decoders.
 4. **Graph:** Resolve repository paths and symbolic target traversals, then build entities and relationships.
 
-Introduce `DeclaredTargets` as the public repository-wide API for phase one. It returns a deterministic, path-and-source-ordered list of `TargetDeclaration` values for every target declaration with a recognized kind and valid block shape, including targets whose bodies contain semantically invalid or unresolved expressions and targets without scripts. It does not invoke HCL functions, evaluate locals, validate target schemas, decode target bodies, or require graph assembly. A file that fails HCL parsing or declaration collection, including a duplicate-local declaration rejected at that boundary, still causes `DeclaredTargets` to return an error rather than returning partial declarations from that file. An internal file-scoped declaration helper supports `ConfigFor` and other single-file callers without parsing unrelated files.
+Introduce `DeclaredTargets` as the public repository-wide API for phase one. It returns a deterministic, path-and-source-ordered list of `graphtarget.ID` values for every target declaration with a recognized kind and valid block shape, including targets whose bodies contain semantically invalid or unresolved expressions and targets without scripts. It does not invoke HCL functions, evaluate locals, validate target schemas, decode target bodies, or require graph assembly. A file that fails HCL parsing or declaration collection, including a duplicate-local declaration rejected at that boundary, still causes `DeclaredTargets` to return an error rather than returning partial declarations from that file. An internal file-scoped declaration helper supports `ConfigFor` and other single-file callers without parsing unrelated files.
 
 Keep `Targets`, `ConfigFor`, and `Graph` as the richer configuration and graph APIs. `ConfigFor` evaluates only the requested file; `Targets` and `Graph` evaluate target bodies as needed. Literal target traversals remain symbolic until graph evaluation, while paths and detector entity references retain their existing dependency types.
 
@@ -60,18 +60,9 @@ Keep `Targets`, `ConfigFor`, and `Graph` as the richer configuration and graph A
 
 Add a declaration-only API:
 
-    type TargetDeclaration struct {
-        ID     graph.EntityID
-        Kind   Kind
-        File   reference.Blob
-        Name   string
-        Index  int
-        Source hcl.Range
-    }
+    func DeclaredTargets(ctx context.Context, repo *attegit.Repo) ([]graphtarget.ID, error)
 
-    func DeclaredTargets(ctx context.Context, repo *attegit.Repo) ([]TargetDeclaration, error)
-
-`DeclaredTargets` parses all repository `atte.hcl` files and returns a deterministic list ordered by repository-relative file path and then source order within each file. The public API is repository-wide. An internal file-scoped declaration helper should support `ConfigFor` and other callers that must not parse unrelated files.
+`DeclaredTargets` parses all repository `atte.hcl` files and returns a deterministic list of `graphtarget.ID` values ordered by repository-relative file path and then source order within each file. The public API is repository-wide. An internal file-scoped declaration helper should support `ConfigFor` and other callers that must not parse unrelated files.
 
 The declaration phase requires valid HCL syntax and a valid target block shape, but does not validate target attributes or evaluate their expressions. It identifies both short forms such as `test "unit" {}` and wrapper forms such as `target "test" "unit" {}`.
 
@@ -79,7 +70,7 @@ The declaration phase assigns anonymous targets a kind-local index and preserves
 
     EntityID(Namespace+":"+string(kind), file, displayName(name, index))
 
-Selector aliases are not stored on `TargetDeclaration`; adapters derive them from the declaration's file, kind, name, and index using the existing selector logic. The phase rejects unknown target kinds, invalid label counts, duplicate labels, and numeric labels, because these errors affect target identity. It does not reject a missing `script`, an invalid or unresolved target-body `local` reference, an unknown target-body function, a missing script file, an unknown target-body attribute, or an invalid dependency expression.
+The internal declaration metadata preserves an empty `Name` for anonymous targets; when converted to `graphtarget.ID`, `Name` is the stable display name (`displayName(name, index)`). The returned values include selector aliases derived from the declaration's file, kind, name, and index using the existing selector logic. The phase rejects unknown target kinds, invalid label counts, duplicate labels, and numeric labels, because these errors affect target identity. It does not reject a missing `script`, an invalid or unresolved target-body `local` reference, an unknown target-body function, a missing script file, an unknown target-body attribute, or an invalid dependency expression.
 
 A `globals` block remains an immediate file-level error because globals are no longer part of the language. More generally, malformed HCL and errors reported while collecting declarations, including duplicate locals rejected by the existing declaration parser, cause `DeclaredTargets` to return an error; declaration discovery must not silently return partial results for a file that failed parsing or declaration collection. Semantically unresolved expressions in otherwise valid target bodies do not fall into that category and must not prevent the declaration from being returned.
 
@@ -144,30 +135,35 @@ Code review findings and clarified decisions from `detector/attehcl/`:
 * The current source already rejects `globals` in `declarationBlocks`, stores only local expressions on `hclFile`, and covers the behavior in `TestGlobalsAreRejected`.
 * `evaluateLocals` already implements same-file local dependency resolution, and `ConfigFor` constructs an evaluator for only the requested `atte.hcl` file.
 * `normalizeBlocks` already performs most declaration-phase work: short and wrapper form normalization, registered-kind lookup, label validation, kind-local indices, duplicate named-target detection, and source-range preservation.
-* The new declaration API is separate from rich target decoding. `DeclaredTargets` must list a declaration when its valid HCL body references an invalid or unresolved local, unknown function, missing script, unknown body attribute, or invalid graph dependency.
+* The new declaration API is separate from rich target decoding. `DeclaredTargets` must list a `graphtarget.ID` when its valid HCL body references an invalid or unresolved local, unknown function, missing script, unknown body attribute, or invalid graph dependency.
 * Malformed HCL and errors reported by declaration collection are different from semantic errors in target attributes. `DeclaredTargets` returns an error for malformed HCL, unsupported `globals`, unknown kinds, invalid labels, duplicate names, and duplicate locals rejected by the existing parser; it must not return partial declarations from a file that failed at that boundary.
 * `DeclaredTargets` is repository-wide and deterministically ordered by file path and source order. An internal file-scoped helper should support `ConfigFor` and other single-file callers. It must not call HCL function providers, `body.Content`, or registered target decoders.
-* `TargetDeclaration` does not store selector aliases. Adapters derive aliases from its file, kind, name, and index using the existing selector logic, preserving current IDs and selectors.
 * The current phase boundary is not yet as explicit as the goals describe: locals are evaluated by `targetsPhase.scopeFor`, and `Graph` calls target evaluation before `addEvaluatedTargetGraph` rather than consuming distinct locals and graph phase results.
 * `Detector.Targets` currently calls rich `Targets` and filters out targets without scripts. It must use `DeclaredTargets` and include scriptless declarations.
 * `addEvaluatedTargetGraph` currently skips symbolic traversals. The chosen resolution rule is that `kind.name` traversals resolve within the dependent target's file; cross-file target dependencies use explicit HCL entity-ID strings. Missing same-file targets are graph-phase errors.
 * Script requirements apply only to script-backed target kinds. Custom target kinds retain control of their decoded values and execution requirements rather than being forced through the built-in `decodedTarget` contract.
 
+Implementation notes from this implementation:
+
+* Added repository-wide declaration-only discovery returning `graphtarget.ID` values with stable IDs, selector aliases, deterministic ordering, context cancellation, and no provider, body-content, or decoder evaluation.
+* Kept rich target decoding and file-local locals evaluation separate from declaration collection, and made graph assembly resolve named same-file target traversals while preserving explicit entity-ID dependencies.
+* Updated detector-level target listing to use declarations (including scriptless targets), documented the API, and added coverage for declaration isolation, declaration errors, and graph traversal edges.
+
 Implementation checklist:
 
-- [ ] Add `TargetDeclaration` and repository-wide `DeclaredTargets(ctx, repo)` with deterministic file/source ordering and stable IDs.
-- [ ] Extract a file-scoped declaration helper so `ConfigFor` does not parse unrelated files.
-- [ ] Ensure `DeclaredTargets` does not evaluate locals, invoke HCL function providers, call `body.Content`, invoke target decoders, validate target attributes, or require executable scripts.
-- [ ] Preserve parser/declaration errors as whole-file errors, including malformed HCL, unsupported `globals`, invalid target block shape, unknown kinds, duplicate names, numeric names, and duplicate locals rejected during declaration collection.
-- [ ] Return declarations despite semantically unresolved target-body locals, unknown target-body functions, unknown body attributes, missing scripts, and invalid dependency expressions when the HCL remains parseable.
-- [ ] Make declaration ordering, kind-local indexing, ID construction, source ranges, and selector alias derivation explicit and deterministic.
-- [ ] Extract or formalize a locals phase separate from target discovery while preserving file-local `local` references and function-provider behavior.
-- [ ] Keep rich target decoding available through `Targets` and `ConfigFor` after locals are evaluated.
-- [ ] Make graph assembly consume the declaration index and phase outputs, resolving `kind.name` traversals within the dependent file and preserving explicit cross-file entity-ID dependencies.
-- [ ] Update the detector-level target listing to use `DeclaredTargets` and include scriptless declarations.
-- [ ] Enforce missing-script errors only for script-backed target kinds; preserve custom target-kind execution contracts.
-- [ ] Preserve target IDs, selector aliases, target registry extension, path handling, provider scoping, and context cancellation.
-- [ ] Add tests for declaration ordering and metadata; scriptless declarations; invalid locals; unknown body functions and attributes; invalid dependency expressions; provider non-invocation; globals rejection; malformed HCL; duplicate locals; unknown kinds; invalid labels; numeric names; duplicate names; and selector compatibility.
-- [ ] Add tests for rich `Targets`/`ConfigFor` evaluation, file-local provider calls, same-file symbolic target resolution, missing symbolic targets, explicit cross-file entity-ID dependencies, and custom target kinds without scripts.
-- [ ] Remove stale inherited-globals documentation and fixtures, and document declaration-only target discovery in `detector/attehcl/README.md`.
-- [ ] Run the repository verification commands after implementation.
+- [x] Add repository-wide `DeclaredTargets(ctx, repo)` returning `graphtarget.ID` values with deterministic file/source ordering, stable IDs, and selector aliases.
+- [x] Extract a file-scoped declaration helper so `ConfigFor` does not parse unrelated files.
+- [x] Ensure `DeclaredTargets` does not evaluate locals, invoke HCL function providers, call `body.Content`, invoke target decoders, validate target attributes, or require executable scripts.
+- [x] Preserve parser/declaration errors as whole-file errors, including malformed HCL, unsupported `globals`, invalid target block shape, unknown kinds, duplicate names, numeric names, and duplicate locals rejected during declaration collection.
+- [x] Return declarations despite semantically unresolved target-body locals, unknown target-body functions, unknown body attributes, missing scripts, and invalid dependency expressions when the HCL remains parseable.
+- [x] Make declaration ordering, kind-local indexing, ID construction, source ranges, and selector alias derivation explicit and deterministic.
+- [x] Extract or formalize a locals phase separate from target discovery while preserving file-local `local` references and function-provider behavior.
+- [x] Keep rich target decoding available through `Targets` and `ConfigFor` after locals are evaluated.
+- [x] Make graph assembly consume the declaration index and phase outputs, resolving `kind.name` traversals within the dependent file and preserving explicit cross-file entity-ID dependencies.
+- [x] Update the detector-level target listing to use `DeclaredTargets` and include scriptless declarations.
+- [x] Enforce missing-script errors only for script-backed target kinds; preserve custom target-kind execution contracts.
+- [x] Preserve target IDs, selector aliases, target registry extension, path handling, provider scoping, and context cancellation.
+- [x] Add tests for declaration ordering and metadata; scriptless declarations; invalid locals; unknown body functions and attributes; invalid dependency expressions; provider non-invocation; globals rejection; malformed HCL; duplicate locals; unknown kinds; invalid labels; numeric names; duplicate names; and selector compatibility.
+- [x] Add tests for rich `Targets`/`ConfigFor` evaluation, file-local provider calls, same-file symbolic target resolution, missing symbolic targets, explicit cross-file entity-ID dependencies, and custom target kinds without scripts.
+- [x] Remove stale inherited-globals documentation and fixtures, and document declaration-only target discovery in `detector/attehcl/README.md`.
+- [x] Run the repository verification commands after implementation.

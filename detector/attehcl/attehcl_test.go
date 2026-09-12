@@ -341,6 +341,7 @@ lint {
 
 	graph, err := Graph(t.Context(), repo, WithFunctions(attegit.PathHCLFunctions))
 	must.NoError(t, err)
+	graphtest.MustHaveRelation(t, graph, grouped[KindTest][0].ID, grouped[KindCodegen][0].ID, DependsOnRelation)
 	for _, target := range targets {
 		test.EqOp(t, target.Kind, graph.Entities[target.ID].Kind)
 		canonical := Selector(target).String()
@@ -376,6 +377,64 @@ func TestEntityIDRoundTrip(t *testing.T) {
 			test.EqOp(t, kind, gotKind)
 			test.EqOp(t, reference.Blob("nested/atte.hcl"), file)
 			test.EqOp(t, "unit", name)
+		})
+	}
+}
+
+func TestDeclaredTargetsDoesNotEvaluateBodies(t *testing.T) {
+	calls := 0
+	repo := newHCLFixture(t, map[string]string{
+		"z/atte.hcl": `test {
+  script = missing_function(local.missing)
+  unknown = missing_function()
+  depends_on = [local.missing]
+}
+`,
+		"atte.hcl": `codegen {}
+`,
+		"z/script.sh": "#!/bin/sh\n",
+	})
+	provider := func(context.Context, *attegit.Repo, reference.Blob) (map[string]function.Function, error) {
+		calls++
+		return nil, nil
+	}
+
+	declarations, err := DeclaredTargets(t.Context(), repo)
+	must.NoError(t, err)
+	test.Len(t, 2, declarations)
+	test.EqOp(t, "atte.hcl", declarations[0].Path)
+	test.EqOp(t, Namespace+":"+string(KindCodegen), declarations[0].Kind)
+	test.EqOp(t, "0", declarations[0].Name)
+	test.EqOp(t, 0, declarations[0].Index)
+	test.EqOp(t, EntityID(CodegenKind, "atte.hcl", "0"), declarations[0].ID)
+	test.EqOp(t, "z/atte.hcl", declarations[1].Path)
+	test.EqOp(t, Namespace+":"+string(KindTest), declarations[1].Kind)
+	test.EqOp(t, "0", declarations[1].Name)
+	test.EqOp(t, 0, declarations[1].Index)
+
+	detectorTargets, err := NewDetector(provider).Targets(t.Context(), repo)
+	must.NoError(t, err)
+	test.Len(t, 2, detectorTargets)
+	test.EqOp(t, 0, calls)
+}
+
+func TestDeclaredTargetsRejectsDeclarationErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		file string
+	}{
+		{name: "malformed HCL", file: `test {`},
+		{name: "globals", file: `globals { value = "unsupported" }`},
+		{name: "unknown kind", file: `package {}`},
+		{name: "numeric name", file: `test "123" {}`},
+		{name: "duplicate name", file: `test "same" {}
+test "same" {}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newHCLFixture(t, map[string]string{"atte.hcl": tt.file})
+			_, err := DeclaredTargets(t.Context(), repo)
+			test.Error(t, err)
 		})
 	}
 }

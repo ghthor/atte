@@ -16,6 +16,7 @@ import (
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphset"
+	"github.com/ghthor/atte/detector/graphtarget"
 	"github.com/ghthor/atte/reference"
 	"github.com/ghthor/atte/reference/selector"
 	"github.com/hashicorp/hcl/v2"
@@ -42,6 +43,17 @@ type dependency struct {
 	value     string
 	entity    graph.EntityID
 	traversal hcl.Traversal
+}
+
+type targetReference struct {
+	file reference.Blob
+	kind Kind
+	name string
+}
+
+type declarationIndex struct {
+	byReference map[targetReference]targetDeclaration
+	byID        map[graph.EntityID]targetDeclaration
 }
 
 type hclFile struct {
@@ -86,9 +98,14 @@ func (files hclFiles) sortedBlobs() []reference.Blob {
 	return slices.Sorted(maps.Keys(files))
 }
 
-func readHCLFiles(repo *attegit.Repo) (hclFiles, error) {
+func readHCLFiles(ctx context.Context, repo *attegit.Repo) (hclFiles, error) {
 	files := make(hclFiles)
 	for _, file := range repo.ObjKeys {
+		if ctx != nil {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		if repo.Obj[file].Kind != attegit.Blob || path.Base(file.String()) != Filename {
 			continue
 		}
@@ -179,6 +196,17 @@ type normalizedBlock struct {
 	index int
 }
 
+// targetDeclaration describes the identity and source location of a target
+// without evaluating its body.
+type targetDeclaration struct {
+	ID     graph.EntityID
+	Kind   Kind
+	File   reference.Blob
+	Name   string
+	Index  int
+	Source hcl.Range
+}
+
 type evaluatedTarget struct {
 	Kind    Kind
 	File    reference.Blob
@@ -189,6 +217,14 @@ type evaluatedTarget struct {
 	Source  hcl.Range
 }
 
+type declarationsPhase struct {
+	evaluator *evaluator
+}
+
+type localsPhase struct {
+	evaluator *evaluator
+}
+
 type targetsPhase struct {
 	evaluator *evaluator
 }
@@ -197,7 +233,13 @@ func newEvaluator(ctx context.Context, repo *attegit.Repo, provider graphset.Fun
 	if repo == nil {
 		return nil, fmt.Errorf("repository is nil")
 	}
-	files, err := readHCLFiles(repo)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	files, err := readHCLFiles(ctx, repo)
 	if err != nil {
 		return nil, err
 	}
@@ -214,6 +256,12 @@ func newEvaluator(ctx context.Context, repo *attegit.Repo, provider graphset.Fun
 func newEvaluatorForFile(ctx context.Context, repo *attegit.Repo, file reference.Blob, provider graphset.FunctionProvider) (*evaluator, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("repository is nil")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	parsed := &hclFile{
 		file:   file,
@@ -249,7 +297,7 @@ func (e *evaluator) hclFunctions(file reference.Blob) (map[string]function.Funct
 	return functions, nil
 }
 
-func (p targetsPhase) scopeFor(file *hclFile) (hclScope, error) {
+func (p localsPhase) scopeFor(file *hclFile) (hclScope, error) {
 	functions, err := p.evaluator.hclFunctions(file.file)
 	if err != nil {
 		return hclScope{}, err
@@ -269,6 +317,75 @@ func (e *evaluator) evalContext(file reference.Blob, scope hclScope) (*hcl.EvalC
 	return &hcl.EvalContext{Variables: map[string]cty.Value{"local": scope.local}, Functions: functions}, nil
 }
 
+func declarationFromBlock(file reference.Blob, item normalizedBlock) targetDeclaration {
+	return targetDeclaration{
+		ID:     EntityID(Namespace+":"+string(item.kind), file, displayName(item.name, item.index)),
+		Kind:   item.kind,
+		File:   file,
+		Name:   item.name,
+		Index:  item.index,
+		Source: item.block.Range(),
+	}
+}
+
+func declarationFromEvaluated(target evaluatedTarget) targetDeclaration {
+	return targetDeclaration{
+		ID:     EntityID(Namespace+":"+string(target.Kind), target.File, displayName(target.Name, target.Index)),
+		Kind:   target.Kind,
+		File:   target.File,
+		Name:   target.Name,
+		Index:  target.Index,
+		Source: target.Source,
+	}
+}
+
+func targetIDFromDeclaration(declaration targetDeclaration) graphtarget.ID {
+	display := displayName(declaration.Name, declaration.Index)
+	return graphtarget.ID{
+		ID:        declaration.ID,
+		Namespace: graphtarget.Namespace(Namespace),
+		Kind:      Namespace + ":" + string(declaration.Kind),
+		Path:      declaration.File.String(),
+		Name:      display,
+		Index:     declaration.Index,
+		Aliases: selector.Aliases(selector.Target{
+			Path:  declaration.File.String(),
+			Kind:  string(declaration.Kind),
+			Name:  display,
+			Index: declaration.Index,
+		}),
+	}
+}
+
+func (e *evaluator) declaredTargets(only ...reference.Blob) ([]targetDeclaration, error) {
+	files := e.files.sortedBlobs()
+	if len(only) > 0 {
+		files = only
+	}
+	declarations := make([]targetDeclaration, 0)
+	phase := declarationsPhase{evaluator: e}
+	for _, file := range files {
+		if err := e.ctx.Err(); err != nil {
+			return nil, err
+		}
+		config, ok := e.files[file]
+		if !ok {
+			continue
+		}
+		normalized, err := phase.normalizeBlocks(config)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range normalized {
+			if err := e.ctx.Err(); err != nil {
+				return nil, err
+			}
+			declarations = append(declarations, declarationFromBlock(file, item))
+		}
+	}
+	return declarations, nil
+}
+
 func (e *evaluator) evaluatedTargets(only ...reference.Blob) ([]evaluatedTarget, error) {
 	files := e.files.sortedBlobs()
 	if len(only) > 0 {
@@ -277,6 +394,9 @@ func (e *evaluator) evaluatedTargets(only ...reference.Blob) ([]evaluatedTarget,
 	blocks := make([]evaluatedTarget, 0)
 	phase := targetsPhase{evaluator: e}
 	for _, file := range files {
+		if err := e.ctx.Err(); err != nil {
+			return nil, err
+		}
 		config, ok := e.files[file]
 		if !ok {
 			continue
@@ -291,7 +411,11 @@ func (e *evaluator) evaluatedTargets(only ...reference.Blob) ([]evaluatedTarget,
 }
 
 func (p targetsPhase) evaluatedTargets(file *hclFile) ([]evaluatedTarget, error) {
-	scope, err := p.scopeFor(file)
+	normalized, err := declarationsPhase(p).normalizeBlocks(file)
+	if err != nil {
+		return nil, err
+	}
+	scope, err := localsPhase(p).scopeFor(file)
 	if err != nil {
 		return nil, err
 	}
@@ -299,12 +423,11 @@ func (p targetsPhase) evaluatedTargets(file *hclFile) ([]evaluatedTarget, error)
 	if err != nil {
 		return nil, err
 	}
-	targets := make([]evaluatedTarget, 0)
-	normalized, err := p.normalizeBlocks(file)
-	if err != nil {
-		return nil, err
-	}
+	targets := make([]evaluatedTarget, 0, len(normalized))
 	for _, item := range normalized {
+		if err := p.evaluator.ctx.Err(); err != nil {
+			return nil, err
+		}
 		kind, name, body, index := item.kind, item.name, item.block.Body, item.index
 		spec := p.evaluator.kindSpecs[kind]
 		content, diagnostics := body.Content(&spec.schema)
@@ -462,6 +585,24 @@ func Targets(ctx context.Context, repo *attegit.Repo, provider graphset.Function
 	return targetsWithProvider(ctx, repo, provider)
 }
 
+// DeclaredTargets returns target identities without evaluating target bodies.
+// Results are ordered by repository-relative file path and source order.
+func DeclaredTargets(ctx context.Context, repo *attegit.Repo) ([]graphtarget.ID, error) {
+	evaluator, err := newEvaluator(ctx, repo, nil)
+	if err != nil {
+		return nil, err
+	}
+	declarations, err := evaluator.declaredTargets()
+	if err != nil {
+		return nil, err
+	}
+	targets := make([]graphtarget.ID, 0, len(declarations))
+	for _, declaration := range declarations {
+		targets = append(targets, targetIDFromDeclaration(declaration))
+	}
+	return targets, nil
+}
+
 // SortedTargets returns the targets grouped by kind in deterministic source order.
 func SortedTargets(grouped map[Kind][]Target) []Target {
 	kinds := make([]Kind, 0, len(grouped))
@@ -570,6 +711,17 @@ func graphFor(ctx context.Context, repo *attegit.Repo, options graphset.Options)
 	entities := make([]graph.Entity, 0)
 	seenEntities := make(map[graph.EntityID]struct{})
 	relations := make([]graph.Relationship, 0)
+	declarations := declarationIndex{
+		byReference: make(map[targetReference]targetDeclaration, len(blocks)),
+		byID:        make(map[graph.EntityID]targetDeclaration, len(blocks)),
+	}
+	for _, block := range blocks {
+		declaration := declarationFromEvaluated(block)
+		declarations.byID[declaration.ID] = declaration
+		if declaration.Name != "" {
+			declarations.byReference[targetReference{file: declaration.File, kind: declaration.Kind, name: declaration.Name}] = declaration
+		}
+	}
 	addEntity := func(e graph.Entity) {
 		if _, exists := seenEntities[e.ID]; exists {
 			return
@@ -581,7 +733,7 @@ func graphFor(ctx context.Context, repo *attegit.Repo, options graphset.Options)
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		r, err := addEvaluatedTargetGraph(ctx, repo, block, addEntity, options.AttachToTree)
+		r, err := addEvaluatedTargetGraph(ctx, repo, block, declarations, addEntity, options.AttachToTree)
 		if err != nil {
 			return nil, err
 		}
@@ -591,7 +743,10 @@ func graphFor(ctx context.Context, repo *attegit.Repo, options graphset.Options)
 }
 
 // addEvaluatedTargetGraph builds graph entities and relations for one decoded block.
-func addEvaluatedTargetGraph(ctx context.Context, repo *attegit.Repo, target evaluatedTarget, addEntity func(graph.Entity), containment bool) ([]graph.Relationship, error) {
+func addEvaluatedTargetGraph(ctx context.Context, repo *attegit.Repo, target evaluatedTarget, declarations declarationIndex, addEntity func(graph.Entity), containment bool) ([]graph.Relationship, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	relations := make([]graph.Relationship, 0)
 	id := EntityID(Namespace+":"+string(target.Kind), target.File, displayName(target.Name, target.Index))
 	addEntity(graph.Entity{ID: id, Kind: Namespace + ":" + string(target.Kind)})
@@ -626,14 +781,27 @@ func addEvaluatedTargetGraph(ctx context.Context, repo *attegit.Repo, target eva
 		relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(targetBlob), Kind: ScriptRelation})
 	}
 	for _, dep := range decoded.Deps {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if dep.traversal != nil {
-			// Symbolic target traversals are preserved for the later graph-assembly phase.
+			declaration, err := resolveTargetTraversal(target.File, dep.traversal, declarations)
+			if err != nil {
+				return nil, err
+			}
+			addEntity(graph.Entity{ID: declaration.ID, Kind: Namespace + ":" + string(declaration.Kind)})
+			relations = append(relations, graph.Relationship{From: id, To: declaration.ID, Kind: DependsOnRelation})
 			continue
 		}
 		if dep.entity != "" {
 			kind, err := entityDependencyKind(dep.entity)
 			if err != nil {
 				return nil, err
+			}
+			if strings.HasPrefix(string(dep.entity), Namespace+":") {
+				if _, ok := declarations.byID[dep.entity]; !ok {
+					return nil, fmt.Errorf("dependency target %q not declared", dep.entity)
+				}
 			}
 			addEntity(graph.Entity{ID: dep.entity, Kind: kind})
 			relations = append(relations, graph.Relationship{From: id, To: dep.entity, Kind: DependsOnRelation})
@@ -652,6 +820,22 @@ func addEvaluatedTargetGraph(ctx context.Context, repo *attegit.Repo, target eva
 		relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(targetBlob), Kind: DependsOnRelation})
 	}
 	return relations, nil
+}
+
+func resolveTargetTraversal(file reference.Blob, traversal hcl.Traversal, declarations declarationIndex) (targetDeclaration, error) {
+	if len(traversal) != 2 {
+		return targetDeclaration{}, fmt.Errorf("%q: target dependency must be a kind.name traversal", file)
+	}
+	attribute, ok := traversal[1].(hcl.TraverseAttr)
+	if !ok {
+		return targetDeclaration{}, fmt.Errorf("%q: target dependency must be a kind.name traversal", file)
+	}
+	kind := Kind(traversal.RootName())
+	declaration, ok := declarations.byReference[targetReference{file: file, kind: kind, name: attribute.Name}]
+	if !ok {
+		return targetDeclaration{}, fmt.Errorf("%q: target dependency %s.%s not found in the same file", file, kind, attribute.Name)
+	}
+	return declaration, nil
 }
 
 func entityDependencyKind(id graph.EntityID) (string, error) {
@@ -687,11 +871,14 @@ func parseFile(file reference.Blob, contents []byte) (*hclsyntax.Body, error) {
 
 // normalizeBlocks discovers target declarations in source order and assigns
 // kind-local indices before any target body is decoded.
-func (p targetsPhase) normalizeBlocks(file *hclFile) ([]normalizedBlock, error) {
+func (p declarationsPhase) normalizeBlocks(file *hclFile) ([]normalizedBlock, error) {
 	blocks := make([]normalizedBlock, 0, len(file.body.Blocks))
 	kindIndexes := make(map[Kind]int, len(p.evaluator.kindSpecs))
 	named := make(map[Kind]map[string]struct{}, len(p.evaluator.kindSpecs))
 	for _, block := range file.body.Blocks {
+		if err := p.evaluator.ctx.Err(); err != nil {
+			return nil, err
+		}
 		if block.Type == "locals" {
 			continue
 		}
@@ -715,7 +902,7 @@ func (p targetsPhase) normalizeBlocks(file *hclFile) ([]normalizedBlock, error) 
 	return blocks, nil
 }
 
-func (p targetsPhase) normalizeBlock(block *hclsyntax.Block) (Kind, string, *hclsyntax.Body, error) {
+func (p declarationsPhase) normalizeBlock(block *hclsyntax.Block) (Kind, string, *hclsyntax.Body, error) {
 	kindName := block.Type
 	labelOffset := 0
 	if block.Type == "target" {
