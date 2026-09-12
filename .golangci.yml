@@ -15,6 +15,7 @@ linters:
     - gocritic
     - ineffassign
     - modernize
+    - revive
     - staticcheck
     - unused
     - usestdlibvars
@@ -28,6 +29,11 @@ linters:
         - hugeParam
         - importShadow
         - rangeValCopy
+    revive:
+      enable-default-rules: false
+      rules:
+        - name: early-return
+        - name: var-naming
 
 formatters:
   enable:
