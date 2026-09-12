@@ -147,10 +147,11 @@ func (p SomePath) Resolve(tree Tree) (Blob, error) { return ResolveBlobFromTree(
 // Resolve resolves a //-prefixed path to a blob.
 func (p SlashPath) Resolve() (Blob, error) {
 	value := string(p)
-	if !strings.HasPrefix(value, "//") {
-		return "", fmt.Errorf("invalid slash path %q", value)
+	value, ok := strings.CutPrefix(value, "//")
+	if !ok {
+		return "", fmt.Errorf("invalid slash path %q", p)
 	}
-	clean, err := parse(strings.TrimPrefix(value, "//"))
+	clean, err := parse(value)
 	return Blob(clean), err
 }
 
@@ -198,8 +199,8 @@ func resolve(dir, value string) (string, error) {
 	}
 	value = strings.ReplaceAll(value, "\\", "/")
 	resolved := path.Join(dir, value)
-	if strings.HasPrefix(value, "//") {
-		resolved = strings.TrimPrefix(value, "//")
+	if rooted, ok := strings.CutPrefix(value, "//"); ok {
+		resolved = rooted
 	}
 	clean, err := parse(resolved)
 	if err != nil {

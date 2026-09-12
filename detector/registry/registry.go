@@ -4,6 +4,7 @@ package registry
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sort"
 	"sync"
 
@@ -107,9 +108,7 @@ func (r *Registry) HCLFunctions(ctx context.Context, repo *attegit.Repo, file re
 	}
 	r.mu.RLock()
 	factories := make(map[string]HCLFunctionFactory, len(r.functions))
-	for name, factory := range r.functions {
-		factories[name] = factory
-	}
+	maps.Copy(factories, r.functions)
 	r.mu.RUnlock()
 	result := make(map[string]function.Function, len(factories))
 	for name, factory := range factories {

@@ -72,7 +72,7 @@ func discoverGoListModules(t *testing.T, repositoryDir string) []string {
 	cmd.Dir = repositoryDir
 	output, err := cmd.Output()
 	must.NoError(t, err)
-	for _, file := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+	for file := range strings.SplitSeq(strings.TrimSpace(string(output)), "\n") {
 		if file == "" || filepath.Base(file) != "go.mod" {
 			continue
 		}

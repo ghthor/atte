@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -260,17 +261,12 @@ func (t Target) identifierAliases() []string {
 }
 
 func containsAlias(aliases []string, value string) bool {
-	for _, alias := range aliases {
-		if value == alias {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(aliases, value)
 }
 
 func shortName(name string) string {
-	if i := strings.IndexByte(name, '.'); i >= 0 {
-		return name[i+1:]
+	if _, short, ok := strings.Cut(name, "."); ok {
+		return short
 	}
 	return name
 }

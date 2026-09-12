@@ -13,10 +13,10 @@ import (
 // RepositoryPathType is the cty capsule type used for repository-relative blob references
 var RepositoryPathType = cty.CapsuleWithOps(
 	"atte.repository_path",
-	reflect.TypeOf(reference.Blob("")),
+	reflect.TypeFor[reference.Blob](),
 	&cty.CapsuleOps{
-		GoString:  func(value interface{}) string { return fmt.Sprintf("path(%q)", value.(reference.Blob)) },
-		RawEquals: func(a, b interface{}) bool { return a.(reference.Blob) == b.(reference.Blob) },
+		GoString:  func(value any) string { return fmt.Sprintf("path(%q)", value.(reference.Blob)) },
+		RawEquals: func(a, b any) bool { return a.(reference.Blob) == b.(reference.Blob) },
 	},
 )
 

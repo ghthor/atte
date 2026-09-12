@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -222,7 +223,7 @@ func addGraphChildren(parent treeprint.Tree, repo *attegit.Repo, g *graph.Graph,
 			}
 		}
 	}
-	sort.Slice(children, func(i, j int) bool { return children[i] < children[j] })
+	slices.Sort(children)
 	for _, id := range children {
 		entity := g.Entities[id]
 		switch entity.Kind {

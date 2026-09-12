@@ -144,8 +144,8 @@ func decodeTargetDependencies(attribute *hcl.Attribute, ctx *hcl.EvalContext) ([
 			return nil, fmt.Errorf("values must be strings or paths")
 		}
 		raw := value.AsString()
-		if strings.HasPrefix(raw, "attehcl-id:") {
-			dependencies = append(dependencies, dependency{entity: graph.EntityID(strings.TrimPrefix(raw, "attehcl-id:"))})
+		if value, ok := strings.CutPrefix(raw, "attehcl-id:"); ok {
+			dependencies = append(dependencies, dependency{entity: graph.EntityID(value)})
 		} else if strings.HasPrefix(raw, "attego:") {
 			dependencies = append(dependencies, dependency{entity: graph.EntityID(raw)})
 		} else {

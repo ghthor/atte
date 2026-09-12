@@ -354,11 +354,11 @@ func (r *Repo) rebuildIndexes() {
 
 func parseLine(line string) (Obj, error) {
 	var obj Obj
-	i := strings.IndexByte(line, '\t')
-	if i < 0 {
+	header, rawPath, ok := strings.Cut(line, "\t")
+	if !ok {
 		return obj, errors.New("record has no tab separator")
 	}
-	fields := strings.Fields(line[:i])
+	fields := strings.Fields(header)
 	if len(fields) != 3 {
 		return obj, fmt.Errorf("record header has %d fields", len(fields))
 	}
@@ -374,14 +374,14 @@ func parseLine(line string) (Obj, error) {
 	}
 	if fields[1] == "blob" {
 		obj.Kind = Blob
-		blob, err := reference.ParseBlob(line[i+1:])
+		blob, err := reference.ParseBlob(rawPath)
 		if err != nil {
 			return Obj{}, err
 		}
 		obj.Path = blob
 	} else {
 		obj.Kind = Tree
-		tree, err := reference.ParseTree(line[i+1:])
+		tree, err := reference.ParseTree(rawPath)
 		if err != nil {
 			return Obj{}, err
 		}

@@ -3,6 +3,7 @@ package attehcl
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -440,12 +441,7 @@ test "same" {}`},
 }
 
 func contains(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, want)
 }
 
 func newHCLFixture(t *testing.T, files map[string]string) *attegit.Repo {

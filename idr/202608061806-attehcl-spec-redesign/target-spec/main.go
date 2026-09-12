@@ -69,12 +69,12 @@ type repositoryPath string
 
 var repositoryPathType = cty.CapsuleWithOps(
 	"target_spec.repository_path",
-	reflect.TypeOf(repositoryPath("")),
+	reflect.TypeFor[repositoryPath](),
 	&cty.CapsuleOps{
-		GoString: func(value interface{}) string {
+		GoString: func(value any) string {
 			return fmt.Sprintf("path(%q)", value.(repositoryPath))
 		},
-		RawEquals: func(a, b interface{}) bool {
+		RawEquals: func(a, b any) bool {
 			return a.(repositoryPath) == b.(repositoryPath)
 		},
 	},

@@ -151,9 +151,7 @@ func evaluateDeclaration(expression hcl.Expression, context *hcl.EvalContext) (c
 func evaluateLocals(file *hclFile, expressions map[string]hcl.Expression, functions map[string]function.Function) (map[string]cty.Value, error) {
 	values := make(map[string]cty.Value, len(expressions))
 	pending := make(map[string]hcl.Expression, len(expressions))
-	for name, expr := range expressions {
-		pending[name] = expr
-	}
+	maps.Copy(pending, expressions)
 	for len(pending) > 0 {
 		progress := false
 		var lastName string
@@ -490,8 +488,8 @@ func targetScript(repo *attegit.Repo, file reference.Blob, decoded any) (referen
 	if !ok {
 		return "", "", nil
 	}
-	if strings.HasPrefix(target.Script, DecodingPathPrefix) {
-		return reference.Blob(strings.TrimPrefix(target.Script, DecodingPathPrefix)), "", nil
+	if script, ok := strings.CutPrefix(target.Script, DecodingPathPrefix); ok {
+		return reference.Blob(script), "", nil
 	}
 	if target.Script == "" {
 		return "", "", nil
