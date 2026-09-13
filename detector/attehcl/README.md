@@ -41,7 +41,7 @@ repository
 [Declaration-only path]       [3. Evaluate locals]
     output: targetDeclaration[]     output: hclScope
       - entity ID                    - known local values
-      - kind, file, name, index     - provider HCL functions are loaded
+      - kind, file, name, index     - base and provider HCL functions are loaded
       - source range                - combined into an hcl.EvalContext
     |                              |
     v                              v
@@ -79,6 +79,12 @@ target dependencies.
 order without evaluating locals, target attributes, functions, or registered target
 decoders. Use `Targets` or `ConfigFor` when decoded target values are needed; use
 `Graph` for repository paths and symbolic same-file target dependencies.
+
+Full evaluation provides the common HCL functions used by HashiCorp configuration
+languages, including collection, encoding, crypto, CIDR, UUID, YAML, and filesystem
+functions. Filesystem functions resolve relative to the tree containing the HCL
+file. Provider functions are merged on top of this base set and must use names
+that do not conflict with a base function.
 
 ```hcl
 test "service" {

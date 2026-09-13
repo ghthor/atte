@@ -32,6 +32,42 @@ func testPath(raw string) reference.Path {
 	return p
 }
 
+func TestBaseHCLFunctions(t *testing.T) {
+	functions := baseHCLFunctions(reference.Blob("nested/atte.hcl"))
+	for _, name := range []string{
+		"abs", "abspath", "base64decode", "base64encode", "basename", "bcrypt",
+		"can", "ceil", "chomp", "chunklist", "cidrhost", "cidrnetmask", "cidrsubnet",
+		"cidrsubnets", "coalesce", "coalescelist", "compact", "concat", "contains",
+		"convert", "csvdecode", "dirname", "distinct", "element", "file", "filebase64",
+		"fileexists", "fileset", "flatten", "floor", "format", "formatdate", "formatlist",
+		"indent", "index", "join", "jsondecode", "jsonencode", "keys", "length", "log",
+		"lookup", "lower", "max", "md5", "merge", "min", "parseint", "pathexpand", "pow",
+		"range", "replace", "regex_replace", "reverse", "rsadecrypt", "setintersection",
+		"setproduct", "setunion", "sha1", "sha256", "sha512", "signum", "slice", "sort",
+		"split", "strlen", "strrev", "substr", "timeadd", "title", "trim", "trimprefix",
+		"trimspace", "trimsuffix", "try", "upper", "urlencode", "uuidv4", "uuidv5", "values",
+		"yamldecode", "yamlencode", "zipmap",
+	} {
+		_, ok := functions[name]
+		test.True(t, ok, test.Sprintf("base HCL function %q should be registered", name))
+	}
+}
+
+func TestBaseHCLFunctionsEvaluateByDefault(t *testing.T) {
+	repo := newHCLFixture(t, map[string]string{
+		"atte.hcl": `locals {
+  script = upper("echo")
+}
+
+test { script = local.script }
+`,
+	})
+
+	grouped, err := Targets(t.Context(), repo, nil)
+	must.NoError(t, err)
+	test.EqOp(t, "ECHO", grouped[KindTest][0].Inline)
+}
+
 func TestGraphLabeledAndUnlabeledTests(t *testing.T) {
 	repo := newHCLFixture(t, map[string]string{
 		"atte.hcl": `

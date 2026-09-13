@@ -376,7 +376,7 @@ func mergedHCLFunctions(
 	file reference.Blob,
 	provider graphset.FunctionProvider,
 ) (map[string]function.Function, error) {
-	functions := make(map[string]function.Function)
+	functions := baseHCLFunctions(file)
 	if provider == nil {
 		return functions, nil
 	}
