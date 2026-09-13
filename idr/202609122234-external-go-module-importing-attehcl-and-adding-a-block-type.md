@@ -147,3 +147,12 @@ Each checkpoint below should be implemented and verified independently, then pau
 3. **Runnable command projection.** Implement the `deploy` execution capability so it resolves to the equivalent of `echo "deploy release to dev"`, and make `run --dry-run deploy` use the common runnable-target path. Verify the dry-run acceptance test passes without launching a subprocess while `config show` remains red if configuration projection is not complete.
 4. **Configuration projection.** Implement the custom configuration projection, including the target identity and `env = "dev"` in the normal `config show` output. Verify the configuration acceptance test passes and that only the injected example target is rendered.
 5. **Nested-module replacement coverage and full verification.** Add the approved `attego` tests for nested modules and local `replace` directives, then run the repository verification targets from `AGENTS.md`. Update this section with factual results and any remaining design or implementation discrepancies.
+
+### Public target-kind capabilities checkpoint result
+
+* Added the public `TargetKindSpec` registration contract with independent decoder, graph, execution, and configuration projections.
+* Refactored built-in HCL target handling, graph construction, `run`, and `config show` to consume registered capabilities. Built-in script targets retain their existing graph, command, and configuration behavior.
+* Added common target graph/configuration/command helpers and registry-snapshot and non-runnable capability tests.
+* Updated the custom-block example scaffold to compile against the new registration contract; its acceptance tests remain red because `deploy` has not yet been registered with decoding and projections.
+* Verified `go test ./detector/attehcl ./cmd` and root `go test ./...`; `codegen.go`, `codegen.fmt`, `codegen.rendered`, and `lint.go` pass. The aggregate `test.go` target fails only because the intentionally red example acceptance suite is included and still reports the unsupported `deploy` kind.
+* Added `reference/target.Computed` for the common configuration fields. `attehcl.Target.Configuration` now returns it directly, with kind-specific values in `Meta`; `config show` uses the shared type for JSON and HCL conversion.

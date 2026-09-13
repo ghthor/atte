@@ -1,6 +1,7 @@
 package attehcl
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"strings"
@@ -20,29 +21,51 @@ type Kind string
 // TargetDecoder decodes a schema-validated target body into a kind-owned value.
 type TargetDecoder func(*hcl.BodyContent, *hcl.EvalContext) (any, error)
 
+// TargetGraphProjection projects a target into graph entities and relationships.
+// The attachToTree argument requests the common file/tree containment relations.
+type TargetGraphProjection func(context.Context, *attegit.Repo, Target, TargetGraphContext, bool) (TargetGraph, error)
+
+// TargetExecutionProjection constructs the command used to run a target. Args
+// contains the executable and its arguments; Dir is the process working directory.
+type TargetExecutionProjection func(Target, string) (TargetCommand, error)
+
+// TargetConfigProjection adds decoded target data to config show output. The
+// returned keys must not overlap the standard target identity fields.
+type TargetConfigProjection func(Target) (map[string]any, error)
+
+// TargetKindSpec describes the independent capabilities of a registered kind.
+// Decoder is required; the other projections are optional.
+type TargetKindSpec struct {
+	Schema    *hcl.BodySchema
+	Decoder   TargetDecoder
+	Graph     TargetGraphProjection
+	Execution TargetExecutionProjection
+	Config    TargetConfigProjection
+}
+
+// TargetGraphContext provides common dependency resolution to a graph projector.
+type TargetGraphContext struct {
+	ResolveTarget func(hcl.Traversal) (graph.Entity, error)
+	EntityKind    func(graph.EntityID) (string, error)
+}
+
+// TargetGraph is the graph projection of one target.
+type TargetGraph struct {
+	Entities      []graph.Entity
+	Relationships []graph.Relationship
+}
+
+// TargetCommand is the executable representation of one target.
+type TargetCommand struct {
+	Dir  string
+	Args []string
+}
+
 const (
 	KindTest    Kind = "test"
 	KindCodegen Kind = "codegen"
 	KindLint    Kind = "lint"
 )
-
-type targetKindSpec struct {
-	schema  hcl.BodySchema
-	decoder TargetDecoder
-}
-
-var (
-	registryMu sync.RWMutex
-	registry   = make(map[Kind]targetKindSpec)
-)
-
-func init() {
-	for _, kind := range []Kind{KindTest, KindCodegen, KindLint} {
-		if err := Register(kind, decodeTestTarget); err != nil {
-			panic(err)
-		}
-	}
-}
 
 var testSchema = hcl.BodySchema{
 	Attributes: []hcl.AttributeSchema{
@@ -52,10 +75,43 @@ var testSchema = hcl.BodySchema{
 	},
 }
 
-// Register adds a target kind to the process-wide target registry. A nil or
-// omitted schema uses the built-in target schema. Registration rejects duplicate
-// kinds. Each evaluator takes a stable registry snapshot when it is created.
-func Register[K ~string](kind K, decoder TargetDecoder, schemas ...*hcl.BodySchema) error {
+type targetScriptProjection func(*attegit.Repo, reference.Blob, any) (reference.Blob, string, error)
+
+type targetKindSpec struct {
+	TargetKindSpec
+	script targetScriptProjection
+}
+
+var (
+	registryMu sync.RWMutex
+	registry   = make(map[Kind]targetKindSpec)
+)
+
+func init() {
+	for _, kind := range []Kind{KindTest, KindCodegen, KindLint} {
+		if err := registerBuiltIn(kind, TargetKindSpec{
+			Decoder:   decodeTestTarget,
+			Graph:     graphTestTarget,
+			Execution: executeScriptTarget,
+			Config:    configScriptTarget,
+		}); err != nil {
+			panic(err)
+		}
+	}
+}
+
+// Register adds a target kind to the process-wide target registry. A nil schema
+// uses the built-in script-target schema. Registration rejects duplicate kinds.
+// Each evaluator takes a stable registry snapshot when it is created.
+func Register[K ~string](kind K, spec TargetKindSpec) error {
+	return register(kind, spec, nil)
+}
+
+func registerBuiltIn[K ~string](kind K, spec TargetKindSpec) error {
+	return register(kind, spec, builtinTargetScript)
+}
+
+func register[K ~string](kind K, spec TargetKindSpec, script targetScriptProjection) error {
 	name := string(kind)
 	if kind == "" {
 		return fmt.Errorf("target kind is empty")
@@ -63,16 +119,13 @@ func Register[K ~string](kind K, decoder TargetDecoder, schemas ...*hcl.BodySche
 	if !hclsyntax.ValidIdentifier(name) {
 		return fmt.Errorf("target kind %q is not a valid HCL identifier", kind)
 	}
-	if decoder == nil {
+	if spec.Decoder == nil {
 		return fmt.Errorf("target kind %q has no decoder", kind)
-	}
-	if len(schemas) > 1 {
-		return fmt.Errorf("target kind %q received more than one schema", kind)
 	}
 
 	schema := testSchema
-	if len(schemas) == 1 && schemas[0] != nil {
-		schema = copyBodySchema(*schemas[0])
+	if spec.Schema != nil {
+		schema = copyBodySchema(*spec.Schema)
 	} else {
 		schema = copyBodySchema(schema)
 	}
@@ -83,7 +136,16 @@ func Register[K ~string](kind K, decoder TargetDecoder, schemas ...*hcl.BodySche
 	if _, exists := registry[key]; exists {
 		return fmt.Errorf("target kind %q is already registered", kind)
 	}
-	registry[key] = targetKindSpec{schema: schema, decoder: decoder}
+	registry[key] = targetKindSpec{
+		TargetKindSpec: TargetKindSpec{
+			Schema:    &schema,
+			Decoder:   spec.Decoder,
+			Graph:     spec.Graph,
+			Execution: spec.Execution,
+			Config:    spec.Config,
+		},
+		script: script,
+	}
 	return nil
 }
 
@@ -92,7 +154,17 @@ func targetRegistrySnapshot() map[Kind]targetKindSpec {
 	defer registryMu.RUnlock()
 	snapshot := make(map[Kind]targetKindSpec, len(registry))
 	for kind, spec := range registry {
-		snapshot[kind] = targetKindSpec{schema: copyBodySchema(spec.schema), decoder: spec.decoder}
+		schema := copyBodySchema(*spec.Schema)
+		snapshot[kind] = targetKindSpec{
+			TargetKindSpec: TargetKindSpec{
+				Schema:    &schema,
+				Decoder:   spec.Decoder,
+				Graph:     spec.Graph,
+				Execution: spec.Execution,
+				Config:    spec.Config,
+			},
+			script: spec.script,
+		}
 	}
 	return snapshot
 }

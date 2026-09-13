@@ -200,11 +200,13 @@ func runTargets(ctx context.Context, repo *attegit.Repo, root, cwd, relative str
 		switch target.Namespace {
 		case attehcl.Namespace:
 			native, ok := hclByID[target.ID]
-			if !ok || native.Script == "" {
+			if !ok || !native.Runnable() {
 				continue
 			}
-			file := filepath.Join(root, filepath.FromSlash(native.Script.String()))
-			dir := filepath.Dir(filepath.Join(root, filepath.FromSlash(native.File.String())))
+			command, err := native.Execution(root)
+			if err != nil {
+				return nil, err
+			}
 			targets = append(targets, runTarget{
 				selector: canonical,
 				kind:     native.Kind,
@@ -213,8 +215,8 @@ func runTargets(ctx context.Context, repo *attegit.Repo, root, cwd, relative str
 				index:    native.Index,
 				aliases:  native.Aliases,
 				label:    native.Label,
-				dir:      dir,
-				argv:     []string{"/usr/bin/env", "bash", file},
+				dir:      command.Dir,
+				argv:     command.Args,
 			})
 		case attego.Namespace:
 			dir := filepath.Join(root, filepath.FromSlash(target.Path))

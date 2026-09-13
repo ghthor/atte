@@ -106,6 +106,24 @@ Refiner.
 
 ---
 
+## Projection
+
+A consumer-specific representation of an Entity or declaration derived from
+its underlying identity and decoded data.
+
+Projections adapt the same underlying object for a particular boundary without
+changing the object itself. In Atte, a target may have independent Projections
+for:
+
+* graph Entities and Relationships
+* executable command data
+* configuration output
+
+A Projection describes how an object is represented for a consumer; it does not
+create a second identity or imply that every consumer can use the object.
+
+---
+
 ## Perturbation
 
 A modification to one or more Entities within the Universe.

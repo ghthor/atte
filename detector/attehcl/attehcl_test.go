@@ -209,13 +209,16 @@ func TestTargetRegistrySupportsCustomKindAndWrapperForm(t *testing.T) {
 		Command string
 	}
 	schema := hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "command", Required: true}}}
-	must.NoError(t, Register("package_test", func(content *hcl.BodyContent, ctx *hcl.EvalContext) (any, error) {
-		value, diagnostics := content.Attributes["command"].Expr.Value(ctx)
-		if diagnostics.HasErrors() {
-			return nil, fmt.Errorf("command: %s", diagnostics.Error())
-		}
-		return packageTarget{Command: value.AsString()}, nil
-	}, &schema))
+	must.NoError(t, Register("package_test", TargetKindSpec{
+		Schema: &schema,
+		Decoder: func(content *hcl.BodyContent, ctx *hcl.EvalContext) (any, error) {
+			value, diagnostics := content.Attributes["command"].Expr.Value(ctx)
+			if diagnostics.HasErrors() {
+				return nil, fmt.Errorf("command: %s", diagnostics.Error())
+			}
+			return packageTarget{Command: value.AsString()}, nil
+		},
+	}))
 
 	repo := newHCLFixture(t, map[string]string{
 		"atte.hcl": `target "package_test" "go" {
@@ -233,21 +236,63 @@ func TestTargetRegistrySupportsCustomKindAndWrapperForm(t *testing.T) {
 	test.EqOp(t, "go test ./...", got.Command)
 }
 
+func TestTargetKindCapabilitiesAreIndependent(t *testing.T) {
+	kind := Kind("non_runnable_capability_test")
+	must.NoError(t, Register(kind, TargetKindSpec{
+		Schema: &hcl.BodySchema{},
+		Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
+			return struct{ Value string }{Value: "decoded"}, nil
+		},
+	}))
+	repo := newHCLFixture(t, map[string]string{"atte.hcl": "non_runnable_capability_test \"target\" {}"})
+	config, err := ConfigFor(t.Context(), repo, "", nil)
+	must.NoError(t, err)
+	targets := SortedTargets(config.Targets)
+	test.Len(t, 1, targets)
+	test.False(t, targets[0].Runnable())
+	decoded, ok := targets[0].Decoded.(struct{ Value string })
+	test.True(t, ok, test.Sprintf("non-runnable target should preserve its decoded value"))
+	test.EqOp(t, "decoded", decoded.Value)
+	graph, err := Graph(t.Context(), repo)
+	must.NoError(t, err)
+	test.EqOp(t, 0, len(graph.Entities))
+}
+
+func TestTargetRegistrySnapshotsCapabilities(t *testing.T) {
+	kind := Kind("registry_snapshot_test")
+	repo := newHCLFixture(t, map[string]string{"atte.hcl": "registry_snapshot_test {}"})
+	evaluator, err := newEvaluator(t.Context(), repo, nil)
+	must.NoError(t, err)
+	must.NoError(t, Register(kind, TargetKindSpec{
+		Schema: &hcl.BodySchema{},
+		Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
+			return struct{}{}, nil
+		},
+	}))
+	_, err = evaluator.evaluatedTargets()
+	test.ErrorContains(t, err, "unknown target kind \"registry_snapshot_test\"")
+	_, err = Targets(t.Context(), repo, nil)
+	test.NoError(t, err)
+}
+
 func TestTargetRegistryRegistrationValidation(t *testing.T) {
 	decoder := func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
 		return struct{}{}, nil
 	}
-	test.Error(t, Register("test", decoder))
-	test.Error(t, Register("bad name", decoder))
-	test.Error(t, Register("valid_registration", nil))
+	test.Error(t, Register("test", TargetKindSpec{Decoder: decoder}))
+	test.Error(t, Register("bad name", TargetKindSpec{Decoder: decoder}))
+	test.Error(t, Register("valid_registration", TargetKindSpec{}))
 }
 
 func TestTargetRegistryCopiesSchema(t *testing.T) {
 	schema := hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "command", Required: true}}}
 	kind := "schema_copy_test"
-	must.NoError(t, Register(kind, func(content *hcl.BodyContent, _ *hcl.EvalContext) (any, error) {
-		return content.Attributes["command"].Name, nil
-	}, &schema))
+	must.NoError(t, Register(kind, TargetKindSpec{
+		Schema: &schema,
+		Decoder: func(content *hcl.BodyContent, _ *hcl.EvalContext) (any, error) {
+			return content.Attributes["command"].Name, nil
+		},
+	}))
 	schema.Attributes[0].Name = "changed"
 
 	repo := newHCLFixture(t, map[string]string{

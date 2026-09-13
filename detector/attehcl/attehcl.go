@@ -19,6 +19,7 @@ import (
 	"github.com/ghthor/atte/detector/graphtarget"
 	"github.com/ghthor/atte/reference"
 	"github.com/ghthor/atte/reference/selector"
+	"github.com/ghthor/atte/reference/target"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclparse"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
@@ -212,6 +213,7 @@ type evaluatedTarget struct {
 	Label   string
 	Index   int
 	Decoded any
+	Spec    targetKindSpec
 	Source  hcl.Range
 }
 
@@ -428,7 +430,7 @@ func (p targetsPhase) evaluatedTargets(file *hclFile) ([]evaluatedTarget, error)
 		}
 		kind, name, body, index := item.kind, item.name, item.block.Body, item.index
 		spec := p.evaluator.kindSpecs[kind]
-		content, diagnostics := body.Content(&spec.schema)
+		content, diagnostics := body.Content(spec.Schema)
 		if diagnostics.HasErrors() {
 			return nil, fmt.Errorf(
 				"decode HCL %q target %s.%s at %s: %w",
@@ -439,7 +441,7 @@ func (p targetsPhase) evaluatedTargets(file *hclFile) ([]evaluatedTarget, error)
 				hclDiagnosticError(p.evaluator.repo, file.file, diagnostics),
 			)
 		}
-		decoded, err := spec.decoder(content, ctx)
+		decoded, err := spec.Decoder(content, ctx)
 		if err != nil {
 			var diagnostic targetDiagnosticsError
 			if errors.As(err, &diagnostic) {
@@ -464,6 +466,7 @@ func (p targetsPhase) evaluatedTargets(file *hclFile) ([]evaluatedTarget, error)
 			Label:   name,
 			Index:   index,
 			Decoded: decoded,
+			Spec:    spec,
 			Source:  item.block.Range(),
 		})
 	}
@@ -473,31 +476,41 @@ func (p targetsPhase) evaluatedTargets(file *hclFile) ([]evaluatedTarget, error)
 func targetsFromEvaluated(repo *attegit.Repo, evaluated []evaluatedTarget) (map[Kind][]Target, error) {
 	targets := make(map[Kind][]Target, len(evaluated))
 	for _, item := range evaluated {
-		script, inline, err := targetScript(repo, item.File, item.Decoded)
-		if err != nil {
-			return nil, err
+		target := targetFromEvaluated(item)
+		if item.Spec.script != nil {
+			script, inline, err := item.Spec.script(repo, item.File, item.Decoded)
+			if err != nil {
+				return nil, err
+			}
+			target.Script = script
+			target.Inline = inline
 		}
-		kind := string(item.Kind)
-		display := displayName(item.Name, item.Index)
-		aliases := selector.Aliases(selector.Target{Path: item.File.String(), Kind: kind, Name: display, Index: item.Index})
-		targets[item.Kind] = append(targets[item.Kind], Target{
-			ID:      EntityID(Namespace+":"+kind, item.File, display),
-			Kind:    Namespace + ":" + kind,
-			File:    item.File,
-			Name:    item.Name,
-			Label:   item.Label,
-			Index:   item.Index,
-			Aliases: aliases,
-			Script:  script,
-			Inline:  inline,
-			Decoded: item.Decoded,
-			Source:  item.Source,
-		})
+		targets[item.Kind] = append(targets[item.Kind], target)
 	}
 	return targets, nil
 }
 
-func targetScript(repo *attegit.Repo, file reference.Blob, decoded any) (reference.Blob, string, error) {
+func targetFromEvaluated(item evaluatedTarget) Target {
+	kind := string(item.Kind)
+	display := displayName(item.Name, item.Index)
+	aliases := selector.Aliases(selector.Target{Path: item.File.String(), Kind: kind, Name: display, Index: item.Index})
+	return Target{
+		ID:        EntityID(Namespace+":"+kind, item.File, display),
+		Kind:      Namespace + ":" + kind,
+		File:      item.File,
+		Name:      item.Name,
+		Label:     item.Label,
+		Index:     item.Index,
+		Aliases:   aliases,
+		Decoded:   item.Decoded,
+		graph:     item.Spec.Graph,
+		execution: item.Spec.Execution,
+		config:    item.Spec.Config,
+		Source:    item.Source,
+	}
+}
+
+func builtinTargetScript(repo *attegit.Repo, file reference.Blob, decoded any) (reference.Blob, string, error) {
 	target, ok := decoded.(decodedTarget)
 	if !ok {
 		return "", "", nil
@@ -568,6 +581,10 @@ type Target struct {
 	Inline  string
 	Decoded any
 	Source  hcl.Range
+
+	graph     TargetGraphProjection
+	execution TargetExecutionProjection
+	config    TargetConfigProjection
 }
 
 // DisplayName returns the stable display identifier component for the target.
@@ -576,15 +593,162 @@ func (target Target) DisplayName() string {
 	return displayName(target.Name, target.Index)
 }
 
+// Runnable reports whether the registered kind supplied an execution projection.
+func (target Target) Runnable() bool {
+	return target.execution != nil
+}
+
+// Execution constructs the executable representation of the target from a repository root.
+func (target Target) Execution(root string) (TargetCommand, error) {
+	if target.execution == nil {
+		return TargetCommand{}, fmt.Errorf("target %q has no execution projection", target.ID)
+	}
+	command, err := target.execution(target, root)
+	if err != nil {
+		return TargetCommand{}, fmt.Errorf("construct command for target %q: %w", target.ID, err)
+	}
+	if len(command.Args) == 0 {
+		return TargetCommand{}, fmt.Errorf("construct command for target %q: command has no arguments", target.ID)
+	}
+	return command, nil
+}
+
 // Command constructs the command used to execute the target from a repository root.
 func (target Target) Command(root string) (*exec.Cmd, error) {
+	command, err := target.Execution(root)
+	if err != nil {
+		return nil, err
+	}
+	process := exec.Command(command.Args[0], command.Args[1:]...)
+	process.Dir = command.Dir
+	return process, nil
+}
+
+// GraphProjectionBase returns the target entity and, when requested, the common
+// declaring-file and tree entities and relationships for a target.
+func (target Target) GraphProjectionBase(attachToTree bool) TargetGraph {
+	result := TargetGraph{Entities: []graph.Entity{{ID: target.ID, Kind: target.Kind}}}
+	if !attachToTree {
+		return result
+	}
+	tree := attegit.EntityID(target.File.Tree())
+	file := attegit.EntityID(target.File)
+	result.Entities = append(result.Entities,
+		graph.Entity{ID: tree, Kind: attegit.TreeKind},
+		graph.Entity{ID: file, Kind: attegit.BlobKind},
+	)
+	result.Relationships = append(result.Relationships,
+		graph.Relationship{From: target.ID, To: file, Kind: SourceFileRelation},
+		graph.Relationship{From: tree, To: target.ID, Kind: attegit.ContainsRelation},
+	)
+	return result
+}
+
+// Configuration returns the standard target identity and the registered kind's
+// optional configuration projection.
+func (value Target) Configuration() (target.Computed, error) {
+	computed := target.Computed{
+		Kind:   value.Kind,
+		File:   value.File.String(),
+		Name:   value.DisplayName(),
+		Label:  value.Label,
+		Index:  value.Index,
+		Script: value.Script.String(),
+		Inline: value.Inline,
+	}
+	if value.config == nil {
+		return computed, nil
+	}
+	extra, err := value.config(value)
+	if err != nil {
+		return target.Computed{}, fmt.Errorf("project configuration for target %q: %w", value.ID, err)
+	}
+	for key := range extra {
+		switch key {
+		case "kind", "file", "name", "label", "index", "script", "inline":
+			return target.Computed{}, fmt.Errorf("project configuration for target %q: key %q conflicts with target identity", value.ID, key)
+		}
+	}
+	if len(extra) > 0 {
+		computed.Meta = extra
+	}
+	return computed, nil
+}
+
+func graphTestTarget(ctx context.Context, repo *attegit.Repo, target Target, graphContext TargetGraphContext, attachToTree bool) (TargetGraph, error) {
+	if err := ctx.Err(); err != nil {
+		return TargetGraph{}, err
+	}
+	decoded, ok := target.Decoded.(decodedTarget)
+	if !ok {
+		return TargetGraph{}, fmt.Errorf("target %q has an invalid built-in decoded value", target.ID)
+	}
+	if decoded.Script == "" {
+		return TargetGraph{}, fmt.Errorf("target %q has no script", target.Name)
+	}
+	result := target.GraphProjectionBase(attachToTree)
+	script := strings.TrimPrefix(decoded.Script, DecodingPathPrefix)
+	if script != "" {
+		targetBlob, err := reference.ResolveBlobFromBlob(target.File, reference.SomePath(script))
+		if err != nil {
+			return TargetGraph{}, fmt.Errorf("%q: %w", target.File, err)
+		}
+		if obj, ok := repo.Obj[targetBlob]; !ok || obj.Kind != attegit.Blob {
+			return TargetGraph{}, fmt.Errorf("%q: script %q not found", target.File, targetBlob)
+		}
+		result.Entities = append(result.Entities, graph.Entity{ID: attegit.EntityID(targetBlob), Kind: attegit.BlobKind})
+		result.Relationships = append(result.Relationships, graph.Relationship{From: target.ID, To: attegit.EntityID(targetBlob), Kind: ScriptRelation})
+	}
+	for _, dep := range decoded.Deps {
+		if err := ctx.Err(); err != nil {
+			return TargetGraph{}, err
+		}
+		if dep.traversal != nil {
+			entity, err := graphContext.ResolveTarget(dep.traversal)
+			if err != nil {
+				return TargetGraph{}, err
+			}
+			result.Entities = append(result.Entities, entity)
+			result.Relationships = append(result.Relationships, graph.Relationship{From: target.ID, To: entity.ID, Kind: DependsOnRelation})
+			continue
+		}
+		if dep.entity != "" {
+			kind, err := graphContext.EntityKind(dep.entity)
+			if err != nil {
+				return TargetGraph{}, err
+			}
+			result.Entities = append(result.Entities, graph.Entity{ID: dep.entity, Kind: kind})
+			result.Relationships = append(result.Relationships, graph.Relationship{From: target.ID, To: dep.entity, Kind: DependsOnRelation})
+			continue
+		}
+		value := strings.TrimPrefix(dep.value, DecodingPathPrefix)
+		targetBlob, err := reference.ResolveBlobFromBlob(target.File, reference.SomePath(value))
+		if err != nil {
+			return TargetGraph{}, fmt.Errorf("%q: %w", target.File, err)
+		}
+		obj, ok := repo.Obj[targetBlob]
+		if !ok || obj.Kind != attegit.Blob {
+			return TargetGraph{}, fmt.Errorf("%q: dependency %q not found", target.File, targetBlob)
+		}
+		result.Entities = append(result.Entities, graph.Entity{ID: attegit.EntityID(targetBlob), Kind: attegit.BlobKind})
+		result.Relationships = append(result.Relationships, graph.Relationship{From: target.ID, To: attegit.EntityID(targetBlob), Kind: DependsOnRelation})
+	}
+	return result, nil
+}
+
+func executeScriptTarget(target Target, root string) (TargetCommand, error) {
+	dir := filepath.Dir(filepath.Join(root, filepath.FromSlash(target.File.String())))
 	if target.Script != "" {
-		return exec.Command("/usr/bin/env", "bash", filepath.Join(root, filepath.FromSlash(target.Script.String()))), nil
+		return TargetCommand{Dir: dir, Args: []string{"/usr/bin/env", "bash", filepath.Join(root, filepath.FromSlash(target.Script.String()))}}, nil
 	}
 	if target.Inline != "" {
-		return exec.Command("/usr/bin/env", "bash", "-c", target.Inline), nil
+		return TargetCommand{Dir: dir, Args: []string{"/usr/bin/env", "bash", "-c", target.Inline}}, nil
 	}
-	return nil, fmt.Errorf("target %q has no script", target.ID)
+	return TargetCommand{}, fmt.Errorf("target %q has no script", target.ID)
+}
+
+func configScriptTarget(Target) (map[string]any, error) {
+	return nil, nil
 }
 
 // Selector converts a target to its selector-facing identity.
@@ -772,83 +936,28 @@ func addEvaluatedTargetGraph(
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	relations := make([]graph.Relationship, 0)
-	id := EntityID(Namespace+":"+string(target.Kind), target.File, displayName(target.Name, target.Index))
-	addEntity(graph.Entity{ID: id, Kind: Namespace + ":" + string(target.Kind)})
-	if containment {
-		addEntity(graph.Entity{ID: attegit.EntityID(target.File.Tree()), Kind: attegit.TreeKind})
-		addEntity(graph.Entity{ID: attegit.EntityID(target.File), Kind: attegit.BlobKind})
-		relations = append(relations,
-			graph.Relationship{From: id, To: attegit.EntityID(target.File), Kind: SourceFileRelation},
-			graph.Relationship{From: attegit.EntityID(target.File.Tree()), To: id, Kind: attegit.ContainsRelation},
-		)
+	native := targetFromEvaluated(target)
+	if native.graph == nil {
+		return nil, nil
 	}
-	decoded, ok := target.Decoded.(decodedTarget)
-	if !ok {
-		return relations, nil
-	}
-	if decoded.Script == "" {
-		return nil, fmt.Errorf("target %q has no script", target.Name)
-	}
-	relations = make([]graph.Relationship, 0, 2+len(decoded.Deps)*2)
-	if containment {
-		relations = append(relations,
-			graph.Relationship{From: id, To: attegit.EntityID(target.File), Kind: SourceFileRelation},
-			graph.Relationship{From: attegit.EntityID(target.File.Tree()), To: id, Kind: attegit.ContainsRelation},
-		)
-	}
-	script := strings.TrimPrefix(decoded.Script, DecodingPathPrefix)
-	if script != "" {
-		targetBlob, err := reference.ResolveBlobFromBlob(target.File, reference.SomePath(script))
-		if err != nil {
-			return nil, fmt.Errorf("%q: %w", target.File, err)
-		}
-		if obj, ok := repo.Obj[targetBlob]; !ok || obj.Kind != attegit.Blob {
-			return nil, fmt.Errorf("%q: script %q not found", target.File, targetBlob)
-		}
-		addEntity(graph.Entity{ID: attegit.EntityID(targetBlob), Kind: attegit.BlobKind})
-		relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(targetBlob), Kind: ScriptRelation})
-	}
-	for _, dep := range decoded.Deps {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		if dep.traversal != nil {
-			declaration, err := resolveTargetTraversal(target.File, dep.traversal, declarations)
+	graphContext := TargetGraphContext{
+		ResolveTarget: func(traversal hcl.Traversal) (graph.Entity, error) {
+			declaration, err := resolveTargetTraversal(native.File, traversal, declarations)
 			if err != nil {
-				return nil, err
+				return graph.Entity{}, err
 			}
-			addEntity(graph.Entity{ID: declaration.ID, Kind: Namespace + ":" + string(declaration.Kind)})
-			relations = append(relations, graph.Relationship{From: id, To: declaration.ID, Kind: DependsOnRelation})
-			continue
-		}
-		if dep.entity != "" {
-			kind, err := entityDependencyKind(dep.entity)
-			if err != nil {
-				return nil, err
-			}
-			if strings.HasPrefix(string(dep.entity), Namespace+":") {
-				if _, ok := declarations.byID[dep.entity]; !ok {
-					return nil, fmt.Errorf("dependency target %q not declared", dep.entity)
-				}
-			}
-			addEntity(graph.Entity{ID: dep.entity, Kind: kind})
-			relations = append(relations, graph.Relationship{From: id, To: dep.entity, Kind: DependsOnRelation})
-			continue
-		}
-		value := strings.TrimPrefix(dep.value, DecodingPathPrefix)
-		targetBlob, err := reference.ResolveBlobFromBlob(target.File, reference.SomePath(value))
-		if err != nil {
-			return nil, fmt.Errorf("%q: %w", target.File, err)
-		}
-		obj, ok := repo.Obj[targetBlob]
-		if !ok || obj.Kind != attegit.Blob {
-			return nil, fmt.Errorf("%q: dependency %q not found", target.File, targetBlob)
-		}
-		addEntity(graph.Entity{ID: attegit.EntityID(targetBlob), Kind: attegit.BlobKind})
-		relations = append(relations, graph.Relationship{From: id, To: attegit.EntityID(targetBlob), Kind: DependsOnRelation})
+			return graph.Entity{ID: declaration.ID, Kind: Namespace + ":" + string(declaration.Kind)}, nil
+		},
+		EntityKind: entityDependencyKind,
 	}
-	return relations, nil
+	projected, err := native.graph(ctx, repo, native, graphContext, containment)
+	if err != nil {
+		return nil, fmt.Errorf("project graph for target %q: %w", native.ID, err)
+	}
+	for _, entity := range projected.Entities {
+		addEntity(entity)
+	}
+	return projected.Relationships, nil
 }
 
 func resolveTargetTraversal(file reference.Blob, traversal hcl.Traversal, declarations declarationIndex) (targetDeclaration, error) {

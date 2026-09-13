@@ -16,9 +16,11 @@ import (
 const KindDeploy attehcl.Kind = "deploy"
 
 func main() {
-	err := attehcl.Register(KindDeploy, func(bc *hcl.BodyContent, ec *hcl.EvalContext) (any, error) {
-		return nil, nil
-	}, nil)
+	err := attehcl.Register(KindDeploy, attehcl.TargetKindSpec{
+		Decoder: func(bc *hcl.BodyContent, ec *hcl.EvalContext) (any, error) {
+			return nil, nil
+		},
+	})
 	if err != nil {
 		log.Fatal(err)
 	}

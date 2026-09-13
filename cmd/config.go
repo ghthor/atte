@@ -8,6 +8,7 @@ import (
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/detector/registry"
+	"github.com/ghthor/atte/reference/target"
 	"github.com/hashicorp/hcl/v2/hclwrite"
 	"github.com/spf13/cobra"
 	"github.com/zclconf/go-cty/cty"
@@ -64,17 +65,7 @@ func init() {
 }
 
 type configOutput struct {
-	Target map[string]configTarget `json:"target"`
-}
-
-type configTarget struct {
-	Kind   string `json:"kind"`
-	File   string `json:"file"`
-	Name   string `json:"name"`
-	Label  string `json:"label,omitempty"`
-	Index  int    `json:"index"`
-	Script string `json:"script,omitempty"`
-	Inline string `json:"inline,omitempty"`
+	Target map[string]target.Computed `json:"target"`
 }
 
 func writeConfig(w interface{ Write([]byte) (int, error) }, config attehcl.Config, format string) error {
@@ -95,20 +86,16 @@ func writeConfig(w interface{ Write([]byte) (int, error) }, config attehcl.Confi
 }
 
 func configOutputFor(config attehcl.Config) (configOutput, error) {
-	target := make(map[string]configTarget, len(config.Targets))
+	targets := make(map[string]target.Computed, len(config.Targets))
 	for _, item := range attehcl.SortedTargets(config.Targets) {
 		key := fmt.Sprintf("//%s#%s.%s", item.File, strings.TrimPrefix(item.Kind, attehcl.Namespace+":"), item.DisplayName())
-		target[key] = configTarget{
-			Kind:   item.Kind,
-			File:   item.File.String(),
-			Name:   item.DisplayName(),
-			Label:  item.Label,
-			Index:  item.Index,
-			Script: item.Script.String(),
-			Inline: item.Inline,
+		computed, err := item.Configuration()
+		if err != nil {
+			return configOutput{}, err
 		}
+		targets[key] = computed
 	}
-	return configOutput{Target: target}, nil
+	return configOutput{Target: targets}, nil
 }
 
 func writeConfigHCL(w interface{ Write([]byte) (int, error) }, output configOutput) error {
@@ -149,20 +136,24 @@ func anyCty(value any) (cty.Value, error) {
 			return cty.EmptyObjectVal, nil
 		}
 		return cty.ObjectVal(values), nil
-	case map[string]configTarget:
+	case target.Computed:
+		values := map[string]any{
+			"kind":   value.Kind,
+			"file":   value.File,
+			"name":   value.Name,
+			"label":  value.Label,
+			"index":  value.Index,
+			"script": value.Script,
+			"inline": value.Inline,
+		}
+		if value.Meta != nil {
+			values["meta"] = value.Meta
+		}
+		return anyCty(values)
+	case map[string]target.Computed:
 		values := make(map[string]cty.Value, len(value))
 		for key, item := range value {
-			converted, err := anyCty(
-				map[string]any{
-					"kind":   item.Kind,
-					"file":   item.File,
-					"name":   item.Name,
-					"label":  item.Label,
-					"index":  item.Index,
-					"script": item.Script,
-					"inline": item.Inline,
-				},
-			)
+			converted, err := anyCty(item)
 			if err != nil {
 				return cty.NilVal, err
 			}
