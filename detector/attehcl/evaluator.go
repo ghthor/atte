@@ -12,7 +12,6 @@ import (
 	"github.com/ghthor/atte/detector/graphset"
 	"github.com/ghthor/atte/detector/graphtarget"
 	"github.com/ghthor/atte/reference"
-	"github.com/ghthor/atte/reference/selector"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/zclconf/go-cty/cty"
@@ -206,8 +205,9 @@ func (e *evaluator) evalContext(file reference.Blob, scope hclScope) (*hcl.EvalC
 }
 
 func declarationFromBlock(file reference.Blob, item normalizedBlock) targetDeclaration {
+	identity := targetIdentityFor(file, item.kind, item.name, item.index)
 	return targetDeclaration{
-		ID:     EntityID(Namespace+":"+string(item.kind), file, displayName(item.name, item.index)),
+		ID:     identity.ID,
 		Kind:   item.kind,
 		File:   file,
 		Name:   item.name,
@@ -217,20 +217,15 @@ func declarationFromBlock(file reference.Blob, item normalizedBlock) targetDecla
 }
 
 func targetIDFromDeclaration(declaration targetDeclaration) graphtarget.ID {
-	display := displayName(declaration.Name, declaration.Index)
+	identity := targetIdentityFor(declaration.File, declaration.Kind, declaration.Name, declaration.Index)
 	return graphtarget.ID{
-		ID:        declaration.ID,
+		ID:        identity.ID,
 		Namespace: graphtarget.Namespace(Namespace),
-		Kind:      Namespace + ":" + string(declaration.Kind),
-		Path:      declaration.File.String(),
-		Name:      display,
-		Index:     declaration.Index,
-		Aliases: selector.Aliases(selector.Target{
-			Path:  declaration.File.String(),
-			Kind:  string(declaration.Kind),
-			Name:  display,
-			Index: declaration.Index,
-		}),
+		Kind:      identity.Kind,
+		Path:      identity.Selector.Path,
+		Name:      identity.DisplayName,
+		Index:     identity.Selector.Index,
+		Aliases:   identity.Aliases,
 	}
 }
 

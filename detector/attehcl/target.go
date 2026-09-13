@@ -32,17 +32,15 @@ func targetsFromEvaluated(repo *attegit.Repo, evaluated []evaluatedTarget) (map[
 }
 
 func targetFromEvaluated(item evaluatedTarget) Target {
-	kind := string(item.Kind)
-	display := displayName(item.Name, item.Index)
-	aliases := selector.Aliases(selector.Target{Path: item.File.String(), Kind: kind, Name: display, Index: item.Index})
+	identity := targetIdentityFor(item.File, item.Kind, item.Name, item.Index)
 	return Target{
-		ID:        EntityID(Namespace+":"+kind, item.File, display),
-		Kind:      Namespace + ":" + kind,
+		ID:        identity.ID,
+		Kind:      identity.Kind,
 		File:      item.File,
 		Name:      item.Name,
 		Label:     item.Label,
 		Index:     item.Index,
-		Aliases:   aliases,
+		Aliases:   identity.Aliases,
 		Decoded:   item.Decoded,
 		graph:     item.Spec.Graph,
 		execution: item.Spec.Execution,
@@ -77,6 +75,33 @@ func builtinTargetScript(repo *attegit.Repo, file reference.Blob, decoded any) (
 
 func EntityID(kind string, file reference.Blob, name string) graph.EntityID {
 	return graph.EntityID(fmt.Sprintf("%s:%s:%s", kind, file, name))
+}
+
+type targetIdentity struct {
+	ID          graph.EntityID
+	Kind        string
+	DisplayName string
+	Selector    selector.Target
+	Aliases     []string
+}
+
+func targetIdentityFor(file reference.Blob, kind Kind, name string, index int) targetIdentity {
+	display := displayName(name, index)
+	selectorIdentity := selector.Target{
+		Path:  file.String(),
+		Kind:  string(kind),
+		Name:  display,
+		Index: index,
+	}
+	aliases := selector.Aliases(selectorIdentity)
+	selectorIdentity.Aliases = aliases
+	return targetIdentity{
+		ID:          EntityID(Namespace+":"+string(kind), file, display),
+		Kind:        Namespace + ":" + string(kind),
+		DisplayName: display,
+		Selector:    selectorIdentity,
+		Aliases:     aliases,
+	}
 }
 
 func DecodeEntityID(id graph.EntityID) (string, reference.Blob, string, error) {
@@ -233,11 +258,8 @@ func configScriptTarget(Target) (map[string]any, error) {
 
 // Selector converts a target to its selector-facing identity.
 func Selector(target Target) selector.Target {
-	return selector.Target{
-		Path:    target.File.String(),
-		Kind:    strings.TrimPrefix(target.Kind, Namespace+":"),
-		Name:    target.DisplayName(),
-		Index:   target.Index,
-		Aliases: target.Aliases,
-	}
+	kind := strings.TrimPrefix(target.Kind, Namespace+":")
+	identity := targetIdentityFor(target.File, Kind(kind), target.Name, target.Index)
+	identity.Selector.Aliases = target.Aliases
+	return identity.Selector
 }

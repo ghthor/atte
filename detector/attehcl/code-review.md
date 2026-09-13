@@ -27,7 +27,7 @@
 
 The package has a sound pipeline and good separation between declaration discovery, local evaluation, target decoding, and graph projection. The target capability registry is a useful extensibility boundary, and the recent evaluator-construction cleanup has removed the earlier duplication there.
 
-The main remaining opportunity is algorithmic: local evaluation repeatedly retries expressions. Several smaller refactorings would also centralize target identity construction and remove unused state.
+The main remaining opportunity is algorithmic: local evaluation repeatedly retries expressions. The remaining smaller refactorings remove unused state.
 
 ## Findings
 
@@ -57,23 +57,7 @@ This reduces the traversal to approximately O(L + R), where R is the number of l
 
 ---
 
-### 2. Target identity construction is duplicated across the pipeline
-
-Identity and selector data are assembled independently in several places:
-
-- declarationFromBlock and declarationFromEvaluated both construct the same entity ID.
-- targetIDFromDeclaration and targetFromEvaluated independently derive display names and selector aliases.
-- Selector repeats the namespace/kind conversion for the public representation.
-
-These paths currently agree, but changes to anonymous-target indexing, aliases, or ID formatting can make DeclaredTargets, Targets, and graph entities disagree.
-
-#### Recommendation
-
-Introduce one internal identity helper that accepts file, kind, name, and index and returns the canonical display name, entity ID, selector identity, and aliases. Build declarations and evaluated targets from that value, keeping source range and decoded capabilities as the phase-specific fields.
-
----
-
-### 3. Dead or low-value abstractions remain
+### 2. Dead or low-value abstractions remain
 
 A few constructs add indirection without currently serving a caller.
 
@@ -89,7 +73,7 @@ These are low-risk cleanups, but removing them makes the evaluator's data flow e
 
 ---
 
-### 4. Diagnostic context rereads and resplits the source for every diagnostic
+### 3. Diagnostic context rereads and resplits the source for every diagnostic
 
 hclDiagnosticContext calls repo.Show(file) and splits the complete file contents for each diagnostic. For D diagnostics and a file of size B, this can approach O(D × B) work and performs repeated repository reads.
 
@@ -101,7 +85,7 @@ Retain source contents or precomputed lines in hclFile and pass that data to dia
 
 ---
 
-### 5. Graph construction does not canonicalize duplicate relationships
+### 4. Graph construction does not canonicalize duplicate relationships
 
 graphScriptTarget emits one relationship for every decoded dependency, and graphFor appends all projected relationships before calling graph.New. graph.New sorts relationships but does not remove equivalent edges. Consequently, a dependency list such as depends_on = [path("x"), path("x")] produces duplicate depends-on relationships. Multiple projectors can produce the same issue.
 
@@ -113,7 +97,7 @@ Define whether relationships are a set at the graph.New boundary and enforce tha
 
 ---
 
-### 6. Error extraction can use the Go-version-supported generic helper
+### 5. Error extraction can use the Go-version-supported generic helper
 
 The module targets Go 1.26, and the language server flags the errors.As(err, &diagnostic) form in evaluator.go. errors.AsType[targetDiagnosticsError](err) is shorter and avoids a separately declared mutable variable.
 
@@ -143,9 +127,8 @@ This is a small readability cleanup rather than a performance issue.
 ### Phase 2: Correctness and maintainability
 
 1. Canonicalize duplicate graph relationships and test repeated dependencies.
-2. Centralize target identity construction.
-3. Remove declarationIndex.byID and inline evaluateDeclaration.
-4. Replace errors.As with errors.AsType.
+2. Remove declarationIndex.byID and inline evaluateDeclaration.
+3. Replace errors.As with errors.AsType.
 
 ### Phase 3: Lower-priority allocation cleanup
 
