@@ -29,9 +29,6 @@ func (files hclFiles) sortedBlobs() []reference.Blob {
 func declarationBlocks(file reference.Blob, body *hclsyntax.Body) (map[string]hcl.Expression, error) {
 	locals := make(map[string]hcl.Expression)
 	for _, block := range body.Blocks {
-		if block.Type == "globals" {
-			return nil, fmt.Errorf("decode HCL %q: globals are not supported; targets are file-local", file)
-		}
 		if block.Type != "locals" {
 			continue
 		}

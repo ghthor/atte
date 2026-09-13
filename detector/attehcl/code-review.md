@@ -381,17 +381,55 @@ Replace repeated local-evaluation scans with dependency-ordered evaluation and e
 
 ## Suggested target architecture
 
-The existing pipeline is sound and should be retained:
+The existing pipeline is sound and should be retained. Its important property is
+that each phase exposes only the data needed by the next phase:
 
 ```text
 repository
-  -> parse HCL files
-  -> discover declarations
-  -> evaluate file-local locals
-  -> decode target bodies
-  -> create common Target values
-  -> project graph / command / configuration
+    |
+    v
+[1. Parse HCL files]
+    output: hclFiles
+      - parsed bodies and local expressions, ordered by file
+    |
+    v
+[2. Normalize target blocks]
+    output: normalizedBlock[]
+      - registered kind, name, index, body, and source range
+    |
+    +------------------------------+
+    |                              |
+    v                              v
+[Declaration-only path]       [3. Evaluate locals]
+    output: targetDeclaration[]     output: hclScope + HCL functions
+      - identity and source          - known file-local values
+    |                              |
+    v                              v
+DeclaredTargets              [4. Decode target bodies]
+    output: graphtarget.ID[]       output: evaluatedTarget[]
+                                   - decoded value and kind spec
+                                   - identity and source information
+                                   |
+                   +---------------+----------------+
+                   |                                |
+                   v                                v
+             [5. Materialize targets]       [5. Build graph index]
+             output: map[Kind][]Target       output: declarationIndex
+               - common identity and         - same-file target lookup
+                 projections
+                   |                                |
+                   v                                v
+             Targets / ConfigFor          [6. Project target graphs]
+             output: evaluated config          output: graph.Graph
+                                             - entities and relationships
 ```
+
+`DeclaredTargets` therefore does not require local values, provider functions,
+registered decoders, or graph projections. `Targets` and `ConfigFor` consume the
+full decoded output and add common target identity, selector, script, execution,
+and configuration data. `Graph` consumes the same decoded output, builds a
+same-file declaration index, and then resolves symbolic target dependencies
+while invoking graph projections.
 
 The best remaining refactoring is to reduce representation duplication around `dependency`, `targetDeclaration`, and `evaluatedTarget`.
 

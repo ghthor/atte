@@ -178,14 +178,6 @@ func TestGraphRejectsInvalidConfiguration(t *testing.T) {
 	}
 }
 
-func TestGlobalsAreRejected(t *testing.T) {
-	repo := newHCLFixture(t, map[string]string{
-		"atte.hcl": `globals { value = "unsupported" }`,
-	})
-	_, err := Targets(t.Context(), repo, nil)
-	test.ErrorContains(t, err, "globals are not supported")
-}
-
 func TestLocalExpressionsAreFileLocal(t *testing.T) {
 	repo := newHCLFixture(t, map[string]string{
 		"atte.hcl": `
@@ -470,7 +462,6 @@ func TestDeclaredTargetsRejectsDeclarationErrors(t *testing.T) {
 		file string
 	}{
 		{name: "malformed HCL", file: `test {`},
-		{name: "globals", file: `globals { value = "unsupported" }`},
 		{name: "unknown kind", file: `package {}`},
 		{name: "numeric name", file: `test "123" {}`},
 		{name: "duplicate name", file: `test "same" {}
