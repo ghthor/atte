@@ -302,8 +302,7 @@ func (p targetsPhase) evaluatedTargets(file *hclFile) ([]evaluatedTarget, error)
 		}
 		decoded, err := spec.Decoder(content, ctx)
 		if err != nil {
-			var diagnostic targetDiagnosticsError
-			if errors.As(err, &diagnostic) {
+			if diagnostic, ok := errors.AsType[targetDiagnosticsError](err); ok {
 				return nil, fmt.Errorf(
 					"decode HCL %q target %s.%s at %s: %w",
 					file.file,

@@ -12,16 +12,16 @@
     #### Main stable release branch
     # https://hydra.nixos.org/jobset/nixos/release-26.05/evals
     nixpkgs = {
-      # https://hydra.nixos.org/eval/1827033#tabs-inputs
-      url = "github:NixOS/nixpkgs/8f0500b9660505dc3cb647775fe9a978a74b5283";
+      # https://hydra.nixos.org/eval/1828759#tabs-inputs
+      url = "github:NixOS/nixpkgs/a5cc6f2c37bf518436dc8d1c288ccd0c43c2f4c4";
       # url = "nixpkgs/nixos-26.05";
     };
 
     #### Unstable release branch
     # https://hydra.nixos.org/jobset/nixos/unstable
     nixpkgs-unstable = {
-      # https://hydra.nixos.org/eval/1827505#tabs-inputs
-      url = "github:NixOS/nixpkgs/624af665418d3c65d544145b4d34ad696439570e";
+      # https://hydra.nixos.org/eval/1828722#tabs-inputs
+      url = "github:NixOS/nixpkgs/3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2";
       # url = "nixpkgs/nixos-unstable";
     };
 

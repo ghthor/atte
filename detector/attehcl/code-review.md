@@ -21,7 +21,7 @@
 - go vet ./detector/attehcl — passed
 - golangci-lint run ./detector/attehcl — passed
 - staticcheck ./detector/attehcl — passed
-- Serena diagnostics reported one modernization hint for errors.As; no correctness diagnostics were reported.
+- Serena diagnostics reported no correctness diagnostics.
 
 ## Executive summary
 
@@ -97,14 +97,6 @@ Define whether relationships are a set at the graph.New boundary and enforce tha
 
 ---
 
-### 5. Error extraction can use the Go-version-supported generic helper
-
-The module targets Go 1.26, and the language server flags the errors.As(err, &diagnostic) form in evaluator.go. errors.AsType[targetDiagnosticsError](err) is shorter and avoids a separately declared mutable variable.
-
-This is a small readability cleanup rather than a performance issue.
-
----
-
 ## Complexity summary
 
 | Area | Approximate complexity | Notes |
@@ -128,7 +120,6 @@ This is a small readability cleanup rather than a performance issue.
 
 1. Canonicalize duplicate graph relationships and test repeated dependencies.
 2. Remove declarationIndex.byID and inline evaluateDeclaration.
-3. Replace errors.As with errors.AsType.
 
 ### Phase 3: Lower-priority allocation cleanup
 

@@ -381,7 +381,7 @@ func runTargetPaths(target runTarget) (string, string) {
 
 func matchesRunTargetAt(input string, target runTarget, relative string) bool {
 	canonicalPath, _ := runTargetPaths(target)
-	namespace := strings.SplitN(target.kind, ":", 2)[0]
+	namespace, _, _ := strings.Cut(target.kind, ":")
 	return selector.Matches(graphtarget.ID{
 		Namespace: graphtarget.Namespace(namespace),
 		Kind:      target.kind,
