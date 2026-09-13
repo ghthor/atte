@@ -63,7 +63,18 @@ func projectDependency(
 	var entity graph.Entity
 	switch dependency.kind {
 	case dependencyTarget:
-		resolved, err := graphContext.ResolveTarget(dependency.traversal)
+		var (
+			resolved graph.Entity
+			err      error
+		)
+		if dependency.target.file != "" {
+			if graphContext.ResolveTargetAt == nil {
+				return graph.Entity{}, graph.Relationship{}, fmt.Errorf("cross-file target dependencies are not supported by this graph projector")
+			}
+			resolved, err = graphContext.ResolveTargetAt(dependency.target.file, dependency.traversal)
+		} else {
+			resolved, err = graphContext.ResolveTarget(dependency.traversal)
+		}
 		if err != nil {
 			return graph.Entity{}, graph.Relationship{}, err
 		}
@@ -177,6 +188,13 @@ func addEvaluatedTargetGraph(
 			}
 			return graph.Entity{ID: declaration.ID, Kind: Namespace + ":" + string(declaration.Kind)}, nil
 		},
+		ResolveTargetAt: func(file reference.Blob, traversal hcl.Traversal) (graph.Entity, error) {
+			declaration, err := resolveTargetTraversal(file, traversal, declarations)
+			if err != nil {
+				return graph.Entity{}, err
+			}
+			return graph.Entity{ID: declaration.ID, Kind: Namespace + ":" + string(declaration.Kind)}, nil
+		},
 		EntityKind: entityDependencyKind,
 	}
 	projected, err := native.graph(ctx, repo, native, graphContext, containment)
@@ -200,7 +218,7 @@ func resolveTargetTraversal(file reference.Blob, traversal hcl.Traversal, declar
 	kind := Kind(traversal.RootName())
 	declaration, ok := declarations.byReference[targetReference{file: file, kind: kind, name: attribute.Name}]
 	if !ok {
-		return targetDeclaration{}, fmt.Errorf("%q: target dependency %s.%s not found in the same file", file, kind, attribute.Name)
+		return targetDeclaration{}, fmt.Errorf("%q: target dependency %s.%s not found", file, kind, attribute.Name)
 	}
 	return declaration, nil
 }

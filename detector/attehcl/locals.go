@@ -32,8 +32,8 @@ func evaluateDeclaration(expression hcl.Expression, context *hcl.EvalContext) (c
 	return expression.Value(context)
 }
 
-// evaluateLocals resolves file-local declarations without consulting another
-// atte.hcl file. Cross-file target dependencies are a later graph phase.
+// evaluateLocals resolves file-local declarations without evaluating another
+// atte.hcl file. Cross-file target references are resolved from declarations.
 func targetContextValues(blocks []normalizedBlock, kinds map[Kind]targetKindSpec) map[string]cty.Value {
 	attributes := make(map[Kind]map[string]cty.Value, len(kinds))
 	for kind := range kinds {

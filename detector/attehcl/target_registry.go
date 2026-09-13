@@ -47,8 +47,9 @@ type TargetKindSpec struct {
 
 // TargetGraphContext provides common dependency resolution to a graph projector.
 type TargetGraphContext struct {
-	ResolveTarget func(hcl.Traversal) (graph.Entity, error)
-	EntityKind    func(graph.EntityID) (string, error)
+	ResolveTarget   func(hcl.Traversal) (graph.Entity, error)
+	ResolveTargetAt func(reference.Blob, hcl.Traversal) (graph.Entity, error)
+	EntityKind      func(graph.EntityID) (string, error)
 }
 
 // TargetGraph is the graph projection of one target.
@@ -200,6 +201,43 @@ func targetTraversalValue(kind Kind, name string) string {
 	return targetTraversalValuePrefix + string(kind) + "." + name
 }
 
+const targetReferenceValuePrefix = "attehcl-target-ref:"
+
+func targetReferenceValue(file reference.Blob, kind Kind, name string) string {
+	return targetReferenceValuePrefix + file.String() + "#" + string(kind) + "." + name
+}
+
+func targetReferenceFromValue(value string) (targetReference, bool) {
+	raw, ok := strings.CutPrefix(value, targetReferenceValuePrefix)
+	if !ok {
+		return targetReference{}, false
+	}
+	fileName, identifier, ok := strings.Cut(raw, "#")
+	if !ok {
+		return targetReference{}, false
+	}
+	file, err := reference.ParseBlob(fileName)
+	if err != nil {
+		return targetReference{}, false
+	}
+	kind, name, ok := strings.Cut(identifier, ".")
+	if !ok || !hclsyntax.ValidIdentifier(kind) || !hclsyntax.ValidIdentifier(name) {
+		return targetReference{}, false
+	}
+	return targetReference{
+		file: file,
+		kind: Kind(kind),
+		name: name,
+	}, true
+}
+
+func targetTraversal(kind Kind, name string) hcl.Traversal {
+	return hcl.Traversal{
+		hcl.TraverseRoot{Name: string(kind)},
+		hcl.TraverseAttr{Name: name},
+	}
+}
+
 func targetTraversalFromValue(value string) (hcl.Traversal, bool) {
 	raw, ok := strings.CutPrefix(value, targetTraversalValuePrefix)
 	if !ok {
@@ -315,6 +353,15 @@ func decodeDependencyValue(value cty.Value) ([]dependency, error) {
 	raw := value.AsString()
 	if traversal, ok := targetTraversalFromValue(raw); ok {
 		return []dependency{{kind: dependencyTarget, traversal: traversal}}, nil
+	}
+	if target, ok := targetReferenceFromValue(raw); ok {
+		return []dependency{
+			{
+				kind:      dependencyTarget,
+				target:    target,
+				traversal: targetTraversal(target.kind, target.name),
+			},
+		}, nil
 	}
 	if entity, ok := strings.CutPrefix(raw, "attehcl-id:"); ok {
 		return []dependency{{kind: dependencyEntity, entity: graph.EntityID(entity)}}, nil

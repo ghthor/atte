@@ -20,12 +20,13 @@ import (
 )
 
 type evaluator struct {
-	ctx       context.Context
-	repo      *attegit.Repo
-	files     hclFiles
-	provider  graphset.FunctionProvider
-	functions map[reference.Blob]map[string]function.Function
-	kindSpecs map[Kind]targetKindSpec
+	ctx          context.Context
+	repo         *attegit.Repo
+	files        hclFiles
+	provider     graphset.FunctionProvider
+	functions    map[reference.Blob]map[string]function.Function
+	kindSpecs    map[Kind]targetKindSpec
+	declarations declarationIndex
 }
 
 type normalizedBlock struct {
@@ -87,14 +88,15 @@ func newEvaluator(ctx context.Context, repo *attegit.Repo, provider graphset.Fun
 	if err != nil {
 		return nil, err
 	}
-	return &evaluator{
+	evaluator := &evaluator{
 		ctx:       ctx,
 		repo:      repo,
 		files:     files,
 		provider:  provider,
 		functions: make(map[reference.Blob]map[string]function.Function),
 		kindSpecs: targetRegistrySnapshot(),
-	}, nil
+	}
+	return evaluator, nil
 }
 
 func newEvaluatorForFile(ctx context.Context, repo *attegit.Repo, file reference.Blob, provider graphset.FunctionProvider) (*evaluator, error) {
@@ -104,26 +106,50 @@ func newEvaluatorForFile(ctx context.Context, repo *attegit.Repo, file reference
 	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
-	parsed := &hclFile{
-		file:   file,
-		body:   &hclsyntax.Body{},
-		locals: make(map[string]hcl.Expression),
+	files, err := readHCLFiles(ctx, repo)
+	if err != nil {
+		return nil, err
 	}
-	if object, ok := repo.Obj[file]; ok && object.Kind == attegit.Blob {
-		var err error
-		parsed, err = readHCLFile(repo, file)
-		if err != nil {
-			return nil, err
+	if _, ok := files[file]; !ok {
+		files[file] = &hclFile{
+			file:   file,
+			body:   &hclsyntax.Body{},
+			locals: make(map[string]hcl.Expression),
 		}
 	}
-	return &evaluator{
+	evaluator := &evaluator{
 		ctx:       ctx,
 		repo:      repo,
-		files:     hclFiles{file: parsed},
+		files:     files,
 		provider:  provider,
 		functions: make(map[reference.Blob]map[string]function.Function),
 		kindSpecs: targetRegistrySnapshot(),
-	}, nil
+	}
+	return evaluator, nil
+}
+
+func (e *evaluator) initializeDeclarations() error {
+	targets, err := e.declaredTargets()
+	if err != nil {
+		return err
+	}
+	declarations := declarationIndex{
+		byReference: make(map[targetReference]targetDeclaration, len(targets)),
+		byID:        make(map[graph.EntityID]targetDeclaration, len(targets)),
+	}
+	for _, target := range targets {
+		declaration := target
+		declarations.byID[declaration.ID] = declaration
+		if declaration.Name != "" {
+			declarations.byReference[targetReference{
+				file: declaration.File,
+				kind: declaration.Kind,
+				name: declaration.Name,
+			}] = declaration
+		}
+	}
+	e.declarations = declarations
+	return nil
 }
 
 func (e *evaluator) hclFunctions(file reference.Blob) (map[string]function.Function, error) {
@@ -134,8 +160,23 @@ func (e *evaluator) hclFunctions(file reference.Blob) (map[string]function.Funct
 	if err != nil {
 		return nil, err
 	}
+	if err := e.registerInternalFunctions(file, functions); err != nil {
+		return nil, err
+	}
 	e.functions[file] = functions
 	return functions, nil
+}
+
+func (e *evaluator) registerInternalFunctions(file reference.Blob, functions map[string]function.Function) error {
+	target := targetHCLFunction(file, e.declarations)
+	if _, exists := functions["atte::target"]; exists {
+		return fmt.Errorf("HCL function %q is already registered", "atte::target")
+	}
+	functions["atte::target"] = target
+	if _, exists := functions["target"]; !exists {
+		functions["target"] = target
+	}
+	return nil
 }
 
 func (e *evaluator) evalContext(file reference.Blob, scope hclScope) (*hcl.EvalContext, error) {
@@ -219,6 +260,9 @@ func (e *evaluator) declaredTargets(only ...reference.Blob) ([]targetDeclaration
 }
 
 func (e *evaluator) evaluatedTargets(only ...reference.Blob) ([]evaluatedTarget, error) {
+	if err := e.initializeDeclarations(); err != nil {
+		return nil, err
+	}
 	files := e.files.sortedBlobs()
 	if len(only) > 0 {
 		files = only

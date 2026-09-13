@@ -32,6 +32,7 @@ type dependency struct {
 	kind      dependencyKind
 	path      string
 	entity    graph.EntityID
+	target    targetReference
 	traversal hcl.Traversal
 }
 

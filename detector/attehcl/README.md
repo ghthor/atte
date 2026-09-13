@@ -56,7 +56,7 @@ DeclaredTargets              [4. Decode target bodies]
                    v                                v
              [5. Materialize targets]       [5. Build graph index]
              output: map[Kind][]Target       output: declarationIndex
-               - stable target ID             - same-file kind/name lookup
+               - stable target ID             - repository-wide kind/name lookup
                - selector aliases             - target declarations for
                - script/inline values           symbolic traversals
                - graph, execution, and config
@@ -72,20 +72,27 @@ DeclaredTargets              [4. Decode target bodies]
 The declaration-only branch shares parsing and block normalization with full
 evaluation, but intentionally stops before local evaluation, provider function
 loading, target decoding, and projection construction. The graph branch uses
-all decoded targets to build its same-file lookup before resolving symbolic
+all decoded targets to build its declaration lookup before resolving symbolic
 target dependencies.
 
 `DeclaredTargets` returns `graphtarget.ID` values ordered by file path and source
 order without evaluating locals, target attributes, functions, or registered target
 decoders. Use `Targets` or `ConfigFor` when decoded target values are needed; use
-`Graph` for repository paths and symbolic same-file target dependencies.
+`Graph` for repository paths and symbolic target dependencies.
 
 Full evaluation provides the common HCL functions used by HashiCorp configuration
 languages, including collection, encoding, crypto, CIDR, UUID, YAML, and filesystem
 functions. Filesystem functions resolve relative to the tree containing the HCL
 file. Provider functions are merged on top of this base set and must use names
 that do not conflict with a base function. Each provider function is available
-under both its registered name and the `atte::<name>` namespace.
+under both its registered name and the `atte::<name>` namespace. The built-in
+`atte::target(path, "kind.name")` function resolves a named target declaration
+from another `atte.hcl` file. Its path may be repository-root-relative, such as
+`//path1`, or relative to the declaring `atte.hcl` file, such as `../path1`.
+Target declarations are indexed before locals and target bodies are
+evaluated. Cross-file target reference cycles are an intentional, fully supported
+use case: cycles are retained in the graph and pruned when building a dependency
+tree for a target that has already been reached.
 
 ```hcl
 test "service" {

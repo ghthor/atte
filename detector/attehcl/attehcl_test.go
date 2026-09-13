@@ -114,6 +114,101 @@ test {
 	test.EqOp(t, "some/file", decoded.Deps[2].path)
 }
 
+func TestCrossFileTargetDependenciesWithRootRelativePath(t *testing.T) {
+	repo := newHCLFixture(t, map[string]string{
+		"path1/atte.hcl": strings.TrimLeft(`
+	test "go" {
+	  script = "go test"
+	}
+`, "\n"),
+		"path2/atte.hcl": strings.TrimLeft(`
+	locals {
+	  dependency = target("//path1", "test.go")
+	}
+
+	test "py" {
+	  script = "pytest"
+	  depends_on = [local.dependency]
+	}
+`, "\n"),
+	})
+
+	got, err := Graph(t.Context(), repo)
+	must.NoError(t, err)
+	graphtest.MustHaveRelation(t, got, EntityID(TestKind, "path2/atte.hcl", "py"), EntityID(TestKind, "path1/atte.hcl", "go"), DependsOnRelation)
+}
+
+func TestCrossFileTargetDependencyReachesAttegoEntity(t *testing.T) {
+	repo := newHCLFixture(t, map[string]string{
+		"go.mod": `module example.com/root
+
+go 1.24
+`,
+		"path1/p.go": `package p
+`,
+		"path1/p_test.go": `package p_test
+`,
+		"path1/atte.hcl": strings.TrimLeft(`
+	test "go" {
+	  script = "go test"
+	  depends_on = [atte::gopkg_test(".")]
+	}
+`, "\n"),
+		"path2/atte.hcl": strings.TrimLeft(`
+	test "py" {
+	  script = "pytest"
+	  depends_on = [atte::target("//path1", "test.go")]
+	}
+`, "\n"),
+	})
+
+	functions, err := attego.HCLFunctions(t.Context(), repo, reference.Blob("path1/atte.hcl"))
+	must.NoError(t, err)
+	value, err := functions["gopkg_test"].Call([]cty.Value{cty.StringVal(".")})
+	must.NoError(t, err)
+	goTest := graph.EntityID(value.AsString())
+
+	got, err := Graph(t.Context(), repo, WithFunctions(attego.HCLFunctions))
+	must.NoError(t, err)
+	graphtest.MustHaveRelation(t, got, EntityID(TestKind, "path1/atte.hcl", "go"), goTest, DependsOnRelation)
+	graphtest.MustHaveRelation(t, got, EntityID(TestKind, "path2/atte.hcl", "py"), EntityID(TestKind, "path1/atte.hcl", "go"), DependsOnRelation)
+}
+
+func TestCrossFileTargetDependenciesWithRelativePaths(t *testing.T) {
+	repo := newHCLFixture(t, map[string]string{
+		"path1/atte.hcl": strings.TrimLeft(`
+	test "go" {
+	  script = "go test"
+	  depends_on = [target("../path2", "test.py")]
+	}
+`, "\n"),
+		"path2/atte.hcl": strings.TrimLeft(`
+	test "py" {
+	  script = "pytest"
+	  depends_on = [atte::target("../path1", "test.go")]
+	}
+`, "\n"),
+	})
+
+	got, err := Graph(t.Context(), repo)
+	must.NoError(t, err)
+	graphtest.MustHaveRelation(t, got, EntityID(TestKind, "path1/atte.hcl", "go"), EntityID(TestKind, "path2/atte.hcl", "py"), DependsOnRelation)
+	graphtest.MustHaveRelation(t, got, EntityID(TestKind, "path2/atte.hcl", "py"), EntityID(TestKind, "path1/atte.hcl", "go"), DependsOnRelation)
+}
+
+func TestCrossFileTargetDependencyRejectsDanglingTarget(t *testing.T) {
+	repo := newHCLFixture(t, map[string]string{
+		"path1/atte.hcl": `test "go" { script = "go test" }`,
+		"path2/atte.hcl": `test "py" {
+  script = "pytest"
+  depends_on = [atte::target("//path1", "test.missing")]
+}`,
+	})
+
+	_, err := Targets(t.Context(), repo, nil)
+	test.ErrorContains(t, err, "target test.missing in \"path1/atte.hcl\" was not declared")
+}
+
 func TestGraphLabeledAndUnlabeledTests(t *testing.T) {
 	repo := newHCLFixture(t, map[string]string{
 		"atte.hcl": `

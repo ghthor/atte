@@ -280,7 +280,7 @@ DeclaredTargets              [4. Decode target bodies]
                    v                                v
              [5. Materialize targets]       [5. Build graph index]
              output: map[Kind][]Target       output: declarationIndex
-               - common identity and         - same-file target lookup
+               - common identity and         - repository-wide target lookup
                  projections
                    |                                |
                    v                                v
@@ -293,7 +293,7 @@ DeclaredTargets              [4. Decode target bodies]
 registered decoders, or graph projections. `Targets` and `ConfigFor` consume the
 full decoded output and add common target identity, selector, script, execution,
 and configuration data. `Graph` consumes the same decoded output, builds a
-same-file declaration index, and then resolves symbolic target dependencies
+repository-wide declaration index, and then resolves symbolic target dependencies
 while invoking graph projections.
 
 The best remaining refactoring is to make local evaluation deterministic and to reduce construction duplication around evaluators and target phases.

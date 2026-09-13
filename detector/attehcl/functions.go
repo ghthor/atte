@@ -1,6 +1,9 @@
 package attehcl
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/ghthor/atte/reference"
 	"github.com/hashicorp/go-cty-funcs/cidr"
 	"github.com/hashicorp/go-cty-funcs/crypto"
@@ -9,10 +12,60 @@ import (
 	"github.com/hashicorp/go-cty-funcs/uuid"
 	"github.com/hashicorp/hcl/v2/ext/tryfunc"
 	"github.com/hashicorp/hcl/v2/ext/typeexpr"
+	"github.com/hashicorp/hcl/v2/hclsyntax"
 	ctyyaml "github.com/zclconf/go-cty-yaml"
+	"github.com/zclconf/go-cty/cty"
 	"github.com/zclconf/go-cty/cty/function"
 	"github.com/zclconf/go-cty/cty/function/stdlib"
 )
+
+func targetHCLFunction(file reference.Blob, declarations declarationIndex) function.Function {
+	return function.New(&function.Spec{
+		Params: []function.Parameter{
+			{Name: "path", Type: cty.String},
+			{Name: "target", Type: cty.String},
+		},
+		Type: function.StaticReturnType(cty.String),
+		Impl: func(args []cty.Value, _ cty.Type) (cty.Value, error) {
+			targetFile, err := targetFileFromPath(file, args[0].AsString())
+			if err != nil {
+				return cty.NilVal, err
+			}
+			kind, name, err := parseTargetName(args[1].AsString())
+			if err != nil {
+				return cty.NilVal, err
+			}
+			declaration, ok := declarations.byReference[targetReference{
+				file: targetFile,
+				kind: kind,
+				name: name,
+			}]
+			if !ok {
+				return cty.NilVal, fmt.Errorf("target %s.%s in %q was not declared", kind, name, targetFile)
+			}
+			return cty.StringVal(targetReferenceValue(declaration.File, declaration.Kind, declaration.Name)), nil
+		},
+	})
+}
+
+func targetFileFromPath(file reference.Blob, raw string) (reference.Blob, error) {
+	path := raw
+	if !strings.HasSuffix(path, "/") {
+		path += "/"
+	}
+	return reference.ResolveBlobFromTree(file.Tree(), reference.SomePath(path+Filename))
+}
+
+func parseTargetName(raw string) (Kind, string, error) {
+	kind, name, ok := strings.Cut(raw, ".")
+	if !ok || strings.Contains(name, ".") || !hclsyntax.ValidIdentifier(kind) || !hclsyntax.ValidIdentifier(name) {
+		return "", "", fmt.Errorf("target reference %q must be a kind.name identifier", raw)
+	}
+	if isNumericName(name) {
+		return "", "", fmt.Errorf("target reference %q must use a named target", raw)
+	}
+	return Kind(kind), name, nil
+}
 
 // baseHCLFunctions returns the common HCL functions used by HashiCorp
 // configuration languages. Filesystem functions resolve paths from the tree
