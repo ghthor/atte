@@ -88,15 +88,7 @@ func newEvaluator(ctx context.Context, repo *attegit.Repo, provider graphset.Fun
 	if err != nil {
 		return nil, err
 	}
-	evaluator := &evaluator{
-		ctx:       ctx,
-		repo:      repo,
-		files:     files,
-		provider:  provider,
-		functions: make(map[reference.Blob]map[string]function.Function),
-		kindSpecs: targetRegistrySnapshot(),
-	}
-	return evaluator, nil
+	return newEvaluatorWithFiles(ctx, repo, files, provider), nil
 }
 
 func newEvaluatorForFile(ctx context.Context, repo *attegit.Repo, file reference.Blob, provider graphset.FunctionProvider) (*evaluator, error) {
@@ -117,7 +109,11 @@ func newEvaluatorForFile(ctx context.Context, repo *attegit.Repo, file reference
 			locals: make(map[string]hcl.Expression),
 		}
 	}
-	evaluator := &evaluator{
+	return newEvaluatorWithFiles(ctx, repo, files, provider), nil
+}
+
+func newEvaluatorWithFiles(ctx context.Context, repo *attegit.Repo, files hclFiles, provider graphset.FunctionProvider) *evaluator {
+	return &evaluator{
 		ctx:       ctx,
 		repo:      repo,
 		files:     files,
@@ -125,7 +121,26 @@ func newEvaluatorForFile(ctx context.Context, repo *attegit.Repo, file reference
 		functions: make(map[reference.Blob]map[string]function.Function),
 		kindSpecs: targetRegistrySnapshot(),
 	}
-	return evaluator, nil
+}
+
+func (e *evaluator) forEachFile(only []reference.Blob, visit func(reference.Blob, *hclFile) error) error {
+	files := e.files.sortedBlobs()
+	if len(only) > 0 {
+		files = only
+	}
+	for _, file := range files {
+		if err := e.ctx.Err(); err != nil {
+			return err
+		}
+		config, ok := e.files[file]
+		if !ok {
+			continue
+		}
+		if err := visit(file, config); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (e *evaluator) initializeDeclarations() error {
@@ -231,30 +246,23 @@ func targetIDFromDeclaration(declaration targetDeclaration) graphtarget.ID {
 }
 
 func (e *evaluator) declaredTargets(only ...reference.Blob) ([]targetDeclaration, error) {
-	files := e.files.sortedBlobs()
-	if len(only) > 0 {
-		files = only
-	}
 	declarations := make([]targetDeclaration, 0)
 	phase := declarationsPhase{evaluator: e}
-	for _, file := range files {
-		if err := e.ctx.Err(); err != nil {
-			return nil, err
-		}
-		config, ok := e.files[file]
-		if !ok {
-			continue
-		}
+	err := e.forEachFile(only, func(file reference.Blob, config *hclFile) error {
 		normalized, err := phase.normalizeBlocks(config)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		for _, item := range normalized {
 			if err := e.ctx.Err(); err != nil {
-				return nil, err
+				return err
 			}
 			declarations = append(declarations, declarationFromBlock(file, item))
 		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return declarations, nil
 }
@@ -263,25 +271,18 @@ func (e *evaluator) evaluatedTargets(only ...reference.Blob) ([]evaluatedTarget,
 	if err := e.initializeDeclarations(); err != nil {
 		return nil, err
 	}
-	files := e.files.sortedBlobs()
-	if len(only) > 0 {
-		files = only
-	}
 	blocks := make([]evaluatedTarget, 0)
 	phase := targetsPhase{evaluator: e}
-	for _, file := range files {
-		if err := e.ctx.Err(); err != nil {
-			return nil, err
-		}
-		config, ok := e.files[file]
-		if !ok {
-			continue
-		}
+	err := e.forEachFile(only, func(_ reference.Blob, config *hclFile) error {
 		fileBlocks, err := phase.evaluatedTargets(config)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		blocks = append(blocks, fileBlocks...)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return blocks, nil
 }

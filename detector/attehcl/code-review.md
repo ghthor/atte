@@ -25,7 +25,7 @@
 
 The package has a sound pipeline and good recent separation between declaration discovery, target evaluation, and graph assembly. The target capability registry is also a useful extensibility boundary.
 
-The main remaining opportunity is algorithmic simplification, especially deterministic local evaluation. A smaller maintainability opportunity remains in evaluator construction.
+The main remaining opportunity is algorithmic simplification, especially deterministic local evaluation.
 
 ## Findings
 
@@ -72,37 +72,7 @@ As a minimum improvement, sort pending names before each pass.
 
 ---
 
-### 2. Evaluator construction contains avoidable duplication
-
-`newEvaluator` and `newEvaluatorForFile` both construct the same evaluator fields:
-
-```go
-&evaluator{
-    ctx:       ctx,
-    repo:      repo,
-    files:     ...,
-    provider:  provider,
-    functions: make(map[reference.Blob]map[string]function.Function),
-    kindSpecs: targetRegistrySnapshot(),
-}
-```
-
-Factor this into a helper such as:
-
-```go
-func newEvaluatorWithFiles(
-    ctx context.Context,
-    repo *attegit.Repo,
-    files hclFiles,
-    provider graphset.FunctionProvider,
-) *evaluator
-```
-
-There is similar repetition in `declaredTargets` and `evaluatedTargets`, which both select files, check cancellation, retrieve the file, and iterate. A shared file-selection helper would reduce this duplication.
-
----
-
-### 3. `ConfigFor` contains redundant filtering
+### 2. `ConfigFor` contains redundant filtering
 
 `ConfigFor` creates an evaluator containing exactly one file and evaluates only that file:
 
@@ -126,7 +96,7 @@ Once the single-file invariant is retained, this can return `allTargets` directl
 
 ---
 
-### 4. Dead or low-value abstractions are accumulating
+### 3. Dead or low-value abstractions are accumulating
 
 A few constructs currently add more indirection than value:
 
@@ -154,7 +124,7 @@ These are not urgent, but removing them would make the evaluator easier to follo
 
 ---
 
-### 5. Registry snapshots are more expensive than necessary
+### 4. Registry snapshots are more expensive than necessary
 
 `targetRegistrySnapshot` copies every registered schema for every evaluator. That is reasonable for evaluator snapshot isolation, but `DecodeEntityID` also calls it for every decoded HCL entity ID:
 
@@ -182,7 +152,7 @@ Use a complete snapshot only when creating an evaluator. Entity ID validation do
 
 ---
 
-### 6. Diagnostic context rereads files for every diagnostic
+### 5. Diagnostic context rereads files for every diagnostic
 
 `hclDiagnosticContext` calls `repo.Show(file)` and splits the complete file contents for each diagnostic.
 
@@ -231,12 +201,10 @@ This would also avoid repeatedly loading the same blob.
 3. Remove redundant `ConfigFor` filtering.
 4. Add regression tests for the behavioral changes.
 
-### Phase 2: Reduce duplicated construction
+### Phase 2: Remaining maintainability cleanup
 
-1. Factor evaluator construction.
-2. Factor file-selection logic.
-3. Add a registry lookup helper.
-4. Centralize target identity construction.
+1. Add a registry lookup helper.
+2. Centralize target identity construction.
 
 ### Phase 3: Improve algorithmic complexity
 
@@ -296,6 +264,6 @@ and configuration data. `Graph` consumes the same decoded output, builds a
 repository-wide declaration index, and then resolves symbolic target dependencies
 while invoking graph projections.
 
-The best remaining refactoring is to make local evaluation deterministic and to reduce construction duplication around evaluators and target phases.
+The best remaining refactoring is to make local evaluation deterministic.
 
 A large rewrite of the capability registry is not recommended. The registry and projection interfaces are relatively clean and appear to be the intended extensibility boundary.
