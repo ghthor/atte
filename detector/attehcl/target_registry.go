@@ -260,8 +260,8 @@ func targetTraversalFromValue(value string) (hcl.Traversal, bool) {
 	}, true
 }
 
-func decodeTargetDependencies(attribute *hcl.Attribute, ctx *hcl.EvalContext) ([]dependency, error) {
-	value, diagnostics := attribute.Expr.Value(dependencyEvalContext(ctx))
+func decodeTargetDependencies(attribute *hcl.Attribute, dependencyCtx *hcl.EvalContext) ([]dependency, error) {
+	value, diagnostics := attribute.Expr.Value(dependencyCtx)
 	if diagnostics.HasErrors() {
 		return nil, targetDiagnosticsError{diagnostics: diagnostics}
 	}
@@ -408,12 +408,16 @@ func decodeScriptTarget(content *hcl.BodyContent, ctx *hcl.EvalContext) (any, er
 		}
 	}
 
+	var dependencyContext *hcl.EvalContext
 	for _, name := range []string{"depends_on", "triggered_by"} {
 		attribute, ok := content.Attributes[name]
 		if !ok {
 			continue
 		}
-		dependencies, err := decodeTargetDependencies(attribute, ctx)
+		if dependencyContext == nil {
+			dependencyContext = dependencyEvalContext(ctx)
+		}
+		dependencies, err := decodeTargetDependencies(attribute, dependencyContext)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}

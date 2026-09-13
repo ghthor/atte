@@ -27,7 +27,7 @@
 
 The package has a sound pipeline and good separation between declaration discovery, local evaluation, target decoding, and graph projection. The target capability registry is a useful extensibility boundary, and the recent evaluator-construction cleanup has removed the earlier duplication there.
 
-The main remaining opportunities are algorithmic: local evaluation repeatedly retries expressions, target evaluation normalizes declarations more than once, and dependency decoding rebuilds a complete transformed evaluation context for every dependency attribute. Several smaller refactorings would also centralize target identity construction and remove unused state.
+The main remaining opportunity is algorithmic: local evaluation repeatedly retries expressions. Several smaller refactorings would also centralize target identity construction and remove unused state.
 
 ## Findings
 
@@ -57,19 +57,7 @@ This reduces the traversal to approximately O(L + R), where R is the number of l
 
 ---
 
-### 2. Dependency decoding rebuilds the complete evaluation context per attribute
-
-decodeTargetDependencies calls dependencyEvalContext(ctx) for each depends_on or triggered_by attribute. That helper recursively copies every variable in the context, including all locals and all named targets, and copies the function map before wrapping the path functions. It does this even when the expression references only one dependency.
-
-If A dependency attributes are decoded from a context of size V, this adds roughly O(A × V) copying and traversal, in addition to evaluating and decoding the dependency values. Large local objects or many named targets make the hidden cost more noticeable.
-
-#### Recommendation
-
-Construct the transformed dependency context once per target evaluation (or once per file) and reuse it for all dependency attributes. A cleaner design is to keep ordinary expression evaluation and dependency-value normalization as separate contexts in the target phase, rather than recreating the latter inside decodeTargetDependencies.
-
----
-
-### 3. Target identity construction is duplicated across the pipeline
+### 2. Target identity construction is duplicated across the pipeline
 
 Identity and selector data are assembled independently in several places:
 
@@ -85,7 +73,7 @@ Introduce one internal identity helper that accepts file, kind, name, and index 
 
 ---
 
-### 4. Dead or low-value abstractions remain
+### 3. Dead or low-value abstractions remain
 
 A few constructs add indirection without currently serving a caller.
 
@@ -101,7 +89,7 @@ These are low-risk cleanups, but removing them makes the evaluator's data flow e
 
 ---
 
-### 5. Diagnostic context rereads and resplits the source for every diagnostic
+### 4. Diagnostic context rereads and resplits the source for every diagnostic
 
 hclDiagnosticContext calls repo.Show(file) and splits the complete file contents for each diagnostic. For D diagnostics and a file of size B, this can approach O(D × B) work and performs repeated repository reads.
 
@@ -113,7 +101,7 @@ Retain source contents or precomputed lines in hclFile and pass that data to dia
 
 ---
 
-### 6. Graph construction does not canonicalize duplicate relationships
+### 5. Graph construction does not canonicalize duplicate relationships
 
 graphScriptTarget emits one relationship for every decoded dependency, and graphFor appends all projected relationships before calling graph.New. graph.New sorts relationships but does not remove equivalent edges. Consequently, a dependency list such as depends_on = [path("x"), path("x")] produces duplicate depends-on relationships. Multiple projectors can produce the same issue.
 
@@ -125,7 +113,7 @@ Define whether relationships are a set at the graph.New boundary and enforce tha
 
 ---
 
-### 7. Error extraction can use the Go-version-supported generic helper
+### 6. Error extraction can use the Go-version-supported generic helper
 
 The module targets Go 1.26, and the language server flags the errors.As(err, &diagnostic) form in evaluator.go. errors.AsType[targetDiagnosticsError](err) is shorter and avoids a separately declared mutable variable.
 
@@ -140,7 +128,7 @@ This is a small readability cleanup rather than a performance issue.
 | HCL file discovery and parsing | O(repository objects + parsed bytes) | Only atte.hcl blobs are parsed |
 | Declaration normalization | O(files + blocks) once per evaluator | Normalized blocks are retained for later phases |
 | Local evaluation | O(L²) worst case | Map retries and repeated context construction; target is O(L + references) |
-| Dependency decoding | O(A × V + dependency data) | A dependency attributes repeatedly transform a context of size V |
+| Dependency decoding | O(V + A × dependency data) | Dependency context transformation is shared per target |
 | Target decoding | O(blocks + expression evaluation) | Provider function cost is external |
 | Graph assembly | O(targets + dependencies + projected entities) | Duplicate relationships can increase output and consumer work |
 | Registry snapshots | O(registered kinds × schema size) | One complete snapshot per evaluator is intentional |
@@ -148,10 +136,9 @@ This is a small readability cleanup rather than a performance issue.
 
 ## Recommended implementation order
 
-### Phase 1: Reduce repeated work
+### Phase 1: Improve algorithmic complexity
 
-1. Reuse one dependency evaluation context per target or file.
-2. Replace retry-based local evaluation with dependency-ordered evaluation if configurations can contain many locals.
+1. Replace retry-based local evaluation with dependency-ordered evaluation if configurations can contain many locals.
 
 ### Phase 2: Correctness and maintainability
 
@@ -205,4 +192,4 @@ The existing pipeline should be retained. Its important property is that each ph
 
 DeclaredTargets does not require local values, provider functions, registered decoders, or graph projections. Targets and ConfigFor consume decoded output and add common target identity, selector, script, execution, and configuration data. Graph consumes the same declaration index and decoded output while invoking graph projections.
 
-The best remaining performance improvement is to stop rebuilding dependency contexts. The best algorithmic improvement is deterministic, dependency-ordered local evaluation. A large rewrite of the capability registry is not recommended; its snapshot and projection interfaces are relatively clean and appear to be the intended extensibility boundary.
+The best algorithmic improvement is deterministic, dependency-ordered local evaluation. A large rewrite of the capability registry is not recommended; its snapshot and projection interfaces are relatively clean and appear to be the intended extensibility boundary.

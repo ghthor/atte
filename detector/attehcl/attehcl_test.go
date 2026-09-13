@@ -96,6 +96,7 @@ test {
     gopkg("some/other/path"),
     atte::path("some/file"),
   ]
+  triggered_by = [atte::path("some/trigger")]
 }
 `, "\n"),
 		"test.sh": "#!/bin/sh\n",
@@ -105,13 +106,15 @@ test {
 	must.NoError(t, err)
 	decoded := grouped[KindTest][0].Decoded.(decodedTarget)
 	test.EqOp(t, DecodingPathPrefix+"test.sh", decoded.Script)
-	must.Len(t, 3, decoded.Deps)
+	must.Len(t, 4, decoded.Deps)
 	test.EqOp(t, dependencyPath, decoded.Deps[0].kind)
 	test.EqOp(t, "some/path", decoded.Deps[0].path)
 	test.EqOp(t, dependencyPath, decoded.Deps[1].kind)
 	test.EqOp(t, "some/other/path", decoded.Deps[1].path)
 	test.EqOp(t, dependencyPath, decoded.Deps[2].kind)
 	test.EqOp(t, "some/file", decoded.Deps[2].path)
+	test.EqOp(t, dependencyPath, decoded.Deps[3].kind)
+	test.EqOp(t, "some/trigger", decoded.Deps[3].path)
 }
 
 func TestCrossFileTargetDependenciesWithRootRelativePath(t *testing.T) {
