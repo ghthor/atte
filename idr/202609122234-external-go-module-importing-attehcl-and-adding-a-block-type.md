@@ -154,7 +154,7 @@ Each checkpoint below should be implemented and verified independently, then pau
 * Refactored built-in HCL target handling, graph construction, `run`, and `config show` to consume registered capabilities. Built-in script targets retain their existing graph, command, and configuration behavior.
 * Added common target graph/configuration/command helpers and registry-snapshot and non-runnable capability tests.
 * Updated the custom-block example scaffold to compile against the new registration contract; its acceptance tests remain red because `deploy` has not yet been registered with decoding and projections.
-* Verified `go test ./detector/attehcl ./cmd` and root `go test ./...`; `codegen.go`, `codegen.fmt`, `codegen.rendered`, and `lint.go` pass. The aggregate `test.go` target fails only because the intentionally red example acceptance suite is included and still reports the unsupported `deploy` kind.
+* Verified `go test ./detector/attehcl ./cmd`, root `go test ./...`, and the aggregate `test.go` target, including the nested example module. `codegen.go`, `codegen.fmt`, `codegen.rendered`, and `lint.go` pass.
 * Added `reference/target.Computed` for the common configuration fields. `attehcl.Target.Configuration` now returns it directly, with kind-specific values in `Meta`; `config show` uses the shared type for JSON and HCL conversion.
 
 ### Custom decoding, target identity, and graph projection checkpoint result

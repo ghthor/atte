@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -112,9 +113,20 @@ func TestDeployConfigShow(t *testing.T) {
 	stdout, stderr, err := executeAcceptanceCommand(t, repository, "config", "show")
 	test.NoError(t, err)
 	test.EqOp(t, "", stderr)
-	test.EqOp(t, 1, strings.Count(stdout, "\"kind\""))
-	test.True(t, strings.Contains(stdout, "deploy"), test.Sprintf("configuration should contain the deploy kind: %q", stdout))
-	test.True(t, strings.Contains(stdout, "release"), test.Sprintf("configuration should contain the deploy name: %q", stdout))
-	test.True(t, strings.Contains(stdout, "env"), test.Sprintf("configuration should contain the env attribute: %q", stdout))
-	test.True(t, strings.Contains(stdout, "dev"), test.Sprintf("configuration should preserve the env value: %q", stdout))
+
+	var output struct {
+		Target map[string]struct {
+			Kind string            `json:"kind"`
+			File string            `json:"file"`
+			Name string            `json:"name"`
+			Meta map[string]string `json:"meta"`
+		} `json:"target"`
+	}
+	must.NoError(t, json.Unmarshal([]byte(stdout), &output))
+	test.EqOp(t, 1, len(output.Target))
+	target := output.Target["//atte.hcl#deploy.release"]
+	test.EqOp(t, "attehcl:deploy", target.Kind)
+	test.EqOp(t, "atte.hcl", target.File)
+	test.EqOp(t, "release", target.Name)
+	test.EqOp(t, "dev", target.Meta["env"])
 }
