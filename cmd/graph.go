@@ -126,7 +126,7 @@ func printGraph(ctx context.Context, w io.Writer, repo *attegit.Repo, relativePa
 	}
 	detectorGraph, err := registry.Graph(ctx, repo, graphset.WithAttachToTree())
 	if err != nil {
-		return fmt.Errorf("build Go graph: %w", err)
+		return fmt.Errorf("build detector graph: %w", err)
 	}
 	if detectorGraph != nil {
 		if err := gitGraph.Absorb(detectorGraph); err != nil {

@@ -202,7 +202,7 @@ func assertGraphErrorGolden(t *testing.T, name, got string) {
 	test.EqOp(t, string(want), got)
 }
 
-func TestPrintGraphReportsGoParseError(t *testing.T) {
+func TestPrintGraphReportsDetectorParseError(t *testing.T) {
 	repo := repoWithFiles(t, map[string]string{
 		"go.mod": `module example.com/root
 
@@ -214,7 +214,7 @@ import "unterminated
 	})
 	var got bytes.Buffer
 	err := printGraph(t.Context(), &got, repo, "")
-	test.ErrorContains(t, err, "build Go graph")
+	test.ErrorContains(t, err, "build detector graph")
 }
 
 func TestPrintGraphLocalImports(t *testing.T) {
