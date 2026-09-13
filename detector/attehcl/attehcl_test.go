@@ -18,6 +18,7 @@ import (
 	"github.com/hashicorp/hcl/v2"
 	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
+	"github.com/zclconf/go-cty/cty"
 	"github.com/zclconf/go-cty/cty/function"
 )
 
@@ -66,6 +67,51 @@ test { script = local.script }
 	grouped, err := Targets(t.Context(), repo, nil)
 	must.NoError(t, err)
 	test.EqOp(t, "ECHO", grouped[KindTest][0].Inline)
+}
+
+func TestProviderHCLFunctionsHaveAtteNamespaceAliases(t *testing.T) {
+	provider := func(ctx context.Context, repo *attegit.Repo, file reference.Blob) (map[string]function.Function, error) {
+		path, err := attegit.PathHCLFunction(ctx, repo, file)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]function.Function{
+			"path": path,
+			"gopkg": function.New(&function.Spec{
+				Params: []function.Parameter{{Name: "path", Type: cty.String}},
+				Type:   function.StaticReturnType(cty.String),
+				Impl: func(args []cty.Value, _ cty.Type) (cty.Value, error) {
+					return args[0], nil
+				},
+			}),
+		}, nil
+	}
+
+	repo := newHCLFixture(t, map[string]string{
+		"atte.hcl": strings.TrimLeft(`
+test {
+  script = atte::path("./test.sh")
+  depends_on = [
+    atte::gopkg("some/path"),
+    gopkg("some/other/path"),
+    atte::path("some/file"),
+  ]
+}
+`, "\n"),
+		"test.sh": "#!/bin/sh\n",
+	})
+
+	grouped, err := Targets(t.Context(), repo, provider)
+	must.NoError(t, err)
+	decoded := grouped[KindTest][0].Decoded.(decodedTarget)
+	test.EqOp(t, DecodingPathPrefix+"test.sh", decoded.Script)
+	must.Len(t, 3, decoded.Deps)
+	test.EqOp(t, dependencyPath, decoded.Deps[0].kind)
+	test.EqOp(t, "some/path", decoded.Deps[0].path)
+	test.EqOp(t, dependencyPath, decoded.Deps[1].kind)
+	test.EqOp(t, "some/other/path", decoded.Deps[1].path)
+	test.EqOp(t, dependencyPath, decoded.Deps[2].kind)
+	test.EqOp(t, "some/file", decoded.Deps[2].path)
 }
 
 func TestGraphLabeledAndUnlabeledTests(t *testing.T) {

@@ -84,7 +84,8 @@ Full evaluation provides the common HCL functions used by HashiCorp configuratio
 languages, including collection, encoding, crypto, CIDR, UUID, YAML, and filesystem
 functions. Filesystem functions resolve relative to the tree containing the HCL
 file. Provider functions are merged on top of this base set and must use names
-that do not conflict with a base function.
+that do not conflict with a base function. Each provider function is available
+under both its registered name and the `atte::<name>` namespace.
 
 ```hcl
 test "service" {

@@ -236,8 +236,10 @@ func dependencyEvalContext(ctx *hcl.EvalContext) *hcl.EvalContext {
 	}
 	functions := make(map[string]function.Function, len(ctx.Functions))
 	maps.Copy(functions, ctx.Functions)
-	if path, ok := functions["path"]; ok {
-		functions["path"] = dependencyPathFunction(path)
+	for _, name := range []string{"path", "atte::path"} {
+		if path, ok := functions[name]; ok {
+			functions[name] = dependencyPathFunction(path)
+		}
 	}
 	return &hcl.EvalContext{Variables: variables, Functions: functions}
 }

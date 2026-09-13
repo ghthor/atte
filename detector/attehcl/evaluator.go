@@ -393,6 +393,11 @@ func mergedHCLFunctions(
 			return nil, fmt.Errorf("HCL function %q is already registered", name)
 		}
 		functions[name] = fn
+		namespaced := "atte::" + name
+		if _, exists := functions[namespaced]; exists {
+			return nil, fmt.Errorf("HCL function %q is already registered", namespaced)
+		}
+		functions[namespaced] = fn
 	}
 	return functions, nil
 }
