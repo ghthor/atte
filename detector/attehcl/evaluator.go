@@ -216,17 +216,6 @@ func declarationFromBlock(file reference.Blob, item normalizedBlock) targetDecla
 	}
 }
 
-func declarationFromEvaluated(target evaluatedTarget) targetDeclaration {
-	return targetDeclaration{
-		ID:     EntityID(Namespace+":"+string(target.Kind), target.File, displayName(target.Name, target.Index)),
-		Kind:   target.Kind,
-		File:   target.File,
-		Name:   target.Name,
-		Index:  target.Index,
-		Source: target.Source,
-	}
-}
-
 func targetIDFromDeclaration(declaration targetDeclaration) graphtarget.ID {
 	display := displayName(declaration.Name, declaration.Index)
 	return graphtarget.ID{
@@ -253,6 +242,7 @@ func (e *evaluator) declaredTargets(only ...reference.Blob) ([]targetDeclaration
 		if err != nil {
 			return err
 		}
+		config.normalized = normalized
 		for _, item := range normalized {
 			if err := e.ctx.Err(); err != nil {
 				return err
@@ -288,10 +278,7 @@ func (e *evaluator) evaluatedTargets(only ...reference.Blob) ([]evaluatedTarget,
 }
 
 func (p targetsPhase) evaluatedTargets(file *hclFile) ([]evaluatedTarget, error) {
-	normalized, err := declarationsPhase(p).normalizeBlocks(file)
-	if err != nil {
-		return nil, err
-	}
+	normalized := file.normalized
 	scope, err := localsPhase(p).scopeFor(file, normalized)
 	if err != nil {
 		return nil, err

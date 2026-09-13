@@ -15,9 +15,10 @@ import (
 )
 
 type hclFile struct {
-	file   reference.Blob
-	body   *hclsyntax.Body
-	locals map[string]hcl.Expression
+	file       reference.Blob
+	body       *hclsyntax.Body
+	locals     map[string]hcl.Expression
+	normalized []normalizedBlock
 }
 
 type hclFiles map[reference.Blob]*hclFile

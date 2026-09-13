@@ -133,17 +133,7 @@ func graphFor(ctx context.Context, repo *attegit.Repo, options graphset.Options)
 	entities := make([]graph.Entity, 0)
 	seenEntities := make(map[graph.EntityID]struct{})
 	relations := make([]graph.Relationship, 0)
-	declarations := declarationIndex{
-		byReference: make(map[targetReference]targetDeclaration, len(blocks)),
-		byID:        make(map[graph.EntityID]targetDeclaration, len(blocks)),
-	}
-	for i := range blocks {
-		declaration := declarationFromEvaluated(blocks[i])
-		declarations.byID[declaration.ID] = declaration
-		if declaration.Name != "" {
-			declarations.byReference[targetReference{file: declaration.File, kind: declaration.Kind, name: declaration.Name}] = declaration
-		}
-	}
+	declarations := evaluator.declarations
 	addEntity := func(e graph.Entity) {
 		if _, exists := seenEntities[e.ID]; exists {
 			return

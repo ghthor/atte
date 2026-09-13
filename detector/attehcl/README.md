@@ -71,8 +71,9 @@ DeclaredTargets              [4. Decode target bodies]
 
 The declaration-only branch shares parsing and block normalization with full
 evaluation, but intentionally stops before local evaluation, provider function
-loading, target decoding, and projection construction. The graph branch uses
-all decoded targets to build its declaration lookup before resolving symbolic
+loading, target decoding, and projection construction. Full evaluation retains
+the normalized blocks and declaration lookup for the later target and graph
+phases. The graph branch reuses that declaration lookup when resolving symbolic
 target dependencies.
 
 `DeclaredTargets` returns `graphtarget.ID` values ordered by file path and source

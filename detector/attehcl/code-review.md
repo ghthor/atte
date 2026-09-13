@@ -69,19 +69,7 @@ Construct the transformed dependency context once per target evaluation (or once
 
 ---
 
-### 3. Target blocks are normalized more than once during evaluation
-
-evaluatedTargets first calls initializeDeclarations, which calls declaredTargets and normalizes every target block to build e.declarations. The target phase then calls normalizeBlocks again before decoding each file. A full Targets or Graph evaluation therefore scans and allocates the normalized representation twice. ConfigFor still needs declarations from other files for cross-file target() references, but it also repeats normalization for the selected file.
-
-graphFor additionally rebuilds a second declarationIndex from the evaluated blocks even though initializeDeclarations has already populated e.declarations with the same identities.
-
-#### Recommendation
-
-Have the declaration phase retain or return normalized blocks along with declarations, and let the target phase consume that representation. Reuse e.declarations in graphFor instead of rebuilding it. This removes an O(files + blocks) pass and avoids duplicate maps and identity objects without changing the phase boundaries.
-
----
-
-### 4. Target identity construction is duplicated across the pipeline
+### 3. Target identity construction is duplicated across the pipeline
 
 Identity and selector data are assembled independently in several places:
 
@@ -97,7 +85,7 @@ Introduce one internal identity helper that accepts file, kind, name, and index 
 
 ---
 
-### 5. Dead or low-value abstractions remain
+### 4. Dead or low-value abstractions remain
 
 A few constructs add indirection without currently serving a caller.
 
@@ -113,7 +101,7 @@ These are low-risk cleanups, but removing them makes the evaluator's data flow e
 
 ---
 
-### 6. Diagnostic context rereads and resplits the source for every diagnostic
+### 5. Diagnostic context rereads and resplits the source for every diagnostic
 
 hclDiagnosticContext calls repo.Show(file) and splits the complete file contents for each diagnostic. For D diagnostics and a file of size B, this can approach O(D × B) work and performs repeated repository reads.
 
@@ -125,7 +113,7 @@ Retain source contents or precomputed lines in hclFile and pass that data to dia
 
 ---
 
-### 7. Graph construction does not canonicalize duplicate relationships
+### 6. Graph construction does not canonicalize duplicate relationships
 
 graphScriptTarget emits one relationship for every decoded dependency, and graphFor appends all projected relationships before calling graph.New. graph.New sorts relationships but does not remove equivalent edges. Consequently, a dependency list such as depends_on = [path("x"), path("x")] produces duplicate depends-on relationships. Multiple projectors can produce the same issue.
 
@@ -137,7 +125,7 @@ Define whether relationships are a set at the graph.New boundary and enforce tha
 
 ---
 
-### 8. Error extraction can use the Go-version-supported generic helper
+### 7. Error extraction can use the Go-version-supported generic helper
 
 The module targets Go 1.26, and the language server flags the errors.As(err, &diagnostic) form in evaluator.go. errors.AsType[targetDiagnosticsError](err) is shorter and avoids a separately declared mutable variable.
 
@@ -150,7 +138,7 @@ This is a small readability cleanup rather than a performance issue.
 | Area | Approximate complexity | Notes |
 |---|---:|---|
 | HCL file discovery and parsing | O(repository objects + parsed bytes) | Only atte.hcl blobs are parsed |
-| Declaration normalization | O(files + blocks) per pass | The current full evaluation performs the pass twice |
+| Declaration normalization | O(files + blocks) once per evaluator | Normalized blocks are retained for later phases |
 | Local evaluation | O(L²) worst case | Map retries and repeated context construction; target is O(L + references) |
 | Dependency decoding | O(A × V + dependency data) | A dependency attributes repeatedly transform a context of size V |
 | Target decoding | O(blocks + expression evaluation) | Provider function cost is external |
@@ -163,8 +151,7 @@ This is a small readability cleanup rather than a performance issue.
 ### Phase 1: Reduce repeated work
 
 1. Reuse one dependency evaluation context per target or file.
-2. Retain normalized blocks from declaration discovery and reuse e.declarations in graph construction.
-3. Replace retry-based local evaluation with dependency-ordered evaluation if configurations can contain many locals.
+2. Replace retry-based local evaluation with dependency-ordered evaluation if configurations can contain many locals.
 
 ### Phase 2: Correctness and maintainability
 
@@ -218,4 +205,4 @@ The existing pipeline should be retained. Its important property is that each ph
 
 DeclaredTargets does not require local values, provider functions, registered decoders, or graph projections. Targets and ConfigFor consume decoded output and add common target identity, selector, script, execution, and configuration data. Graph consumes the same declaration index and decoded output while invoking graph projections.
 
-The best remaining performance improvements are to stop rebuilding dependency contexts and normalized declarations. The best algorithmic improvement is deterministic, dependency-ordered local evaluation. A large rewrite of the capability registry is not recommended; its snapshot and projection interfaces are relatively clean and appear to be the intended extensibility boundary.
+The best remaining performance improvement is to stop rebuilding dependency contexts. The best algorithmic improvement is deterministic, dependency-ordered local evaluation. A large rewrite of the capability registry is not recommended; its snapshot and projection interfaces are relatively clean and appear to be the intended extensibility boundary.
