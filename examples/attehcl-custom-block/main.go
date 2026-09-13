@@ -110,8 +110,8 @@ func execute() error {
 	defer cleanup()
 
 	return cmd.ExecuteWithOptions(ctx, os.Args[1:], cmd.ExecuteOptions{
-		Repository:       repository,
-		WorkingDirectory: directory,
+		Repository:     repository,
+		RepositoryRoot: directory,
 	})
 }
 

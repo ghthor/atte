@@ -46,10 +46,10 @@ func executeAcceptanceCommand(t *testing.T, repository acceptanceRepository, arg
 	var out bytes.Buffer
 	var errOut bytes.Buffer
 	err = cmd.ExecuteWithOptions(t.Context(), args, cmd.ExecuteOptions{
-		Repository:       repository.repo,
-		WorkingDirectory: repository.dir,
-		Out:              &out,
-		Err:              &errOut,
+		Repository:     repository.repo,
+		RepositoryRoot: repository.dir,
+		Out:            &out,
+		Err:            &errOut,
 	})
 	return out.String(), errOut.String(), err
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/spf13/cobra"
@@ -35,6 +36,9 @@ func ExecuteContext(ctx context.Context) error {
 type ExecuteOptions struct {
 	// Repository overrides repository discovery for this command execution.
 	Repository *attegit.Repo
+	// RepositoryRoot is the filesystem path to the injected repository root.
+	// It is required when Repository is set.
+	RepositoryRoot string
 	// WorkingDirectory is the repository-relative command working directory.
 	WorkingDirectory string
 	// In, Out, and Err override the Cobra command streams.
@@ -56,19 +60,11 @@ type executionContext struct {
 // It is the embeddable command entry point used by hosts and acceptance tests.
 func ExecuteWithOptions(ctx context.Context, args []string, options ExecuteOptions) error {
 	if options.Repository != nil {
-		workingDirectory := options.WorkingDirectory
-		if workingDirectory == "" {
-			var err error
-			workingDirectory, err = os.Getwd()
-			if err != nil {
-				return fmt.Errorf("get working directory: %w", err)
-			}
+		execution, err := executionContextForOptions(options)
+		if err != nil {
+			return err
 		}
-		ctx = context.WithValue(ctx, executionContextKey{}, executionContext{
-			repository:       options.Repository,
-			root:             workingDirectory,
-			workingDirectory: workingDirectory,
-		})
+		ctx = context.WithValue(ctx, executionContextKey{}, execution)
 	}
 
 	rootCmd.SetArgs(args)
@@ -88,6 +84,36 @@ func ExecuteWithOptions(ctx context.Context, args []string, options ExecuteOptio
 		rootCmd.SetErr(options.Err)
 	}
 	return rootCmd.ExecuteContext(ctx)
+}
+
+func executionContextForOptions(options ExecuteOptions) (executionContext, error) {
+	if options.RepositoryRoot == "" {
+		return executionContext{}, fmt.Errorf("repository root is required when a repository is injected")
+	}
+	if filepath.IsAbs(options.WorkingDirectory) {
+		return executionContext{}, fmt.Errorf("working directory %q must be repository-relative", options.WorkingDirectory)
+	}
+	root, err := filepath.Abs(options.RepositoryRoot)
+	if err != nil {
+		return executionContext{}, fmt.Errorf("resolve repository root: %w", err)
+	}
+	workingDirectory := root
+	if options.WorkingDirectory != "" {
+		workingDirectory = filepath.Join(root, filepath.FromSlash(options.WorkingDirectory))
+	}
+	relative, err := filepath.Rel(root, workingDirectory)
+	if err != nil || relative == ".." || filepath.IsAbs(relative) || len(relative) > 3 && relative[:3] == ".."+string(filepath.Separator) {
+		return executionContext{}, fmt.Errorf("resolve repository-relative working directory %q", options.WorkingDirectory)
+	}
+	if relative == "." {
+		relative = ""
+	}
+	return executionContext{
+		repository:       options.Repository,
+		root:             root,
+		workingDirectory: workingDirectory,
+		relative:         filepath.ToSlash(relative),
+	}, nil
 }
 
 func commandWorkingDirectory(ctx context.Context) (string, error) {
