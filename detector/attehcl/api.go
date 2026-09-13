@@ -103,15 +103,7 @@ func configForWithProvider(ctx context.Context, repo *attegit.Repo, relativePath
 	if err != nil {
 		return Config{}, err
 	}
-	targets := make(map[Kind][]Target, len(allTargets))
-	for kind, kindTargets := range allTargets {
-		for _, target := range kindTargets {
-			if target.File.Tree() == tree {
-				targets[kind] = append(targets[kind], target)
-			}
-		}
-	}
-	return Config{Targets: targets}, nil
+	return Config{Targets: allTargets}, nil
 }
 
 // WithFunctions adds provider-supplied HCL functions.

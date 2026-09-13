@@ -707,6 +707,20 @@ func TestTargetEvaluationProviderIsFileLocal(t *testing.T) {
 	test.EqOp(t, reference.Blob("child/atte.hcl"), calls[0])
 }
 
+func TestConfigForReturnsOnlyRequestedFile(t *testing.T) {
+	repo := newHCLFixture(t, map[string]string{
+		"atte.hcl":         `test "root" { script = "root" }`,
+		"child/atte.hcl":   `test "child" { script = "child" }`,
+		"sibling/atte.hcl": `test "sibling" { script = "sibling" }`,
+	})
+	config, err := ConfigFor(t.Context(), repo, "child", nil)
+	must.NoError(t, err)
+	targets := SortedTargets(config.Targets)
+	test.Len(t, 1, targets)
+	test.EqOp(t, reference.Blob("child/atte.hcl"), targets[0].File)
+	test.EqOp(t, "child", targets[0].Name)
+}
+
 func TestEntityIDRoundTrip(t *testing.T) {
 	for _, kind := range []string{TestKind, CodegenKind, LintKind} {
 		t.Run(kind, func(t *testing.T) {

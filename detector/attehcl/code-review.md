@@ -72,59 +72,23 @@ As a minimum improvement, sort pending names before each pass.
 
 ---
 
-### 2. `ConfigFor` contains redundant filtering
+### 2. Dead or low-value abstractions are accumulating
 
-`ConfigFor` creates an evaluator containing exactly one file and evaluates only that file:
-
-```go
-blocks, err := evaluator.evaluatedTargets(currentBlob)
-```
-
-It then filters the resulting targets by tree. Since the evaluator can only contain `currentBlob`, this filtering is redundant:
-
-```go
-for kind, kindTargets := range allTargets {
-    for _, target := range kindTargets {
-        if target.File.Tree() == tree {
-            targets[kind] = append(targets[kind], target)
-        }
-    }
-}
-```
-
-Once the single-file invariant is retained, this can return `allTargets` directly.
-
----
-
-### 3. Dead or low-value abstractions are accumulating
-
-A few constructs currently add more indirection than value:
+A couple of constructs currently add more indirection than value:
 
 #### `declarationIndex.byID`
 
-It is populated in `graphFor` but never read. Remove it or use it for entity-reference validation.
+It is populated in both `initializeDeclarations` and `graphFor`, but has no readers. Target resolution currently uses `byReference` instead. Remove `byID` and its population unless entity-ID lookup becomes necessary.
 
 #### `evaluateDeclaration`
 
 This is a one-line wrapper around `expression.Value(context)` and is only called once. It can be removed unless it is intended as a future abstraction point.
 
-#### `hclScope`
-
-It currently contains only one field:
-
-```go
-type hclScope struct {
-    local cty.Value
-}
-```
-
-The scope is immediately converted into an `hcl.EvalContext`. It could be replaced with a direct `cty.Value` unless more namespaces are expected soon.
-
 These are not urgent, but removing them would make the evaluator easier to follow.
 
 ---
 
-### 4. Registry snapshots are more expensive than necessary
+### 3. Registry snapshots are more expensive than necessary
 
 `targetRegistrySnapshot` copies every registered schema for every evaluator. That is reasonable for evaluator snapshot isolation, but `DecodeEntityID` also calls it for every decoded HCL entity ID:
 
@@ -152,7 +116,7 @@ Use a complete snapshot only when creating an evaluator. Entity ID validation do
 
 ---
 
-### 5. Diagnostic context rereads files for every diagnostic
+### 4. Diagnostic context rereads files for every diagnostic
 
 `hclDiagnosticContext` calls `repo.Show(file)` and splits the complete file contents for each diagnostic.
 
@@ -198,8 +162,7 @@ This would also avoid repeatedly loading the same blob.
 
 1. Remove unused `declarationIndex.byID`.
 2. Remove or inline `evaluateDeclaration`.
-3. Remove redundant `ConfigFor` filtering.
-4. Add regression tests for the behavioral changes.
+3. Add regression tests for the behavioral changes.
 
 ### Phase 2: Remaining maintainability cleanup
 
