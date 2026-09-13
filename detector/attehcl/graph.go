@@ -37,41 +37,57 @@ func graphScriptTarget(ctx context.Context, repo *attegit.Repo, target Target, g
 		result.Entities = append(result.Entities, graph.Entity{ID: attegit.EntityID(targetBlob), Kind: attegit.BlobKind})
 		result.Relationships = append(result.Relationships, graph.Relationship{From: target.ID, To: attegit.EntityID(targetBlob), Kind: ScriptRelation})
 	}
-	for _, dep := range decoded.Deps {
-		if err := ctx.Err(); err != nil {
+	for _, dependency := range decoded.Deps {
+		entity, relationship, err := projectDependency(ctx, repo, target, dependency, graphContext)
+		if err != nil {
 			return TargetGraph{}, err
 		}
-		if dep.traversal != nil {
-			entity, err := graphContext.ResolveTarget(dep.traversal)
-			if err != nil {
-				return TargetGraph{}, err
-			}
-			result.Entities = append(result.Entities, entity)
-			result.Relationships = append(result.Relationships, graph.Relationship{From: target.ID, To: entity.ID, Kind: DependsOnRelation})
-			continue
-		}
-		if dep.entity != "" {
-			kind, err := graphContext.EntityKind(dep.entity)
-			if err != nil {
-				return TargetGraph{}, err
-			}
-			result.Entities = append(result.Entities, graph.Entity{ID: dep.entity, Kind: kind})
-			result.Relationships = append(result.Relationships, graph.Relationship{From: target.ID, To: dep.entity, Kind: DependsOnRelation})
-			continue
-		}
-		value := strings.TrimPrefix(dep.value, DecodingPathPrefix)
-		targetBlob, err := reference.ResolveBlobFromBlob(target.File, reference.SomePath(value))
+		result.Entities = append(result.Entities, entity)
+		result.Relationships = append(result.Relationships, relationship)
+	}
+	return result, nil
+}
+
+// projectDependency resolves one decoded dependency to a graph entity and relation.
+func projectDependency(
+	ctx context.Context,
+	repo *attegit.Repo,
+	target Target,
+	dependency dependency,
+	graphContext TargetGraphContext,
+) (graph.Entity, graph.Relationship, error) {
+	if err := ctx.Err(); err != nil {
+		return graph.Entity{}, graph.Relationship{}, err
+	}
+
+	var entity graph.Entity
+	switch dependency.kind {
+	case dependencyTarget:
+		resolved, err := graphContext.ResolveTarget(dependency.traversal)
 		if err != nil {
-			return TargetGraph{}, fmt.Errorf("%q: %w", target.File, err)
+			return graph.Entity{}, graph.Relationship{}, err
+		}
+		entity = resolved
+	case dependencyEntity:
+		kind, err := graphContext.EntityKind(dependency.entity)
+		if err != nil {
+			return graph.Entity{}, graph.Relationship{}, err
+		}
+		entity = graph.Entity{ID: dependency.entity, Kind: kind}
+	case dependencyPath:
+		targetBlob, err := reference.ResolveBlobFromBlob(target.File, reference.SomePath(dependency.path))
+		if err != nil {
+			return graph.Entity{}, graph.Relationship{}, fmt.Errorf("%q: %w", target.File, err)
 		}
 		obj, ok := repo.Obj[targetBlob]
 		if !ok || obj.Kind != attegit.Blob {
-			return TargetGraph{}, fmt.Errorf("%q: dependency %q not found", target.File, targetBlob)
+			return graph.Entity{}, graph.Relationship{}, fmt.Errorf("%q: dependency %q not found", target.File, targetBlob)
 		}
-		result.Entities = append(result.Entities, graph.Entity{ID: attegit.EntityID(targetBlob), Kind: attegit.BlobKind})
-		result.Relationships = append(result.Relationships, graph.Relationship{From: target.ID, To: attegit.EntityID(targetBlob), Kind: DependsOnRelation})
+		entity = graph.Entity{ID: attegit.EntityID(targetBlob), Kind: attegit.BlobKind}
+	default:
+		return graph.Entity{}, graph.Relationship{}, fmt.Errorf("dependency has unknown kind %d", dependency.kind)
 	}
-	return result, nil
+	return entity, graph.Relationship{From: target.ID, To: entity.ID, Kind: DependsOnRelation}, nil
 }
 
 // Graph builds the HCL detector graph using the supplied options.

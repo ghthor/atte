@@ -20,8 +20,17 @@ const (
 	DecodingPathPrefix = "attehcl-path:"
 )
 
+type dependencyKind uint8
+
+const (
+	dependencyPath dependencyKind = iota
+	dependencyEntity
+	dependencyTarget
+)
+
 type dependency struct {
-	value     string
+	kind      dependencyKind
+	path      string
 	entity    graph.EntityID
 	traversal hcl.Traversal
 }

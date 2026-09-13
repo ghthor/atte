@@ -415,11 +415,13 @@ test {
 	decoded := grouped[KindTest][2].Decoded.(decodedTarget)
 	must.Len(t, 3, decoded.Deps)
 	for index, name := range []string{"go", "py"} {
+		test.EqOp(t, dependencyTarget, decoded.Deps[index].kind)
 		test.Len(t, 2, decoded.Deps[index].traversal)
 		test.EqOp(t, "test", decoded.Deps[index].traversal.RootName())
 		test.EqOp(t, name, decoded.Deps[index].traversal[1].(hcl.TraverseAttr).Name)
 	}
-	test.EqOp(t, DecodingPathPrefix+"some/file", decoded.Deps[2].value)
+	test.EqOp(t, dependencyPath, decoded.Deps[2].kind)
+	test.EqOp(t, "some/file", decoded.Deps[2].path)
 }
 
 func TestGraphProjectsLocalPathDependency(t *testing.T) {

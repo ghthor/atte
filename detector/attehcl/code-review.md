@@ -25,7 +25,7 @@
 
 The package has a sound pipeline and good recent separation between declaration discovery, target evaluation, and graph assembly. The target capability registry is also a useful extensibility boundary.
 
-The main remaining opportunities are algorithmic simplification and reducing duplication in the dependency projection and evaluator construction paths.
+The main remaining opportunity is algorithmic simplification, especially deterministic local evaluation. A smaller maintainability opportunity remains in evaluator construction.
 
 ## Findings
 
@@ -72,67 +72,7 @@ As a minimum improvement, sort pending names before each pass.
 
 ---
 
-### 2. Dependency decoding and graph projection duplicate branching
-
-`decodeTargetDependencies` and `graphScriptTarget` both discriminate between:
-
-- Target traversals
-- Repository paths
-- HCL/entity IDs
-- Plain strings
-
-`graphScriptTarget` also handles script projection and all dependency projection in one function. Its structural cyclomatic complexity is approximately in the low teens.
-
-The repeated pattern is:
-
-```go
-if dep.traversal != nil { ... }
-if dep.entity != "" { ... }
-// otherwise resolve dep.value as a repository path
-```
-
-#### Recommendation
-
-Represent dependencies as a tagged value rather than three optional fields:
-
-```go
-type dependencyKind uint8
-
-const (
-    dependencyPath dependencyKind = iota
-    dependencyEntity
-    dependencyTarget
-)
-
-type dependency struct {
-    kind      dependencyKind
-    path      string
-    entity    graph.EntityID
-    traversal hcl.Traversal
-}
-```
-
-Then isolate graph projection in a helper such as:
-
-```go
-func projectDependency(
-    ctx context.Context,
-    repo *attegit.Repo,
-    target Target,
-    dependency dependency,
-    graphContext TargetGraphContext,
-) (graph.Entity, graph.Relationship, error)
-```
-
-The built-in functions should also be renamed because they are used for all built-in kinds:
-
-```text
-decodeTestTarget -> decodeScriptTarget
-```
-
----
-
-### 3. Evaluator construction contains avoidable duplication
+### 2. Evaluator construction contains avoidable duplication
 
 `newEvaluator` and `newEvaluatorForFile` both construct the same evaluator fields:
 
@@ -162,7 +102,7 @@ There is similar repetition in `declaredTargets` and `evaluatedTargets`, which b
 
 ---
 
-### 4. `ConfigFor` contains redundant filtering
+### 3. `ConfigFor` contains redundant filtering
 
 `ConfigFor` creates an evaluator containing exactly one file and evaluates only that file:
 
@@ -186,7 +126,7 @@ Once the single-file invariant is retained, this can return `allTargets` directl
 
 ---
 
-### 5. Dead or low-value abstractions are accumulating
+### 4. Dead or low-value abstractions are accumulating
 
 A few constructs currently add more indirection than value:
 
@@ -214,7 +154,7 @@ These are not urgent, but removing them would make the evaluator easier to follo
 
 ---
 
-### 6. Registry snapshots are more expensive than necessary
+### 5. Registry snapshots are more expensive than necessary
 
 `targetRegistrySnapshot` copies every registered schema for every evaluator. That is reasonable for evaluator snapshot isolation, but `DecodeEntityID` also calls it for every decoded HCL entity ID:
 
@@ -242,7 +182,7 @@ Use a complete snapshot only when creating an evaluator. Entity ID validation do
 
 ---
 
-### 7. Diagnostic context rereads files for every diagnostic
+### 6. Diagnostic context rereads files for every diagnostic
 
 `hclDiagnosticContext` calls `repo.Show(file)` and splits the complete file contents for each diagnostic.
 
@@ -356,6 +296,6 @@ and configuration data. `Graph` consumes the same decoded output, builds a
 same-file declaration index, and then resolves symbolic target dependencies
 while invoking graph projections.
 
-The best remaining refactoring is to reduce representation duplication around `dependency`, `targetDeclaration`, and `evaluatedTarget`.
+The best remaining refactoring is to make local evaluation deterministic and to reduce construction duplication around evaluators and target phases.
 
 A large rewrite of the capability registry is not recommended. The registry and projection interfaces are relatively clean and appear to be the intended extensibility boundary.

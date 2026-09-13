@@ -92,7 +92,7 @@ var (
 func init() {
 	for _, kind := range []Kind{KindTest, KindCodegen, KindLint} {
 		if err := registerBuiltIn(kind, TargetKindSpec{
-			Decoder:   decodeTestTarget,
+			Decoder:   decodeScriptTarget,
 			Graph:     graphScriptTarget,
 			Execution: executeScriptTarget,
 			Config:    configScriptTarget,
@@ -305,22 +305,22 @@ func decodeDependencyValue(value cty.Value) ([]dependency, error) {
 	}
 	if value.Type() == attegit.RepositoryPathType {
 		blob := *value.EncapsulatedValue().(*reference.Blob)
-		return []dependency{{value: DecodingPathPrefix + blob.String()}}, nil
+		return []dependency{{kind: dependencyPath, path: blob.String()}}, nil
 	}
 	if value.Type() != cty.String {
 		return nil, fmt.Errorf("values must be strings or paths")
 	}
 	raw := value.AsString()
 	if traversal, ok := targetTraversalFromValue(raw); ok {
-		return []dependency{{traversal: traversal}}, nil
+		return []dependency{{kind: dependencyTarget, traversal: traversal}}, nil
 	}
 	if entity, ok := strings.CutPrefix(raw, "attehcl-id:"); ok {
-		return []dependency{{entity: graph.EntityID(entity)}}, nil
+		return []dependency{{kind: dependencyEntity, entity: graph.EntityID(entity)}}, nil
 	}
 	if strings.HasPrefix(raw, "attego:") {
-		return []dependency{{entity: graph.EntityID(raw)}}, nil
+		return []dependency{{kind: dependencyEntity, entity: graph.EntityID(raw)}}, nil
 	}
-	return []dependency{{value: raw}}, nil
+	return []dependency{{kind: dependencyPath, path: strings.TrimPrefix(raw, DecodingPathPrefix)}}, nil
 }
 
 type targetDiagnosticsError struct {
@@ -331,7 +331,7 @@ func (err targetDiagnosticsError) Error() string {
 	return err.diagnostics.Error()
 }
 
-func decodeTestTarget(content *hcl.BodyContent, ctx *hcl.EvalContext) (any, error) {
+func decodeScriptTarget(content *hcl.BodyContent, ctx *hcl.EvalContext) (any, error) {
 	decoded := decodedTarget{}
 	if attribute, ok := content.Attributes["script"]; ok {
 		value, diagnostics := attribute.Expr.Value(ctx)
