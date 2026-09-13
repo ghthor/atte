@@ -156,3 +156,11 @@ Each checkpoint below should be implemented and verified independently, then pau
 * Updated the custom-block example scaffold to compile against the new registration contract; its acceptance tests remain red because `deploy` has not yet been registered with decoding and projections.
 * Verified `go test ./detector/attehcl ./cmd` and root `go test ./...`; `codegen.go`, `codegen.fmt`, `codegen.rendered`, and `lint.go` pass. The aggregate `test.go` target fails only because the intentionally red example acceptance suite is included and still reports the unsupported `deploy` kind.
 * Added `reference/target.Computed` for the common configuration fields. `attehcl.Target.Configuration` now returns it directly, with kind-specific values in `Meta`; `config show` uses the shared type for JSON and HCL conversion.
+
+### Custom decoding, target identity, and graph projection checkpoint result
+
+* Implemented the example `deploy` body schema requiring a string `env` attribute and added a decoder returning the deploy-specific decoded value.
+* Registered `deploy` during package initialization with decoding and graph capabilities; the target retains its HCL name, stable selector, and decoded environment.
+* Added a graph projection using the common target graph base, including the deploy entity, declaring file, and tree containment relationships.
+* Added acceptance coverage for decoded identity and graph output.
+* The example acceptance suite now progresses past unknown target kind. The graph/identity test passes; `run --dry-run deploy` remains red because execution is not implemented, and `config show` remains red because configuration projection is not implemented.

@@ -8,6 +8,10 @@ import (
 	"github.com/ghthor/atte/cmd"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attegittest"
+	"github.com/ghthor/atte/detector/attehcl"
+	"github.com/ghthor/atte/detector/graphset"
+	"github.com/ghthor/atte/detector/registry"
+	"github.com/ghthor/atte/reference"
 	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
 )
@@ -57,6 +61,49 @@ func TestDeployRunDryRun(t *testing.T) {
 	test.EqOp(t, "", stderr)
 	test.True(t, strings.Contains(stdout, "deploy"), test.Sprintf("dry-run output should identify the deploy target: %q", stdout))
 	test.True(t, strings.Contains(stdout, "echo \"deploy release to dev\""), test.Sprintf("dry-run output should contain the deploy command: %q", stdout))
+}
+
+func TestDeployTargetIdentityAndGraph(t *testing.T) {
+	repository := newAcceptanceRepository(t)
+	builtIns, err := registry.NewBuiltIn()
+	must.NoError(t, err)
+
+	config, err := attehcl.ConfigFor(t.Context(), repository.repo, "", builtIns.FunctionProvider())
+	test.NoError(t, err)
+	if err != nil {
+		return
+	}
+	targets := attehcl.SortedTargets(config.Targets)
+	test.Len(t, 1, targets)
+	if len(targets) == 0 {
+		return
+	}
+	target := targets[0]
+	test.EqOp(t, "attehcl:deploy", target.Kind)
+	test.EqOp(t, "release", target.Name)
+	test.EqOp(t, "//atte.hcl#deploy.release", attehcl.Selector(target).String())
+	decoded, ok := target.Decoded.(deployTarget)
+	test.True(t, ok, test.Sprintf("decoded deploy target should use deployTarget: %#v", target.Decoded))
+	if !ok {
+		return
+	}
+	test.EqOp(t, "dev", decoded.Env)
+
+	graph, err := attehcl.Graph(t.Context(), repository.repo, graphset.WithAttachToTree(), attehcl.WithFunctions(builtIns.FunctionProvider()))
+	test.NoError(t, err)
+	if err != nil {
+		return
+	}
+	targetID := attehcl.EntityID("attehcl:deploy", reference.Blob("atte.hcl"), "release")
+	test.True(t, graph.Has(targetID), test.Sprintf("graph should contain deploy target %q", targetID))
+	test.EqOp(t, attegit.BlobKind, graph.Entities[attegit.EntityID(reference.Blob("atte.hcl"))].Kind)
+	out := graph.Out(targetID)
+	test.Len(t, 1, out)
+	if len(out) == 0 {
+		return
+	}
+	test.EqOp(t, attegit.EntityID(reference.Blob("atte.hcl")), out[0].To)
+	test.EqOp(t, attehcl.SourceFileRelation, out[0].Kind)
 }
 
 func TestDeployConfigShow(t *testing.T) {
