@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
@@ -26,13 +25,13 @@ import (
 	"github.com/xlab/treeprint"
 )
 
-var (
-	graphRef             string
-	graphWorkingTree     bool
-	graphExternalImports bool
-	graphGoFiles         bool
-	graphRunTargets      bool
-)
+type graphOptions struct {
+	ref             string
+	workingTree     bool
+	externalImports bool
+	goFiles         bool
+	runTargets      bool
+}
 
 // PrintGraphOptions controls the details included in graph output.
 type PrintGraphOptions struct {
@@ -44,46 +43,46 @@ type PrintGraphOptions struct {
 	IncludeRunTargets bool
 }
 
-var graphCmd = &cobra.Command{
-	Use:   "graph",
-	Short: "Print the graph for the current directory",
-	Args:  cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		cmd.SilenceUsage = true
-		ctx := cmd.Context()
-		cwd, err := os.Getwd()
-		if err != nil {
-			return fmt.Errorf("get working directory: %w", err)
-		}
-		repoRoot, relative, err := repositoryContext(ctx, cwd)
-		if err != nil {
-			return err
-		}
-		var options []attegit.OpenOption
-		if graphWorkingTree {
-			options = append(options, attegit.WithWorkingTree())
-		}
-		repo, err := attegit.Open(repoRoot, graphRef, options...)
-		if err != nil {
-			return err
-		}
-		return printGraph(
-			ctx,
-			cmd.OutOrStdout(),
-			repo,
-			relative,
-			PrintGraphOptions{IncludeExternalImports: graphExternalImports, IncludeGoFiles: graphGoFiles, IncludeRunTargets: graphRunTargets},
-		)
-	},
-}
-
-func init() {
-	rootCmd.AddCommand(graphCmd)
-	graphCmd.Flags().StringVarP(&graphRef, "ref", "r", "HEAD", "Git revision to print")
-	graphCmd.Flags().BoolVar(&graphWorkingTree, "working-tree", false, "Include modified and non-ignored untracked files")
-	graphCmd.Flags().BoolVar(&graphExternalImports, "external-imports", false, "Include external Go imports")
-	graphCmd.Flags().BoolVar(&graphGoFiles, "go-files", false, "Include Go source files")
-	graphCmd.Flags().BoolVar(&graphRunTargets, "run-targets", false, "Render runnable entities as atte run selectors")
+func newGraphCommand() *cobra.Command {
+	options := &graphOptions{}
+	graphCmd := &cobra.Command{
+		Use:   "graph",
+		Short: "Print the graph for the current directory",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cmd.SilenceUsage = true
+			ctx := cmd.Context()
+			cwd, err := commandWorkingDirectory(ctx)
+			if err != nil {
+				return fmt.Errorf("get working directory: %w", err)
+			}
+			repoRoot, relative, err := repositoryContext(ctx, cwd)
+			if err != nil {
+				return err
+			}
+			var openOptions []attegit.OpenOption
+			if options.workingTree {
+				openOptions = append(openOptions, attegit.WithWorkingTree())
+			}
+			repo, err := openRepository(ctx, repoRoot, options.ref, openOptions...)
+			if err != nil {
+				return err
+			}
+			return printGraph(
+				ctx,
+				cmd.OutOrStdout(),
+				repo,
+				relative,
+				PrintGraphOptions{IncludeExternalImports: options.externalImports, IncludeGoFiles: options.goFiles, IncludeRunTargets: options.runTargets},
+			)
+		},
+	}
+	graphCmd.Flags().StringVarP(&options.ref, "ref", "r", "HEAD", "Git revision to print")
+	graphCmd.Flags().BoolVar(&options.workingTree, "working-tree", false, "Include modified and non-ignored untracked files")
+	graphCmd.Flags().BoolVar(&options.externalImports, "external-imports", false, "Include external Go imports")
+	graphCmd.Flags().BoolVar(&options.goFiles, "go-files", false, "Include Go source files")
+	graphCmd.Flags().BoolVar(&options.runTargets, "run-targets", false, "Render runnable entities as atte run selectors")
+	return graphCmd
 }
 
 func repositoryContext(ctx context.Context, cwd string) (string, string, error) {

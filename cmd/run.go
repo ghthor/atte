@@ -22,10 +22,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	runDryRun bool
-	runList   bool
-)
+type runOptions struct {
+	dryRun bool
+	list   bool
+}
 
 type runTarget struct {
 	selector string
@@ -39,12 +39,14 @@ type runTarget struct {
 	argv     []string
 }
 
-var runCmd = &cobra.Command{
-	Use:               "run [selector]",
-	Short:             "Run test, codegen, and lint targets from the repository",
-	Args:              cobra.MaximumNArgs(1),
-	ValidArgsFunction: runCmdValidArgs,
-	Long: strings.TrimLeftFunc(`
+func newRunCommand() *cobra.Command {
+	options := &runOptions{}
+	runCmd := &cobra.Command{
+		Use:               "run [selector]",
+		Short:             "Run test, codegen, and lint targets from the repository",
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: runCmdValidArgs,
+		Long: strings.TrimLeftFunc(`
 The run command executes scripts declared in atte.hcl test, codegen, and lint
 blocks, or runs go test -v for a repository Go package.
 
@@ -74,13 +76,13 @@ repository target:
 Shell completion supports short aliases and path-qualified selectors. Run
 atte completion --help for shell completion installation instructions.
 `, unicode.IsSpace),
-	RunE: runCommand,
-}
-
-func init() {
-	rootCmd.AddCommand(runCmd)
-	runCmd.Flags().BoolVar(&runDryRun, "dry-run", false, "Print the resolved target and command without executing it")
-	runCmd.Flags().BoolVar(&runList, "list", false, "List runnable targets")
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCommand(cmd, args, *options)
+		},
+	}
+	runCmd.Flags().BoolVar(&options.dryRun, "dry-run", false, "Print the resolved target and command without executing it")
+	runCmd.Flags().BoolVar(&options.list, "list", false, "List runnable targets")
+	return runCmd
 }
 
 func loadRunTargets(ctx context.Context) (root, cwd, relative string, targets []runTarget, err error) {
@@ -102,13 +104,13 @@ func loadRunTargets(ctx context.Context) (root, cwd, relative string, targets []
 	return
 }
 
-func runCommand(cmd *cobra.Command, args []string) error {
+func runCommand(cmd *cobra.Command, args []string, options runOptions) error {
 	ctx := cmd.Context()
 	_, _, relative, targets, err := loadRunTargets(ctx)
 	if err != nil {
 		return err
 	}
-	if runList {
+	if options.list {
 		for _, target := range targets {
 			if _, err := fmt.Fprintln(cmd.OutOrStdout(), target.selector); err != nil {
 				return fmt.Errorf("list targets: %w", err)
@@ -129,7 +131,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if runDryRun {
+	if options.dryRun {
 		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "attr run %s\n%s\n", target.selector, formatRunArgs(target.argv)); err != nil {
 			return fmt.Errorf("print dry run: %w", err)
 		}

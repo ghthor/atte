@@ -55,6 +55,8 @@ func executeAcceptanceCommand(t *testing.T, repository acceptanceRepository, arg
 }
 
 func TestDeployRunDryRun(t *testing.T) {
+	t.Parallel()
+
 	repository := newAcceptanceRepository(t)
 
 	stdout, stderr, err := executeAcceptanceCommand(t, repository, "run", "--dry-run", "deploy")
@@ -65,6 +67,8 @@ func TestDeployRunDryRun(t *testing.T) {
 }
 
 func TestDeployTargetIdentityAndGraph(t *testing.T) {
+	t.Parallel()
+
 	repository := newAcceptanceRepository(t)
 	builtIns, err := registry.NewBuiltIn()
 	must.NoError(t, err)
@@ -108,6 +112,8 @@ func TestDeployTargetIdentityAndGraph(t *testing.T) {
 }
 
 func TestDeployConfigShow(t *testing.T) {
+	t.Parallel()
+
 	repository := newAcceptanceRepository(t)
 
 	stdout, stderr, err := executeAcceptanceCommand(t, repository, "config", "show")

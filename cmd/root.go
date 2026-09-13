@@ -11,10 +11,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var rootCmd = &cobra.Command{
-	Use:   "atte",
-	Short: "Compute the minimum work required after a software change",
-	Long: `Atte is a change attenuation engine for software Universes.
+func newRootCommand() *cobra.Command {
+	rootCmd := &cobra.Command{
+		Use:   "atte",
+		Short: "Compute the minimum work required after a software change",
+		Long: `Atte is a change attenuation engine for software Universes.
 
 It conservatively propagates change through the dependency graph to compute
 an affected Cone, then refines Candidates to remove false positives and
@@ -22,26 +23,36 @@ produce the smallest provably correct Work Set.
 
 The Work Set can be consumed by build systems, test runners, package managers,
 deployment systems, and CI pipelines.`,
-	// Uncomment the following line if your bare application
-	// has an action associated with it:
-	// Run: func(cmd *cobra.Command, args []string) { },
+	}
+	rootCmd.AddCommand(
+		newRunCommand(),
+		newConfigCommand(),
+		newGraphCommand(),
+	)
+	return rootCmd
 }
 
-// ExecuteContext runs the atte command with ctx and exits with status 1 if it fails.
+// ExecuteContext runs the atte command with ctx using the process's arguments and
+// standard input, output, and error streams. It discovers the repository from the
+// current working directory. Each call uses an isolated Cobra command tree.
 func ExecuteContext(ctx context.Context) error {
-	return rootCmd.ExecuteContext(ctx)
+	return newRootCommand().ExecuteContext(ctx)
 }
 
-// ExecuteOptions configures one command execution.
+// ExecuteOptions configures one isolated command execution. When Repository is
+// set, RepositoryRoot must identify the injected repository and WorkingDirectory
+// is resolved relative to that root.
 type ExecuteOptions struct {
 	// Repository overrides repository discovery for this command execution.
 	Repository *attegit.Repo
-	// RepositoryRoot is the filesystem path to the injected repository root.
-	// It is required when Repository is set.
+	// RepositoryRoot is the filesystem path to the injected repository root. It
+	// is required when Repository is set and may be relative or absolute.
 	RepositoryRoot string
-	// WorkingDirectory is the repository-relative command working directory.
+	// WorkingDirectory is the repository-relative command working directory. An
+	// empty value selects the repository root.
 	WorkingDirectory string
-	// In, Out, and Err override the Cobra command streams.
+	// In, Out, and Err override the Cobra command streams. Nil values use the
+	// process's standard input, output, and error streams, respectively.
 	In  io.Reader
 	Out io.Writer
 	Err io.Writer
@@ -56,8 +67,10 @@ type executionContext struct {
 	relative         string
 }
 
-// ExecuteWithOptions runs the atte command with args and the supplied execution options.
-// It is the embeddable command entry point used by hosts and acceptance tests.
+// ExecuteWithOptions runs the atte command with args and options using an
+// isolated Cobra command tree. When a repository is injected, args are evaluated
+// against that repository and WorkingDirectory; otherwise normal repository
+// discovery is used.
 func ExecuteWithOptions(ctx context.Context, args []string, options ExecuteOptions) error {
 	if options.Repository != nil {
 		execution, err := executionContextForOptions(options)
@@ -67,6 +80,7 @@ func ExecuteWithOptions(ctx context.Context, args []string, options ExecuteOptio
 		ctx = context.WithValue(ctx, executionContextKey{}, execution)
 	}
 
+	rootCmd := newRootCommand()
 	rootCmd.SetArgs(args)
 	if options.In == nil {
 		rootCmd.SetIn(os.Stdin)

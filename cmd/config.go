@@ -14,54 +14,53 @@ import (
 	"github.com/zclconf/go-cty/cty"
 )
 
-var (
-	configRef         string
-	configWorkingTree bool
-	configFormat      string
-)
-
-var configCmd = &cobra.Command{Use: "config", Short: "Inspect evaluated configuration"}
-
-var configShowCmd = &cobra.Command{
-	Use:   "show",
-	Short: "Show evaluated configuration for the current directory",
-	Args:  cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := cmd.Context()
-		cwd, err := commandWorkingDirectory(ctx)
-		if err != nil {
-			return fmt.Errorf("get working directory: %w", err)
-		}
-		root, relative, err := repositoryContext(ctx, cwd)
-		if err != nil {
-			return err
-		}
-		var options []attegit.OpenOption
-		if configWorkingTree {
-			options = append(options, attegit.WithWorkingTree())
-		}
-		repo, err := openRepository(ctx, root, configRef, options...)
-		if err != nil {
-			return err
-		}
-		builtIns, err := registry.NewBuiltIn()
-		if err != nil {
-			return fmt.Errorf("register detectors: %w", err)
-		}
-		config, err := attehcl.ConfigFor(cmd.Context(), repo, relative, builtIns.FunctionProvider())
-		if err != nil {
-			return fmt.Errorf("evaluate attehcl configuration: %w", err)
-		}
-		return writeConfig(cmd.OutOrStdout(), config, configFormat)
-	},
+type configOptions struct {
+	ref         string
+	workingTree bool
+	format      string
 }
 
-func init() {
-	rootCmd.AddCommand(configCmd)
+func newConfigCommand() *cobra.Command {
+	options := &configOptions{}
+	configCmd := &cobra.Command{Use: "config", Short: "Inspect evaluated configuration"}
+	configShowCmd := &cobra.Command{
+		Use:   "show",
+		Short: "Show evaluated configuration for the current directory",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ctx := cmd.Context()
+			cwd, err := commandWorkingDirectory(ctx)
+			if err != nil {
+				return fmt.Errorf("get working directory: %w", err)
+			}
+			root, relative, err := repositoryContext(ctx, cwd)
+			if err != nil {
+				return err
+			}
+			var openOptions []attegit.OpenOption
+			if options.workingTree {
+				openOptions = append(openOptions, attegit.WithWorkingTree())
+			}
+			repo, err := openRepository(ctx, root, options.ref, openOptions...)
+			if err != nil {
+				return err
+			}
+			builtIns, err := registry.NewBuiltIn()
+			if err != nil {
+				return fmt.Errorf("register detectors: %w", err)
+			}
+			config, err := attehcl.ConfigFor(cmd.Context(), repo, relative, builtIns.FunctionProvider())
+			if err != nil {
+				return fmt.Errorf("evaluate attehcl configuration: %w", err)
+			}
+			return writeConfig(cmd.OutOrStdout(), config, options.format)
+		},
+	}
+	configShowCmd.Flags().StringVarP(&options.ref, "ref", "r", "HEAD", "Git revision to inspect")
+	configShowCmd.Flags().BoolVar(&options.workingTree, "working-tree", false, "Include modified and non-ignored untracked files")
+	configShowCmd.Flags().StringVar(&options.format, "format", "json", "Output format (json or hcl)")
 	configCmd.AddCommand(configShowCmd)
-	configShowCmd.Flags().StringVarP(&configRef, "ref", "r", "HEAD", "Git revision to inspect")
-	configShowCmd.Flags().BoolVar(&configWorkingTree, "working-tree", false, "Include modified and non-ignored untracked files")
-	configShowCmd.Flags().StringVar(&configFormat, "format", "json", "Output format (json or hcl)")
+	return configCmd
 }
 
 type configOutput struct {
