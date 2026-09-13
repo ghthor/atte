@@ -91,7 +91,7 @@ func init() {
 	for _, kind := range []Kind{KindTest, KindCodegen, KindLint} {
 		if err := registerBuiltIn(kind, TargetKindSpec{
 			Decoder:   decodeTestTarget,
-			Graph:     graphTestTarget,
+			Graph:     graphScriptTarget,
 			Execution: executeScriptTarget,
 			Config:    configScriptTarget,
 		}); err != nil {
