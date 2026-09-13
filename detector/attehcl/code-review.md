@@ -1,56 +1,47 @@
-# Complexity and Refactoring Review: `detector/attehcl`
+# Complexity and Refactoring Review: detector/attehcl
 
 ## Scope
 
 | File | Responsibility |
 |---|---|
-| `parser.go` | HCL file discovery and parsing |
-| `locals.go` | File-local expression evaluation |
-| `evaluator.go` | Declaration discovery and target decoding |
-| `target.go` | Target identity, execution, and configuration |
-| `graph.go` | Graph projection and dependency resolution |
-| `diagnostics.go` | HCL diagnostic formatting |
-| `api.go` | Public target and configuration APIs |
-| `target_registry.go` | Target-kind registration and decoding |
-| `detector.go` | Detector adapter and selector integration |
-| `attehcl_test.go` | Package tests |
+| parser.go | HCL file discovery and parsing |
+| locals.go | File-local expression evaluation |
+| evaluator.go | Declaration discovery and target decoding |
+| target.go | Target identity, execution, and configuration |
+| graph.go | Graph projection and dependency resolution |
+| diagnostics.go | HCL diagnostic formatting |
+| api.go | Public target and configuration APIs |
+| target_registry.go | Target-kind registration and decoding |
+| detector.go | Detector adapter and selector integration |
+| attehcl_test.go | Package tests |
 
 ## Validation
 
-- `go test ./detector/attehcl` — passed
-- `golangci-lint run ./detector/attehcl` — passed
-- `staticcheck ./detector/attehcl` — passed
+- go test ./detector/attehcl — passed
+- go vet ./detector/attehcl — passed
+- golangci-lint run ./detector/attehcl — passed
+- staticcheck ./detector/attehcl — passed
+- Serena diagnostics reported one modernization hint for errors.As; no correctness diagnostics were reported.
 
 ## Executive summary
 
-The package has a sound pipeline and good recent separation between declaration discovery, target evaluation, and graph assembly. The target capability registry is also a useful extensibility boundary.
+The package has a sound pipeline and good separation between declaration discovery, local evaluation, target decoding, and graph projection. The target capability registry is a useful extensibility boundary, and the recent evaluator-construction cleanup has removed the earlier duplication there.
 
-The main remaining opportunity is algorithmic simplification, especially deterministic local evaluation.
+The main remaining opportunities are algorithmic: local evaluation repeatedly retries expressions, target evaluation normalizes declarations more than once, and dependency decoding rebuilds a complete transformed evaluation context for every dependency attribute. Several smaller refactorings would also centralize target identity construction and remove unused state.
 
 ## Findings
 
 ### 1. Local evaluation is quadratic and nondeterministic
 
-`evaluateLocals` repeatedly scans all unresolved locals until one pass makes no progress.
+evaluateLocals repeatedly scans all unresolved locals until one pass makes no progress. For L locals, a dependency chain evaluated in an unfavorable order can require approximately O(L²) expression evaluations and context constructions. The context itself is rebuilt for every pending expression, so the retry loop also repeatedly copies the currently known local and target namespaces.
 
-For `L` locals, the behavior is approximately:
+The result is nondeterministic because expressions and pending are maps. The local name and diagnostics reported for an invalid dependency or cycle can vary between executions:
 
-```text
-Best case:    O(L) expression evaluations
-Worst case:   O(L²) expression evaluations
-```
-
-A dependency chain evaluated in reverse map order can require one successful local per pass.
-
-The result is also nondeterministic because `expressions` and `pending` are maps. The local name and diagnostics reported for an invalid dependency or cycle can vary between executions:
-
-```go
-var lastName string
-var lastDiags hcl.Diagnostics
-for name, expr := range pending {
-    ...
-}
-```
+    var lastName string
+    var lastDiags hcl.Diagnostics
+    for name, expr := range pending {
+        ...
+    }
 
 #### Recommendation
 
@@ -58,59 +49,99 @@ Use a dependency-aware resolver:
 
 1. Extract local references from each expression.
 2. Build a local dependency graph.
-3. Resolve using DFS or Kahn's algorithm.
+3. Resolve with DFS or Kahn's algorithm.
 4. Detect cycles explicitly.
 5. Sort names before reporting errors.
 
-This would provide approximately `O(L + R)` traversal complexity, where `R` is the number of local references, along with deterministic cycle diagnostics such as:
-
-```text
-local.a -> local.b -> local.a forms a cycle
-```
-
-As a minimum improvement, sort pending names before each pass.
+This reduces the traversal to approximately O(L + R), where R is the number of local references, and permits deterministic cycle diagnostics such as local.a -> local.b -> local.a. As a minimum improvement, sort pending names and retain a reusable evaluation context for each pass. The dependency-aware resolver is preferable because it also gives better cycle and missing-reference errors.
 
 ---
 
-### 2. Dead or low-value abstractions are accumulating
+### 2. Dependency decoding rebuilds the complete evaluation context per attribute
 
-A couple of constructs currently add more indirection than value:
+decodeTargetDependencies calls dependencyEvalContext(ctx) for each depends_on or triggered_by attribute. That helper recursively copies every variable in the context, including all locals and all named targets, and copies the function map before wrapping the path functions. It does this even when the expression references only one dependency.
 
-#### `declarationIndex.byID`
+If A dependency attributes are decoded from a context of size V, this adds roughly O(A × V) copying and traversal, in addition to evaluating and decoding the dependency values. Large local objects or many named targets make the hidden cost more noticeable.
 
-It is populated in both `initializeDeclarations` and `graphFor`, but has no readers. Target resolution currently uses `byReference` instead. Remove `byID` and its population unless entity-ID lookup becomes necessary.
+#### Recommendation
 
-#### `evaluateDeclaration`
-
-This is a one-line wrapper around `expression.Value(context)` and is only called once. It can be removed unless it is intended as a future abstraction point.
-
-These are not urgent, but removing them would make the evaluator easier to follow.
+Construct the transformed dependency context once per target evaluation (or once per file) and reuse it for all dependency attributes. A cleaner design is to keep ordinary expression evaluation and dependency-value normalization as separate contexts in the target phase, rather than recreating the latter inside decodeTargetDependencies.
 
 ---
 
-### 3. Diagnostic context rereads files for every diagnostic
+### 3. Target blocks are normalized more than once during evaluation
 
-`hclDiagnosticContext` calls `repo.Show(file)` and splits the complete file contents for each diagnostic.
+evaluatedTargets first calls initializeDeclarations, which calls declaredTargets and normalizes every target block to build e.declarations. The target phase then calls normalizeBlocks again before decoding each file. A full Targets or Graph evaluation therefore scans and allocates the normalized representation twice. ConfigFor still needs declarations from other files for cross-file target() references, but it also repeats normalization for the selected file.
 
-For `D` diagnostics and a file of size `B`, this can approach:
+graphFor additionally rebuilds a second declarationIndex from the evaluated blocks even though initializeDeclarations has already populated e.declarations with the same identities.
 
-```text
-O(D × B)
-```
+#### Recommendation
 
-The number of diagnostics is usually small, so this is unlikely to be a practical bottleneck. Nevertheless, the evaluator already owns parsed file information and could retain source contents or precomputed lines:
+Have the declaration phase retain or return normalized blocks along with declarations, and let the target phase consume that representation. Reuse e.declarations in graphFor instead of rebuilding it. This removes an O(files + blocks) pass and avoids duplicate maps and identity objects without changing the phase boundaries.
 
-```go
-type hclFile struct {
-    file     reference.Blob
-    contents []byte
-    lines    []string
-    body     *hclsyntax.Body
-    locals   map[string]hcl.Expression
-}
-```
+---
 
-This would also avoid repeatedly loading the same blob.
+### 4. Target identity construction is duplicated across the pipeline
+
+Identity and selector data are assembled independently in several places:
+
+- declarationFromBlock and declarationFromEvaluated both construct the same entity ID.
+- targetIDFromDeclaration and targetFromEvaluated independently derive display names and selector aliases.
+- Selector repeats the namespace/kind conversion for the public representation.
+
+These paths currently agree, but changes to anonymous-target indexing, aliases, or ID formatting can make DeclaredTargets, Targets, and graph entities disagree.
+
+#### Recommendation
+
+Introduce one internal identity helper that accepts file, kind, name, and index and returns the canonical display name, entity ID, selector identity, and aliases. Build declarations and evaluated targets from that value, keeping source range and decoded capabilities as the phase-specific fields.
+
+---
+
+### 5. Dead or low-value abstractions remain
+
+A few constructs add indirection without currently serving a caller.
+
+#### declarationIndex.byID
+
+It is populated by initializeDeclarations and graphFor, but no code reads it. Target resolution uses byReference. Remove it unless entity-ID lookup is actually needed.
+
+#### evaluateDeclaration
+
+This is a one-line wrapper around expression.Value(context) and is called only once. Inline it unless it is intended to become a real policy boundary.
+
+These are low-risk cleanups, but removing them makes the evaluator's data flow easier to follow and reinforces the single-purpose declaration index.
+
+---
+
+### 6. Diagnostic context rereads and resplits the source for every diagnostic
+
+hclDiagnosticContext calls repo.Show(file) and splits the complete file contents for each diagnostic. For D diagnostics and a file of size B, this can approach O(D × B) work and performs repeated repository reads.
+
+The number of diagnostics is usually small, so this is not an urgent bottleneck. It is nevertheless avoidable because parsing already has the source file associated with the evaluator.
+
+#### Recommendation
+
+Retain source contents or precomputed lines in hclFile and pass that data to diagnostic formatting. If retaining the full contents is undesirable, cache the split lines for the duration of one file evaluation.
+
+---
+
+### 7. Graph construction does not canonicalize duplicate relationships
+
+graphScriptTarget emits one relationship for every decoded dependency, and graphFor appends all projected relationships before calling graph.New. graph.New sorts relationships but does not remove equivalent edges. Consequently, a dependency list such as depends_on = [path("x"), path("x")] produces duplicate depends-on relationships. Multiple projectors can produce the same issue.
+
+This is unnecessary output and avoidable work for graph consumers. It is also inconsistent with Graph.Absorb, which explicitly ignores duplicate relationships.
+
+#### Recommendation
+
+Define whether relationships are a set at the graph.New boundary and enforce that invariant there, or deduplicate in graphFor with a map[graph.Relationship]struct{} before constructing the graph. Add a regression test for repeated dependencies.
+
+---
+
+### 8. Error extraction can use the Go-version-supported generic helper
+
+The module targets Go 1.26, and the language server flags the errors.As(err, &diagnostic) form in evaluator.go. errors.AsType[targetDiagnosticsError](err) is shorter and avoids a separately declared mutable variable.
+
+This is a small readability cleanup rather than a performance issue.
 
 ---
 
@@ -118,86 +149,73 @@ This would also avoid repeatedly loading the same blob.
 
 | Area | Approximate complexity | Notes |
 |---|---:|---|
-| HCL file discovery | `O(repository objects + parsed bytes)` | Only `atte.hcl` blobs are parsed |
-| Declaration normalization | `O(files + blocks)` | Deterministic after file sorting |
-| Local evaluation | `O(L²)` worst case | Repeated map scans; should become `O(L + references)` |
-| Target decoding | `O(blocks + expression evaluation)` | Provider function cost is external |
-| Graph assembly | `O(targets + dependencies + projected entities)` | Capability callbacks can add external cost |
-| Registry snapshots | `O(registered kinds × schema size)` | One complete snapshot per evaluator |
-| Diagnostic rendering | `O(diagnostics × file size)` | File contents are reread per diagnostic |
-
----
+| HCL file discovery and parsing | O(repository objects + parsed bytes) | Only atte.hcl blobs are parsed |
+| Declaration normalization | O(files + blocks) per pass | The current full evaluation performs the pass twice |
+| Local evaluation | O(L²) worst case | Map retries and repeated context construction; target is O(L + references) |
+| Dependency decoding | O(A × V + dependency data) | A dependency attributes repeatedly transform a context of size V |
+| Target decoding | O(blocks + expression evaluation) | Provider function cost is external |
+| Graph assembly | O(targets + dependencies + projected entities) | Duplicate relationships can increase output and consumer work |
+| Registry snapshots | O(registered kinds × schema size) | One complete snapshot per evaluator is intentional |
+| Diagnostic rendering | O(diagnostics × file size) | File contents are reread per diagnostic |
 
 ## Recommended implementation order
 
-### Phase 1: Correctness and cheap cleanup
+### Phase 1: Reduce repeated work
 
-1. Remove unused `declarationIndex.byID`.
-2. Remove or inline `evaluateDeclaration`.
-3. Add regression tests for the behavioral changes.
+1. Reuse one dependency evaluation context per target or file.
+2. Retain normalized blocks from declaration discovery and reuse e.declarations in graph construction.
+3. Replace retry-based local evaluation with dependency-ordered evaluation if configurations can contain many locals.
 
-### Phase 2: Remaining maintainability cleanup
+### Phase 2: Correctness and maintainability
 
-1. Centralize target identity construction.
+1. Canonicalize duplicate graph relationships and test repeated dependencies.
+2. Centralize target identity construction.
+3. Remove declarationIndex.byID and inline evaluateDeclaration.
+4. Replace errors.As with errors.AsType.
 
-### Phase 3: Improve algorithmic complexity
+### Phase 3: Lower-priority allocation cleanup
 
-Replace repeated local-evaluation scans with dependency-ordered evaluation and explicit cycle detection. This is worthwhile if HCL files can contain many locals, but it is less urgent than the correctness and maintainability changes above.
-
----
+1. Cache source lines or source contents for diagnostic rendering.
+2. Consider sharing immutable common HCL functions across files while retaining per-file filesystem functions.
 
 ## Suggested target architecture
 
-The existing pipeline is sound and should be retained. Its important property is
-that each phase exposes only the data needed by the next phase:
+The existing pipeline should be retained. Its important property is that each phase exposes only the data needed by the next phase:
 
-```text
-repository
-    |
-    v
-[1. Parse HCL files]
-    output: hclFiles
-      - parsed bodies and local expressions, ordered by file
-    |
-    v
-[2. Normalize target blocks]
-    output: normalizedBlock[]
-      - registered kind, name, index, body, and source range
-    |
-    +------------------------------+
-    |                              |
-    v                              v
-[Declaration-only path]       [3. Evaluate locals]
-    output: targetDeclaration[]     output: hclScope + HCL functions
-      - identity and source          - known file-local values
-    |                              |
-    v                              v
-DeclaredTargets              [4. Decode target bodies]
-    output: graphtarget.ID[]       output: evaluatedTarget[]
-                                   - decoded value and kind spec
-                                   - identity and source information
-                                   |
-                   +---------------+----------------+
-                   |                                |
-                   v                                v
-             [5. Materialize targets]       [5. Build graph index]
-             output: map[Kind][]Target       output: declarationIndex
-               - common identity and         - repository-wide target lookup
-                 projections
-                   |                                |
-                   v                                v
-             Targets / ConfigFor          [6. Project target graphs]
-             output: evaluated config          output: graph.Graph
-                                             - entities and relationships
-```
+    repository
+        |
+        v
+    [1. Parse HCL files]
+        output: hclFiles
+          - parsed bodies and local expressions, ordered by file
+        |
+        v
+    [2. Normalize target blocks]
+        output: normalizedBlock[] + declarationIndex
+          - registered kind, name, index, body, and source range
+          - canonical repository-wide target lookup
+        |
+        +------------------------------+
+        |                              |
+        v                              v
+    [Declaration-only path]       [3. Evaluate locals]
+        output: targetDeclaration[]     output: hclScope + HCL functions
+          - identity and source          - known file-local values
+        |                              |
+        v                              v
+    DeclaredTargets              [4. Decode target bodies]
+        output: graphtarget.ID[]       output: evaluatedTarget[]
+                                       - decoded value and kind spec
+                                       - identity and source information
+                                       |
+                       +---------------+----------------+
+                       |                                |
+                       v                                v
+                 [5. Materialize targets]       [5. Project target graphs]
+                 output: map[Kind][]Target       output: graph.Graph
+                   - common identity and         - entities and relationships
+                     projections                 - resolved symbolic dependencies
 
-`DeclaredTargets` therefore does not require local values, provider functions,
-registered decoders, or graph projections. `Targets` and `ConfigFor` consume the
-full decoded output and add common target identity, selector, script, execution,
-and configuration data. `Graph` consumes the same decoded output, builds a
-repository-wide declaration index, and then resolves symbolic target dependencies
-while invoking graph projections.
+DeclaredTargets does not require local values, provider functions, registered decoders, or graph projections. Targets and ConfigFor consume decoded output and add common target identity, selector, script, execution, and configuration data. Graph consumes the same declaration index and decoded output while invoking graph projections.
 
-The best remaining refactoring is to make local evaluation deterministic.
-
-A large rewrite of the capability registry is not recommended. The registry and projection interfaces are relatively clean and appear to be the intended extensibility boundary.
+The best remaining performance improvements are to stop rebuilding dependency contexts and normalized declarations. The best algorithmic improvement is deterministic, dependency-ordered local evaluation. A large rewrite of the capability registry is not recommended; its snapshot and projection interfaces are relatively clean and appear to be the intended extensibility boundary.
