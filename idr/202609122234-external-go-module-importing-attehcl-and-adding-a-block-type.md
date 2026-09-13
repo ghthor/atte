@@ -164,3 +164,20 @@ Each checkpoint below should be implemented and verified independently, then pau
 * Added a graph projection using the common target graph base, including the deploy entity, declaring file, and tree containment relationships.
 * Added acceptance coverage for decoded identity and graph output.
 * The example acceptance suite now progresses past unknown target kind. The graph/identity test passes; `run --dry-run deploy` remains red because execution is not implemented, and `config show` remains red because configuration projection is not implemented.
+
+### Runnable command projection checkpoint result
+
+* Added the `deploy` execution projection, which constructs `echo "deploy release to dev"` with the injected repository root as its working directory.
+* The existing common runnable-target path now discovers and dry-runs the custom target without launching a subprocess.
+* Updated dry-run command formatting to quote arguments containing whitespace while preserving the direct argument representation used for execution.
+* The example `run --dry-run deploy` acceptance case passes; `config show` remains red because configuration projection is not implemented.
+
+### Configuration projection checkpoint result
+
+* Added the `deploy` configuration projection, preserving `env` as kind-specific metadata in the shared `target.Computed` output.
+* The custom target now renders its common identity and `meta.env` through the normal JSON and HCL configuration paths.
+* The complete example acceptance suite passes, including `run --dry-run deploy`, target identity and graph coverage, and `config show`.
+* Updated the example executable to create the same temporary Git-backed mock repository used by the acceptance scenario and inject it through `cmd.ExecuteWithOptions`, so `go run . config show` and `go run . run --dry-run deploy` exercise the custom target instead of the checkout repository.
+* Extracted temporary Git repository creation into `detector/attegitmock`; `detector/attegittest` now wraps that implementation for testing, and the example host uses it directly.
+* Restored the shared `RunGitScript` multiline-script operation and used it for `attegitmock.New` repository initialization. The repository uses a nested temporary directory so sibling Git fixtures such as alternates remain isolated.
+* Added context propagation to `attegitmock.New` and `RunGitScript`; the test wrapper and example host pass their active contexts through to Git setup commands.

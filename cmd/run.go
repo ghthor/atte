@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -129,7 +130,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if runDryRun {
-		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "attr run %s\n%s\n", target.selector, strings.Join(target.argv, " ")); err != nil {
+		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "attr run %s\n%s\n", target.selector, formatRunArgs(target.argv)); err != nil {
 			return fmt.Errorf("print dry run: %w", err)
 		}
 		return nil
@@ -143,6 +144,18 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("run %q: %w", input, err)
 	}
 	return nil
+}
+
+func formatRunArgs(args []string) string {
+	formatted := make([]string, len(args))
+	for i, arg := range args {
+		if arg == "" || strings.IndexFunc(arg, unicode.IsSpace) >= 0 {
+			formatted[i] = strconv.Quote(arg)
+		} else {
+			formatted[i] = arg
+		}
+	}
+	return strings.Join(formatted, " ")
 }
 
 func runCmdValidArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {

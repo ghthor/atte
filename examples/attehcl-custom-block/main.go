@@ -10,12 +10,21 @@ import (
 
 	"github.com/ghthor/atte/cmd"
 	"github.com/ghthor/atte/detector/attegit"
+	"github.com/ghthor/atte/detector/attegitmock"
 	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/zclconf/go-cty/cty"
 )
 
 const KindDeploy attehcl.Kind = "deploy"
+
+const mockAtteHCL = `
+
+deploy "release" {
+  env = "dev"
+}
+
+`
 
 var deploySchema = hcl.BodySchema{
 	Attributes: []hcl.AttributeSchema{{Name: "env", Required: true}},
@@ -27,9 +36,11 @@ type deployTarget struct {
 
 func init() {
 	if err := attehcl.Register(KindDeploy, attehcl.TargetKindSpec{
-		Schema:  &deploySchema,
-		Decoder: decodeDeployTarget,
-		Graph:   graphDeployTarget,
+		Schema:    &deploySchema,
+		Decoder:   decodeDeployTarget,
+		Graph:     graphDeployTarget,
+		Execution: executeDeployTarget,
+		Config:    configDeployTarget,
 	}); err != nil {
 		panic(err)
 	}
@@ -63,6 +74,25 @@ func graphDeployTarget(
 	return target.GraphProjectionBase(attachToTree), nil
 }
 
+func configDeployTarget(target attehcl.Target) (map[string]any, error) {
+	decoded, ok := target.Decoded.(deployTarget)
+	if !ok {
+		return nil, fmt.Errorf("target %q has an invalid deploy decoded value", target.ID)
+	}
+	return map[string]any{"env": decoded.Env}, nil
+}
+
+func executeDeployTarget(target attehcl.Target, root string) (attehcl.TargetCommand, error) {
+	decoded, ok := target.Decoded.(deployTarget)
+	if !ok {
+		return attehcl.TargetCommand{}, fmt.Errorf("target %q has an invalid deploy decoded value", target.ID)
+	}
+	return attehcl.TargetCommand{
+		Dir:  root,
+		Args: []string{"echo", fmt.Sprintf("deploy %s to %s", target.Name, decoded.Env)},
+	}, nil
+}
+
 func main() {
 	if err := execute(); err != nil {
 		log.Fatal(err)
@@ -72,5 +102,37 @@ func main() {
 func execute() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return cmd.ExecuteContext(ctx)
+
+	repository, directory, cleanup, err := newMockRepository(ctx)
+	if err != nil {
+		return fmt.Errorf("create mock repository: %w", err)
+	}
+	defer cleanup()
+
+	return cmd.ExecuteWithOptions(ctx, os.Args[1:], cmd.ExecuteOptions{
+		Repository:       repository,
+		WorkingDirectory: directory,
+	})
+}
+
+func newMockRepository(ctx context.Context) (*attegit.Repo, string, func(), error) {
+	mock, err := attegitmock.New(ctx)
+	if err != nil {
+		return nil, "", func() {}, err
+	}
+	cleanup := func() { _ = mock.Cleanup() }
+	if err := mock.WriteFile(attehcl.Filename, []byte(mockAtteHCL), 0o644); err != nil {
+		cleanup()
+		return nil, "", func() {}, err
+	}
+	if err := mock.CommitAll("add deploy target"); err != nil {
+		cleanup()
+		return nil, "", func() {}, err
+	}
+	repository, err := attegit.Open(mock.Dir(), "HEAD", attegit.WithWorkingTree())
+	if err != nil {
+		cleanup()
+		return nil, "", func() {}, err
+	}
+	return repository, mock.Dir(), cleanup, nil
 }
