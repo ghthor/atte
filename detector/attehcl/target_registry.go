@@ -3,6 +3,7 @@ package attehcl
 import (
 	"context"
 	"fmt"
+	"maps"
 	"reflect"
 	"strings"
 	"sync"
@@ -13,6 +14,7 @@ import (
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/zclconf/go-cty/cty"
+	"github.com/zclconf/go-cty/cty/function"
 )
 
 // Kind identifies a registered target kind and its target namespace.
@@ -192,39 +194,133 @@ func validateDecoderResult(kind Kind, decoded any) error {
 	return nil
 }
 
-func decodeTargetDependencies(attribute *hcl.Attribute, ctx *hcl.EvalContext) ([]dependency, error) {
-	list, ok := attribute.Expr.(*hclsyntax.TupleConsExpr)
+const targetTraversalValuePrefix = "attehcl-target:"
+
+func targetTraversalValue(kind Kind, name string) string {
+	return targetTraversalValuePrefix + string(kind) + "." + name
+}
+
+func targetTraversalFromValue(value string) (hcl.Traversal, bool) {
+	raw, ok := strings.CutPrefix(value, targetTraversalValuePrefix)
 	if !ok {
-		return nil, fmt.Errorf("must be a literal list")
+		return nil, false
 	}
-	dependencies := make([]dependency, 0, len(list.Exprs))
-	for _, element := range list.Exprs {
-		if traversal, ok := element.(*hclsyntax.ScopeTraversalExpr); ok {
-			dependencies = append(dependencies, dependency{traversal: traversal.Traversal})
-			continue
-		}
-		value, diagnostics := element.Value(ctx)
-		if diagnostics.HasErrors() {
-			return nil, targetDiagnosticsError{diagnostics: diagnostics}
-		}
-		if value.Type() == attegit.RepositoryPathType {
-			blob := *value.EncapsulatedValue().(*reference.Blob)
-			dependencies = append(dependencies, dependency{value: DecodingPathPrefix + blob.String()})
-			continue
-		}
-		if value.Type() != cty.String {
-			return nil, fmt.Errorf("values must be strings or paths")
-		}
-		raw := value.AsString()
-		if value, ok := strings.CutPrefix(raw, "attehcl-id:"); ok {
-			dependencies = append(dependencies, dependency{entity: graph.EntityID(value)})
-		} else if strings.HasPrefix(raw, "attego:") {
-			dependencies = append(dependencies, dependency{entity: graph.EntityID(raw)})
-		} else {
-			dependencies = append(dependencies, dependency{value: raw})
-		}
+	kind, name, ok := strings.Cut(raw, ".")
+	if !ok || !hclsyntax.ValidIdentifier(kind) || !hclsyntax.ValidIdentifier(name) {
+		return nil, false
 	}
-	return dependencies, nil
+	return hcl.Traversal{
+		hcl.TraverseRoot{Name: kind},
+		hcl.TraverseAttr{Name: name},
+	}, true
+}
+
+func decodeTargetDependencies(attribute *hcl.Attribute, ctx *hcl.EvalContext) ([]dependency, error) {
+	value, diagnostics := attribute.Expr.Value(dependencyEvalContext(ctx))
+	if diagnostics.HasErrors() {
+		return nil, targetDiagnosticsError{diagnostics: diagnostics}
+	}
+	if !value.IsKnown() {
+		return nil, fmt.Errorf("dependency expression must be known")
+	}
+	if value.IsNull() || (!value.Type().IsTupleType() && !value.Type().IsListType() && !value.Type().IsSetType()) {
+		return nil, fmt.Errorf("dependency expression must evaluate to a list")
+	}
+	return decodeDependencyValue(value)
+}
+
+func dependencyEvalContext(ctx *hcl.EvalContext) *hcl.EvalContext {
+	variables := make(map[string]cty.Value, len(ctx.Variables))
+	for name, value := range ctx.Variables {
+		variables[name] = dependencyValue(value)
+	}
+	functions := make(map[string]function.Function, len(ctx.Functions))
+	maps.Copy(functions, ctx.Functions)
+	if path, ok := functions["path"]; ok {
+		functions["path"] = dependencyPathFunction(path)
+	}
+	return &hcl.EvalContext{Variables: variables, Functions: functions}
+}
+
+func dependencyPathFunction(path function.Function) function.Function {
+	return function.New(&function.Spec{
+		Params: path.Params(),
+		Type:   function.StaticReturnType(cty.String),
+		Impl: func(args []cty.Value, _ cty.Type) (cty.Value, error) {
+			value, err := path.Call(args)
+			if err != nil {
+				return cty.NilVal, err
+			}
+			return dependencyValue(value), nil
+		},
+	})
+}
+
+func dependencyValue(value cty.Value) cty.Value {
+	if !value.IsKnown() || value.IsNull() {
+		return value
+	}
+	if value.Type() == attegit.RepositoryPathType {
+		blob := *value.EncapsulatedValue().(*reference.Blob)
+		return cty.StringVal(DecodingPathPrefix + blob.String())
+	}
+	if value.Type().IsTupleType() || value.Type().IsListType() || value.Type().IsSetType() {
+		elements := make([]cty.Value, 0)
+		iterator := value.ElementIterator()
+		for iterator.Next() {
+			_, element := iterator.Element()
+			elements = append(elements, dependencyValue(element))
+		}
+		return cty.TupleVal(elements)
+	}
+	if value.Type().IsObjectType() {
+		attributes := make(map[string]cty.Value, len(value.AsValueMap()))
+		for name, attribute := range value.AsValueMap() {
+			attributes[name] = dependencyValue(attribute)
+		}
+		return cty.ObjectVal(attributes)
+	}
+	return value
+}
+
+func decodeDependencyValue(value cty.Value) ([]dependency, error) {
+	if !value.IsKnown() {
+		return nil, fmt.Errorf("dependency value must be known")
+	}
+	if value.IsNull() {
+		return nil, fmt.Errorf("dependency value must not be null")
+	}
+	if value.Type().IsTupleType() || value.Type().IsListType() || value.Type().IsSetType() {
+		dependencies := make([]dependency, 0)
+		iterator := value.ElementIterator()
+		for iterator.Next() {
+			_, element := iterator.Element()
+			decoded, err := decodeDependencyValue(element)
+			if err != nil {
+				return nil, err
+			}
+			dependencies = append(dependencies, decoded...)
+		}
+		return dependencies, nil
+	}
+	if value.Type() == attegit.RepositoryPathType {
+		blob := *value.EncapsulatedValue().(*reference.Blob)
+		return []dependency{{value: DecodingPathPrefix + blob.String()}}, nil
+	}
+	if value.Type() != cty.String {
+		return nil, fmt.Errorf("values must be strings or paths")
+	}
+	raw := value.AsString()
+	if traversal, ok := targetTraversalFromValue(raw); ok {
+		return []dependency{{traversal: traversal}}, nil
+	}
+	if entity, ok := strings.CutPrefix(raw, "attehcl-id:"); ok {
+		return []dependency{{entity: graph.EntityID(entity)}}, nil
+	}
+	if strings.HasPrefix(raw, "attego:") {
+		return []dependency{{entity: graph.EntityID(raw)}}, nil
+	}
+	return []dependency{{value: raw}}, nil
 }
 
 type targetDiagnosticsError struct {

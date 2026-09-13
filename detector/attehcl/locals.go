@@ -10,7 +10,8 @@ import (
 )
 
 type hclScope struct {
-	local cty.Value
+	local   cty.Value
+	targets map[string]cty.Value
 }
 
 func objectValue(values map[string]cty.Value) cty.Value {
@@ -20,8 +21,11 @@ func objectValue(values map[string]cty.Value) cty.Value {
 	return cty.ObjectVal(values)
 }
 
-func localContext(values map[string]cty.Value, functions map[string]function.Function) *hcl.EvalContext {
-	return &hcl.EvalContext{Variables: map[string]cty.Value{"local": objectValue(values)}, Functions: functions}
+func localContext(values, targets map[string]cty.Value, functions map[string]function.Function) *hcl.EvalContext {
+	variables := make(map[string]cty.Value, len(targets)+1)
+	variables["local"] = objectValue(values)
+	maps.Copy(variables, targets)
+	return &hcl.EvalContext{Variables: variables, Functions: functions}
 }
 
 func evaluateDeclaration(expression hcl.Expression, context *hcl.EvalContext) (cty.Value, hcl.Diagnostics) {
@@ -30,7 +34,30 @@ func evaluateDeclaration(expression hcl.Expression, context *hcl.EvalContext) (c
 
 // evaluateLocals resolves file-local declarations without consulting another
 // atte.hcl file. Cross-file target dependencies are a later graph phase.
-func evaluateLocals(file *hclFile, expressions map[string]hcl.Expression, functions map[string]function.Function) (map[string]cty.Value, error) {
+func targetContextValues(blocks []normalizedBlock, kinds map[Kind]targetKindSpec) map[string]cty.Value {
+	attributes := make(map[Kind]map[string]cty.Value, len(kinds))
+	for kind := range kinds {
+		attributes[kind] = make(map[string]cty.Value)
+	}
+	for _, block := range blocks {
+		if block.name == "" {
+			continue
+		}
+		attributes[block.kind][block.name] = cty.StringVal(targetTraversalValue(block.kind, block.name))
+	}
+	targets := make(map[string]cty.Value, len(attributes))
+	for kind, values := range attributes {
+		targets[string(kind)] = objectValue(values)
+	}
+	return targets
+}
+
+func evaluateLocals(
+	file *hclFile,
+	expressions map[string]hcl.Expression,
+	targets map[string]cty.Value,
+	functions map[string]function.Function,
+) (map[string]cty.Value, error) {
 	values := make(map[string]cty.Value, len(expressions))
 	pending := make(map[string]hcl.Expression, len(expressions))
 	maps.Copy(pending, expressions)
@@ -40,7 +67,7 @@ func evaluateLocals(file *hclFile, expressions map[string]hcl.Expression, functi
 		var lastDiags hcl.Diagnostics
 		for name, expr := range pending {
 			lastName = name
-			ctx := localContext(values, functions)
+			ctx := localContext(values, targets, functions)
 			value, diags := evaluateDeclaration(expr, ctx)
 			if diags.HasErrors() {
 				lastDiags = diags
@@ -60,14 +87,15 @@ func evaluateLocals(file *hclFile, expressions map[string]hcl.Expression, functi
 	return values, nil
 }
 
-func (p localsPhase) scopeFor(file *hclFile) (hclScope, error) {
+func (p localsPhase) scopeFor(file *hclFile, blocks []normalizedBlock) (hclScope, error) {
 	functions, err := p.evaluator.hclFunctions(file.file)
 	if err != nil {
 		return hclScope{}, err
 	}
-	locals, err := evaluateLocals(file, file.locals, functions)
+	targets := targetContextValues(blocks, p.evaluator.kindSpecs)
+	locals, err := evaluateLocals(file, file.locals, targets, functions)
 	if err != nil {
 		return hclScope{}, err
 	}
-	return hclScope{local: objectValue(locals)}, nil
+	return hclScope{local: objectValue(locals), targets: targets}, nil
 }

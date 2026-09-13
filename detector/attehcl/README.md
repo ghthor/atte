@@ -98,12 +98,13 @@ codegen "schema" {
 ```
 
 `script` accepts an inline string or a repository-relative `path(...)` value.
-Dependency collections may contain repository paths, detector references
-provided by supported HCL functions, and literal target traversals. Ordinary
-expressions are evaluated while the file's targets are decoded and must
-resolve to known values. Literal target traversals are preserved symbolically
-for a later graph phase; target enumeration does not resolve them.
+`depends_on` and `triggered_by` accept any expression that evaluates to a
+known list of graph dependencies. The list may contain repository paths,
+detector references returned by supported HCL functions, and target traversals,
+including values assembled through functions such as `concat` or `flatten`.
+Target traversals are preserved symbolically for a later graph phase; target
+enumeration does not resolve them.
 
 `locals` may be used as file-local target input. Multiple `locals` blocks are
-merged and duplicate names are rejected. Locals may reference other locals in
-the same file. Locals do not propagate to other files.
+merged and duplicate names are rejected. Locals may reference other locals and
+named targets in the same file. Locals do not propagate to other files.

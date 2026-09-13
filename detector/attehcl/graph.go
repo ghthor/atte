@@ -25,8 +25,8 @@ func graphScriptTarget(ctx context.Context, repo *attegit.Repo, target Target, g
 		return TargetGraph{}, fmt.Errorf("target %q has no script", target.Name)
 	}
 	result := target.GraphProjectionBase(attachToTree)
-	script := strings.TrimPrefix(decoded.Script, DecodingPathPrefix)
-	if script != "" {
+	script, isPath := strings.CutPrefix(decoded.Script, DecodingPathPrefix)
+	if isPath && script != "" {
 		targetBlob, err := reference.ResolveBlobFromBlob(target.File, reference.SomePath(script))
 		if err != nil {
 			return TargetGraph{}, fmt.Errorf("%q: %w", target.File, err)

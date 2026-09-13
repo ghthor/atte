@@ -205,7 +205,7 @@ func TestGraphRejectsInvalidConfiguration(t *testing.T) {
 		},
 		{
 			name: "path traversal",
-			file: `test { script = "../../missing.sh" }`,
+			file: `test { script = path("../../missing.sh") }`,
 		},
 	}
 
@@ -214,7 +214,7 @@ func TestGraphRejectsInvalidConfiguration(t *testing.T) {
 			repo := newHCLFixture(t, map[string]string{
 				"nested/atte.hcl": tt.file,
 			})
-			_, err := Graph(t.Context(), repo)
+			_, err := Graph(t.Context(), repo, WithFunctions(attegit.PathHCLFunctions))
 			test.Error(t, err)
 		})
 	}
@@ -373,6 +373,122 @@ func TestTargetRegistryRejectsUnknownAndMalformedBlocks(t *testing.T) {
 	reject(`target { script = "echo" }`, "target block must have one or two labels")
 	reject(`target "test" "one" "two" { script = "echo" }`, "target block must have one or two labels")
 	reject(`test "one" "two" { script = "echo" }`, "target test has too many labels")
+}
+
+func TestTargetDependenciesEvaluateLocalsAndConcat(t *testing.T) {
+	const config = `
+test "go" {
+  script = "go test ./.."
+}
+
+test "py" {
+  script = "pytest"
+}
+
+locals {
+  test_group = [
+    test.go,
+    test.py,
+  ]
+}
+
+test {
+  script = "echo test all"
+
+  depends_on = flatten([
+    concat(
+      local.test_group,
+      [
+        path("some/file"),
+      ],
+    ),
+  ])
+}
+`
+	repo := newHCLFixture(t, map[string]string{
+		"atte.hcl":  strings.TrimLeft(config, "\n"),
+		"some/file": "dependency\n",
+	})
+
+	grouped, err := Targets(t.Context(), repo, attegit.PathHCLFunctions)
+	must.NoError(t, err)
+	decoded := grouped[KindTest][2].Decoded.(decodedTarget)
+	must.Len(t, 3, decoded.Deps)
+	for index, name := range []string{"go", "py"} {
+		test.Len(t, 2, decoded.Deps[index].traversal)
+		test.EqOp(t, "test", decoded.Deps[index].traversal.RootName())
+		test.EqOp(t, name, decoded.Deps[index].traversal[1].(hcl.TraverseAttr).Name)
+	}
+	test.EqOp(t, DecodingPathPrefix+"some/file", decoded.Deps[2].value)
+}
+
+func TestGraphProjectsLocalPathDependency(t *testing.T) {
+	const config = `
+locals {
+  dependency = "./config.yaml"
+}
+
+test {
+  script = path("./test.sh")
+  depends_on = [local.dependency]
+}
+`
+	repo := newHCLFixture(t, map[string]string{
+		"atte.hcl":    strings.TrimLeft(config, "\n"),
+		"test.sh":     "#!/bin/sh\n",
+		"config.yaml": "config\n",
+	})
+
+	got, err := Graph(t.Context(), repo, WithFunctions(attegit.PathHCLFunctions))
+	must.NoError(t, err)
+	testTarget := EntityID(TestKind, "atte.hcl", "0")
+	graphtest.MustHaveRelation(t, got, testTarget, attegit.EntityID(testPath("config.yaml")), DependsOnRelation)
+}
+
+func TestGraphProjectsEvaluatedLocalDependencies(t *testing.T) {
+	const config = `
+test "go" {
+  script = path("./go.sh")
+}
+
+test "py" {
+  script = path("./py.sh")
+}
+
+locals {
+  test_group = [
+    test.go,
+    test.py,
+  ]
+}
+
+test {
+  script = path("./all.sh")
+  depends_on = flatten([
+    concat(
+      local.test_group,
+      [
+        path("some/file"),
+      ],
+    ),
+  ])
+}
+`
+	repo := newHCLFixture(t, map[string]string{
+		"atte.hcl":  strings.TrimLeft(config, "\n"),
+		"go.sh":     "#!/bin/sh\n",
+		"py.sh":     "#!/bin/sh\n",
+		"all.sh":    "#!/bin/sh\n",
+		"some/file": "dependency\n",
+	})
+
+	got, err := Graph(t.Context(), repo, WithFunctions(attegit.PathHCLFunctions))
+	must.NoError(t, err)
+
+	all := EntityID(TestKind, "atte.hcl", "2")
+	graphtest.MustHaveRelation(t, got, all, EntityID(TestKind, "atte.hcl", "go"), DependsOnRelation)
+	graphtest.MustHaveRelation(t, got, all, EntityID(TestKind, "atte.hcl", "py"), DependsOnRelation)
+	graphtest.MustHaveRelation(t, got, all, attegit.EntityID(testPath("some/file")), DependsOnRelation)
 }
 
 func TestTargetEvaluationPreservesTraversalsAndProjectsConsistently(t *testing.T) {

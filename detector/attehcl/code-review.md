@@ -25,7 +25,7 @@
 
 The package has a sound pipeline and good recent separation between declaration discovery, target evaluation, and graph assembly. The target capability registry is also a useful extensibility boundary.
 
-The main remaining opportunity for targeted behavioral work is fixing local traversals in dependency lists, which are currently preserved as target traversals instead of being evaluated through the local scope.
+The main remaining opportunities are algorithmic simplification and reducing duplication in the dependency projection and evaluator construction paths.
 
 ## Findings
 
@@ -132,47 +132,7 @@ decodeTestTarget -> decodeScriptTarget
 
 ---
 
-### 3. Local traversals in dependency lists are likely mishandled
-
-`decodeTargetDependencies` preserves every `hclsyntax.ScopeTraversalExpr` symbolically before evaluating it:
-
-```go
-if traversal, ok := element.(*hclsyntax.ScopeTraversalExpr); ok {
-    dependencies = append(dependencies, dependency{traversal: traversal.Traversal})
-    continue
-}
-```
-
-Consequently, this configuration is likely treated incorrectly:
-
-```hcl
-locals {
-  dependency = "./config.yaml"
-}
-
-test {
-  script     = "echo test"
-  depends_on = [local.dependency]
-}
-```
-
-`local.dependency` is preserved as though it were a target traversal. During graph assembly it is then resolved as a `kind.name` traversal and rejected.
-
-This is inconsistent with the documented behavior that locals may be used as file-local target input.
-
-#### Recommendation
-
-Only preserve traversals intended to be target references:
-
-- Evaluate traversals rooted at `local`.
-- Preserve traversals rooted at registered target kinds.
-- Reject or evaluate all other expressions consistently.
-
-Add a focused regression test using a local path in `depends_on` or `triggered_by`.
-
----
-
-### 4. Evaluator construction contains avoidable duplication
+### 3. Evaluator construction contains avoidable duplication
 
 `newEvaluator` and `newEvaluatorForFile` both construct the same evaluator fields:
 
@@ -202,7 +162,7 @@ There is similar repetition in `declaredTargets` and `evaluatedTargets`, which b
 
 ---
 
-### 5. `ConfigFor` contains redundant filtering
+### 4. `ConfigFor` contains redundant filtering
 
 `ConfigFor` creates an evaluator containing exactly one file and evaluates only that file:
 
@@ -226,7 +186,7 @@ Once the single-file invariant is retained, this can return `allTargets` directl
 
 ---
 
-### 6. Dead or low-value abstractions are accumulating
+### 5. Dead or low-value abstractions are accumulating
 
 A few constructs currently add more indirection than value:
 
@@ -254,7 +214,7 @@ These are not urgent, but removing them would make the evaluator easier to follo
 
 ---
 
-### 7. Registry snapshots are more expensive than necessary
+### 6. Registry snapshots are more expensive than necessary
 
 `targetRegistrySnapshot` copies every registered schema for every evaluator. That is reasonable for evaluator snapshot isolation, but `DecodeEntityID` also calls it for every decoded HCL entity ID:
 
@@ -282,7 +242,7 @@ Use a complete snapshot only when creating an evaluator. Entity ID validation do
 
 ---
 
-### 8. Diagnostic context rereads files for every diagnostic
+### 7. Diagnostic context rereads files for every diagnostic
 
 `hclDiagnosticContext` calls `repo.Show(file)` and splits the complete file contents for each diagnostic.
 
@@ -326,11 +286,10 @@ This would also avoid repeatedly loading the same blob.
 
 ### Phase 1: Correctness and cheap cleanup
 
-1. Fix `local.*` dependency traversal evaluation.
-2. Remove unused `declarationIndex.byID`.
-3. Remove or inline `evaluateDeclaration`.
-4. Remove redundant `ConfigFor` filtering.
-5. Add regression tests for the behavioral changes.
+1. Remove unused `declarationIndex.byID`.
+2. Remove or inline `evaluateDeclaration`.
+3. Remove redundant `ConfigFor` filtering.
+4. Add regression tests for the behavioral changes.
 
 ### Phase 2: Reduce duplicated construction
 

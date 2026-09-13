@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/ghthor/atte/detector/attegit"
@@ -142,7 +143,10 @@ func (e *evaluator) evalContext(file reference.Blob, scope hclScope) (*hcl.EvalC
 	if err != nil {
 		return nil, err
 	}
-	return &hcl.EvalContext{Variables: map[string]cty.Value{"local": scope.local}, Functions: functions}, nil
+	variables := make(map[string]cty.Value, len(scope.targets)+1)
+	variables["local"] = scope.local
+	maps.Copy(variables, scope.targets)
+	return &hcl.EvalContext{Variables: variables, Functions: functions}, nil
 }
 
 func declarationFromBlock(file reference.Blob, item normalizedBlock) targetDeclaration {
@@ -243,7 +247,7 @@ func (p targetsPhase) evaluatedTargets(file *hclFile) ([]evaluatedTarget, error)
 	if err != nil {
 		return nil, err
 	}
-	scope, err := localsPhase(p).scopeFor(file)
+	scope, err := localsPhase(p).scopeFor(file, normalized)
 	if err != nil {
 		return nil, err
 	}
