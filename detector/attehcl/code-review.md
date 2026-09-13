@@ -88,35 +88,7 @@ These are not urgent, but removing them would make the evaluator easier to follo
 
 ---
 
-### 3. Registry snapshots are more expensive than necessary
-
-`targetRegistrySnapshot` copies every registered schema for every evaluator. That is reasonable for evaluator snapshot isolation, but `DecodeEntityID` also calls it for every decoded HCL entity ID:
-
-```go
-if _, registered := targetRegistrySnapshot()[Kind(parts[1])]; !registered {
-```
-
-For `K` registered kinds and `D` entity lookups, this can result in approximately `O(D × K)` map-copy and schema-copy work.
-
-#### Recommendation
-
-Add a read-only lookup helper:
-
-```go
-func registeredKind(kind Kind) bool
-```
-
-or:
-
-```go
-func lookupTargetKind(kind Kind) (targetKindSpec, bool)
-```
-
-Use a complete snapshot only when creating an evaluator. Entity ID validation does not need to copy every registered schema.
-
----
-
-### 4. Diagnostic context rereads files for every diagnostic
+### 3. Diagnostic context rereads files for every diagnostic
 
 `hclDiagnosticContext` calls `repo.Show(file)` and splits the complete file contents for each diagnostic.
 
@@ -151,7 +123,7 @@ This would also avoid repeatedly loading the same blob.
 | Local evaluation | `O(L²)` worst case | Repeated map scans; should become `O(L + references)` |
 | Target decoding | `O(blocks + expression evaluation)` | Provider function cost is external |
 | Graph assembly | `O(targets + dependencies + projected entities)` | Capability callbacks can add external cost |
-| Registry snapshots | `O(registered kinds × schema size)` | Repeated unnecessarily during entity ID validation |
+| Registry snapshots | `O(registered kinds × schema size)` | One complete snapshot per evaluator |
 | Diagnostic rendering | `O(diagnostics × file size)` | File contents are reread per diagnostic |
 
 ---
@@ -166,8 +138,7 @@ This would also avoid repeatedly loading the same blob.
 
 ### Phase 2: Remaining maintainability cleanup
 
-1. Add a registry lookup helper.
-2. Centralize target identity construction.
+1. Centralize target identity construction.
 
 ### Phase 3: Improve algorithmic complexity
 

@@ -152,6 +152,13 @@ func register[K ~string](kind K, spec TargetKindSpec, script targetScriptProject
 	return nil
 }
 
+func registeredKind(kind Kind) bool {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+	_, registered := registry[kind]
+	return registered
+}
+
 func targetRegistrySnapshot() map[Kind]targetKindSpec {
 	registryMu.RLock()
 	defer registryMu.RUnlock()

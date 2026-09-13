@@ -85,7 +85,7 @@ func DecodeEntityID(id graph.EntityID) (string, reference.Blob, string, error) {
 		return "", "", "", fmt.Errorf("invalid attehcl entity ID %q", id)
 	}
 	kind := parts[0] + ":" + parts[1]
-	if _, registered := targetRegistrySnapshot()[Kind(parts[1])]; !registered {
+	if !registeredKind(Kind(parts[1])) {
 		return "", "", "", fmt.Errorf("invalid attehcl entity ID %q", id)
 	}
 	file, err := reference.ParseBlob(parts[2])

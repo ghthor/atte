@@ -734,6 +734,12 @@ func TestEntityIDRoundTrip(t *testing.T) {
 	}
 }
 
+func TestDecodeEntityIDRejectsUnknownKind(t *testing.T) {
+	id := EntityID(Namespace+":unknown", "nested/atte.hcl", "unit")
+	_, _, _, err := DecodeEntityID(id)
+	test.ErrorContains(t, err, "invalid attehcl entity ID")
+}
+
 func TestDeclaredTargetsDoesNotEvaluateBodies(t *testing.T) {
 	calls := 0
 	repo := newHCLFixture(t, map[string]string{
