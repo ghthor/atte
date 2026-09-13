@@ -25,10 +25,7 @@
 
 The package has a sound pipeline and good recent separation between declaration discovery, target evaluation, and graph assembly. The target capability registry is also a useful extensibility boundary.
 
-The main remaining opportunities are algorithmic simplification and targeted behavioral fixes. There are two behavioral issues worth addressing:
-
-1. `Graph` can panic when passed a nil context.
-2. Local traversals in dependency lists are preserved as target traversals instead of being evaluated through the local scope.
+The main remaining opportunity for targeted behavioral work is fixing local traversals in dependency lists, which are currently preserved as target traversals instead of being evaluated through the local scope.
 
 ## Findings
 
@@ -175,37 +172,7 @@ Add a focused regression test using a local path in `depends_on` or `triggered_b
 
 ---
 
-### 4. Public `Graph` can panic with a nil context
-
-`newEvaluator` and `newEvaluatorForFile` normalize nil contexts to `context.Background()`, but `Graph` checks the context first:
-
-```go
-func Graph(ctx context.Context, repo *attegit.Repo, options ...graphset.Option) (*graph.Graph, error) {
-    if err := ctx.Err(); err != nil {
-        return nil, err
-    }
-```
-
-Calling `Graph(nil, repo)` panics before reaching the normalization logic.
-
-#### Recommendation
-
-Normalize context at the public API boundary:
-
-```go
-func normalizeContext(ctx context.Context) context.Context {
-    if ctx == nil {
-        return context.Background()
-    }
-    return ctx
-}
-```
-
-Use it consistently in `Graph`, `DeclaredTargets`, `ConfigFor`, and `Targets`. Alternatively, remove nil-context support entirely and consistently treat nil as invalid. The current mixed behavior is the problem.
-
----
-
-### 5. Evaluator construction contains avoidable duplication
+### 4. Evaluator construction contains avoidable duplication
 
 `newEvaluator` and `newEvaluatorForFile` both construct the same evaluator fields:
 
@@ -235,7 +202,7 @@ There is similar repetition in `declaredTargets` and `evaluatedTargets`, which b
 
 ---
 
-### 6. `ConfigFor` contains redundant filtering
+### 5. `ConfigFor` contains redundant filtering
 
 `ConfigFor` creates an evaluator containing exactly one file and evaluates only that file:
 
@@ -259,7 +226,7 @@ Once the single-file invariant is retained, this can return `allTargets` directl
 
 ---
 
-### 7. Dead or low-value abstractions are accumulating
+### 6. Dead or low-value abstractions are accumulating
 
 A few constructs currently add more indirection than value:
 
@@ -287,7 +254,7 @@ These are not urgent, but removing them would make the evaluator easier to follo
 
 ---
 
-### 8. Registry snapshots are more expensive than necessary
+### 7. Registry snapshots are more expensive than necessary
 
 `targetRegistrySnapshot` copies every registered schema for every evaluator. That is reasonable for evaluator snapshot isolation, but `DecodeEntityID` also calls it for every decoded HCL entity ID:
 
@@ -315,7 +282,7 @@ Use a complete snapshot only when creating an evaluator. Entity ID validation do
 
 ---
 
-### 9. Diagnostic context rereads files for every diagnostic
+### 8. Diagnostic context rereads files for every diagnostic
 
 `hclDiagnosticContext` calls `repo.Show(file)` and splits the complete file contents for each diagnostic.
 
@@ -359,12 +326,11 @@ This would also avoid repeatedly loading the same blob.
 
 ### Phase 1: Correctness and cheap cleanup
 
-1. Normalize nil contexts in public APIs.
-2. Fix `local.*` dependency traversal evaluation.
-3. Remove unused `declarationIndex.byID`.
-4. Remove or inline `evaluateDeclaration`.
-5. Remove redundant `ConfigFor` filtering.
-6. Add regression tests for the behavioral changes.
+1. Fix `local.*` dependency traversal evaluation.
+2. Remove unused `declarationIndex.byID`.
+3. Remove or inline `evaluateDeclaration`.
+4. Remove redundant `ConfigFor` filtering.
+5. Add regression tests for the behavioral changes.
 
 ### Phase 2: Reduce duplicated construction
 

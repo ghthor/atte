@@ -13,12 +13,18 @@ import (
 
 // Targets evaluates all atte.hcl files independently and groups declarations by kind.
 func Targets(ctx context.Context, repo *attegit.Repo, provider graphset.FunctionProvider) (map[Kind][]Target, error) {
+	if err := checkContext(ctx); err != nil {
+		return nil, err
+	}
 	return targetsWithProvider(ctx, repo, provider)
 }
 
 // DeclaredTargets returns target identities without evaluating target bodies.
 // Results are ordered by repository-relative file path and source order.
 func DeclaredTargets(ctx context.Context, repo *attegit.Repo) ([]graphtarget.ID, error) {
+	if err := checkContext(ctx); err != nil {
+		return nil, err
+	}
 	evaluator, err := newEvaluator(ctx, repo, nil)
 	if err != nil {
 		return nil, err
@@ -67,6 +73,9 @@ type Config struct {
 
 // ConfigFor evaluates the file-local target configuration for a repository-relative directory.
 func ConfigFor(ctx context.Context, repo *attegit.Repo, relativePath string, provider graphset.FunctionProvider) (Config, error) {
+	if err := checkContext(ctx); err != nil {
+		return Config{}, err
+	}
 	return configForWithProvider(ctx, repo, relativePath, provider)
 }
 

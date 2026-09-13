@@ -144,6 +144,12 @@ codegen "go" {
 	test.ErrorContains(t, err, "Call to function \"gopkg\" failed")
 }
 
+func TestGraphRejectsNilContext(t *testing.T) {
+	var ctx context.Context
+	_, err := Graph(ctx, nil)
+	test.ErrorContains(t, err, "context must not be nil")
+}
+
 func TestGraphRejectsInvalidConfiguration(t *testing.T) {
 	tests := []struct {
 		name string

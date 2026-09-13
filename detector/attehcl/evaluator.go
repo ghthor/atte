@@ -68,14 +68,18 @@ type targetsPhase struct {
 	evaluator *evaluator
 }
 
+func checkContext(ctx context.Context) error {
+	if ctx == nil {
+		return fmt.Errorf("context must not be nil")
+	}
+	return ctx.Err()
+}
+
 func newEvaluator(ctx context.Context, repo *attegit.Repo, provider graphset.FunctionProvider) (*evaluator, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("repository is nil")
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if err := ctx.Err(); err != nil {
+	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
 	files, err := readHCLFiles(ctx, repo)
@@ -96,10 +100,7 @@ func newEvaluatorForFile(ctx context.Context, repo *attegit.Repo, file reference
 	if repo == nil {
 		return nil, fmt.Errorf("repository is nil")
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if err := ctx.Err(); err != nil {
+	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
 	parsed := &hclFile{

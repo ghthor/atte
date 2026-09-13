@@ -76,7 +76,7 @@ func graphScriptTarget(ctx context.Context, repo *attegit.Repo, target Target, g
 
 // Graph builds the HCL detector graph using the supplied options.
 func Graph(ctx context.Context, repo *attegit.Repo, options ...graphset.Option) (*graph.Graph, error) {
-	if err := ctx.Err(); err != nil {
+	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
 	config := graphset.Options{}
