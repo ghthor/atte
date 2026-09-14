@@ -28,3 +28,12 @@ type TargetDetector interface {
 	Detector
 	Targets(context.Context, *attegit.Repo) ([]graphtarget.ID, error)
 }
+
+// EntityDecoder validates an entity ID and returns its detector-specific kind.
+// IDs must begin with the detector namespace followed by a colon. A detector
+// may return its namespace as the kind when the ID does not encode a more
+// specific kind, as with attegit path IDs.
+type EntityDecoder interface {
+	Detector
+	DecodeID(id graph.EntityID) (graph.Entity, error)
+}

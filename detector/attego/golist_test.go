@@ -177,7 +177,7 @@ func addGoListImport(
 			kind = PackageKind
 		}
 	}
-	entities[target] = graph.Entity{ID: target, Kind: kind}
+	entities[target] = graph.Entity{ID: target, Kind: graph.EntityKind(kind)}
 	relations[graph.Relationship{From: from, To: target, Kind: ImportsRelation}] = struct{}{}
 }
 

@@ -49,7 +49,7 @@ type TargetKindSpec struct {
 type TargetGraphContext struct {
 	ResolveTarget   func(hcl.Traversal) (graph.Entity, error)
 	ResolveTargetAt func(reference.Blob, hcl.Traversal) (graph.Entity, error)
-	EntityKind      func(graph.EntityID) (string, error)
+	EntityKind      func(graph.EntityID) (graph.EntityKind, error)
 }
 
 // TargetGraph is the graph projection of one target.

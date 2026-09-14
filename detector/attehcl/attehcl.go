@@ -8,8 +8,9 @@ import (
 )
 
 const (
-	Filename                              = "atte.hcl"
-	Namespace                             = "attehcl"
+	Filename  = "atte.hcl"
+	Namespace = "attehcl"
+
 	TestKind                              = Namespace + ":test"
 	CodegenKind                           = Namespace + ":codegen"
 	LintKind                              = Namespace + ":lint"

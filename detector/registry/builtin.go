@@ -13,10 +13,14 @@ import (
 // NewBuiltIn returns a registry containing atte's built-in detectors and HCL functions.
 func NewBuiltIn() (*Registry, error) {
 	r := New()
+
+	if err := r.RegisterDetector(attegit.Detector{}); err != nil {
+		return nil, err
+	}
 	if err := r.RegisterDetector(attego.Detector{}); err != nil {
 		return nil, err
 	}
-	if err := r.RegisterDetector(attehcl.NewDetector(r.FunctionProvider())); err != nil {
+	if err := r.RegisterDetector(attehcl.NewDetector(r.FunctionProvider(), r.DecodeID)); err != nil {
 		return nil, err
 	}
 	if err := r.RegisterHCLFunction("path", attegit.PathHCLFunction); err != nil {

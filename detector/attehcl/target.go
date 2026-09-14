@@ -193,7 +193,7 @@ func (target Target) Command(root string) (*exec.Cmd, error) {
 // GraphProjectionBase returns the target entity and, when requested, the common
 // declaring-file and tree entities and relationships for a target.
 func (target Target) GraphProjectionBase(attachToTree bool) TargetGraph {
-	result := TargetGraph{Entities: []graph.Entity{{ID: target.ID, Kind: target.Kind}}}
+	result := TargetGraph{Entities: []graph.Entity{{ID: target.ID, Kind: graph.EntityKind(target.Kind)}}}
 	if !attachToTree {
 		return result
 	}

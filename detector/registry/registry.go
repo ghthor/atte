@@ -22,6 +22,7 @@ type Detector struct {
 	Namespace string
 	Graph     func(context.Context, *attegit.Repo, ...graphset.Option) (*graph.Graph, error)
 	Targets   func(context.Context, *attegit.Repo) ([]graphtarget.ID, error)
+	DecodeID  func(graph.EntityID) (graph.Entity, error)
 }
 
 // HCLFunctionFactory constructs a function for one repository and HCL file.
@@ -47,7 +48,7 @@ func (r *Registry) Register(detector Detector) error {
 	if detector.Namespace == "" {
 		return fmt.Errorf("detector namespace is empty")
 	}
-	if detector.Graph == nil && detector.Targets == nil {
+	if detector.Graph == nil && detector.Targets == nil && detector.DecodeID == nil {
 		return fmt.Errorf("detector %q has no capabilities", detector.Namespace)
 	}
 	r.mu.Lock()
@@ -70,6 +71,9 @@ func (r *Registry) RegisterDetector(value detector.Detector) error {
 	}
 	if targetDetector, ok := value.(detector.TargetDetector); ok {
 		adapted.Targets = targetDetector.Targets
+	}
+	if entityDecoder, ok := value.(detector.EntityDecoder); ok {
+		adapted.DecodeID = entityDecoder.DecodeID
 	}
 	return r.Register(adapted)
 }
@@ -160,6 +164,31 @@ func (r *Registry) Targets(ctx context.Context, repo *attegit.Repo) ([]graphtarg
 		targets = append(targets, found...)
 	}
 	return targets, nil
+}
+
+// DecodeID resolves an entity ID using the detector registered for its namespace.
+func (r *Registry) DecodeID(id graph.EntityID) (graph.Entity, error) {
+	if r == nil {
+		return graph.Entity{}, fmt.Errorf("registry is nil")
+	}
+	namespace := id.Namespace()
+	if namespace == "" {
+		return graph.Entity{}, fmt.Errorf("entity ID %q has no namespace", id)
+	}
+	r.mu.RLock()
+	d, ok := r.detectors[namespace]
+	r.mu.RUnlock()
+	if !ok {
+		return graph.Entity{}, fmt.Errorf("no detector registered for entity namespace %q", namespace)
+	}
+	if d.DecodeID == nil {
+		return graph.Entity{}, fmt.Errorf("detector %q does not decode entity IDs", namespace)
+	}
+	entity, err := d.DecodeID(id)
+	if err != nil {
+		return graph.Entity{}, fmt.Errorf("decode %q entity ID: %w", namespace, err)
+	}
+	return entity, nil
 }
 
 func (r *Registry) snapshot() []Detector {

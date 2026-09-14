@@ -27,7 +27,8 @@ import (
 // Namespace prefixes entity IDs produced by this package. The package-kind
 // values distinguish repository packages, package tests, and unresolved imports.
 const (
-	Namespace           = "attego"
+	Namespace = "attego"
+
 	PackageKind         = Namespace + ":package"
 	PackageTestKind     = Namespace + ":package-test"
 	PackageStdlibKind   = Namespace + ":package-stdlib"
@@ -99,6 +100,15 @@ func DecodeEntityID(id graph.EntityID) (string, reference.Tree, string, error) {
 type Detector struct{}
 
 func (Detector) Namespace() string { return Namespace }
+
+// DecodeID converts an attego entity ID into the shared graph representation.
+func (Detector) DecodeID(id graph.EntityID) (graph.Entity, error) {
+	kind, _, _, err := DecodeEntityID(id)
+	if err != nil {
+		return graph.Entity{}, err
+	}
+	return graph.Entity{ID: id, Kind: graph.EntityKind(kind)}, nil
+}
 
 func init() {
 	if err := selector.Register(Namespace, matchSelector, renderSelector); err != nil {
@@ -191,7 +201,7 @@ func Targets(ctx context.Context, repo *attegit.Repo) ([]Target, error) {
 		if packageDir == "" {
 			continue
 		}
-		targets = append(targets, Target{ID: id, Kind: entity.Kind, ModuleDir: moduleDir, PackageDir: packageDir, ImportPath: importPath})
+		targets = append(targets, Target{ID: id, Kind: string(entity.Kind), ModuleDir: moduleDir, PackageDir: packageDir, ImportPath: importPath})
 	}
 	return targets, nil
 }
@@ -434,7 +444,7 @@ func addImport(
 			kind = PackageStdlibKind
 		}
 		target = EntityID(kind, p.module.dir, imp)
-		entities[target] = graph.Entity{ID: target, Kind: kind}
+		entities[target] = graph.Entity{ID: target, Kind: graph.EntityKind(kind)}
 	}
 	relations[graph.Relationship{From: from, To: target, Kind: ImportsRelation}] = struct{}{}
 }

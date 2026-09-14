@@ -11,10 +11,18 @@ import (
 // EntityID uniquely identifies an entity in a Graph.
 type EntityID string
 
+// EntityKind identifies the namespace-qualified kind of a graph entity.
+// Entity kinds use the form "namespace:kind" when a namespace has multiple
+// entity types; a detector may use its namespace alone when an ID does not
+// encode a more specific kind.
+type EntityKind string
+
 // Entity describes a graph entity and its kind.
 type Entity struct {
-	ID   EntityID
-	Kind string
+	ID EntityID
+
+	// Kind identifies the detector-specific type of the entity.
+	Kind EntityKind
 }
 
 // RelationKind identifies the meaning and direction of a relationship.
@@ -25,6 +33,12 @@ type Relationship struct {
 	From EntityID
 	To   EntityID
 	Kind RelationKind
+}
+
+// Namespace returns the portion of the entity ID before its first colon.
+func (id EntityID) Namespace() string {
+	n, _, _ := strings.Cut(string(id), ":")
+	return n
 }
 
 // Graph stores entities and their outgoing relationships. EntityKeys and outgoing

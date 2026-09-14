@@ -171,7 +171,7 @@ go 1.24
 	must.NoError(t, err)
 	goTest := graph.EntityID(value.AsString())
 
-	got, err := Graph(t.Context(), repo, WithFunctions(attego.HCLFunctions))
+	got, err := Graph(t.Context(), repo, WithFunctions(attego.HCLFunctions), graphset.WithEntityDecoder((attego.Detector{}).DecodeID))
 	must.NoError(t, err)
 	graphtest.MustHaveRelation(t, got, EntityID(TestKind, "path1/atte.hcl", "go"), goTest, DependsOnRelation)
 	graphtest.MustHaveRelation(t, got, EntityID(TestKind, "path2/atte.hcl", "py"), EntityID(TestKind, "path1/atte.hcl", "go"), DependsOnRelation)
@@ -318,7 +318,7 @@ codegen "go" {
 		"go.mod": "module example.com/root\n",
 	})
 
-	_, err := Graph(t.Context(), repo, WithFunctions(attego.HCLFunctions))
+	_, err := Graph(t.Context(), repo, WithFunctions(attego.HCLFunctions), graphset.WithEntityDecoder((attego.Detector{}).DecodeID))
 	test.ErrorContains(t, err, `decode HCL "atte.hcl": atte.hcl:3,17-23:`)
 	test.ErrorContains(t, err, "  3 |   depends_on = [gopkg(\"./cmd/mis\")]\n")
 	test.ErrorContains(t, err, "Call to function \"gopkg\" failed")
@@ -685,7 +685,7 @@ lint {
 	must.NoError(t, err)
 	graphtest.MustHaveRelation(t, graph, grouped[KindTest][0].ID, grouped[KindCodegen][0].ID, DependsOnRelation)
 	for _, target := range targets {
-		test.EqOp(t, target.Kind, graph.Entities[target.ID].Kind)
+		test.EqOp(t, target.Kind, string(graph.Entities[target.ID].Kind))
 		canonical := Selector(target).String()
 		test.EqOp(t, canonical, selector.Render(target.File.String(), strings.TrimPrefix(target.Kind, Namespace+":")+"."+target.DisplayName()))
 		test.True(t, Selector(target).Matches(canonical, ""), test.Sprintf("canonical selector should match %s", canonical))

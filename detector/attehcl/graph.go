@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/ghthor/atte/detector/attegit"
-	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphset"
 	"github.com/ghthor/atte/reference"
@@ -106,12 +105,13 @@ func Graph(ctx context.Context, repo *attegit.Repo, options ...graphset.Option) 
 	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
-	config := graphset.Options{}
+	config := graphset.Options{EntityDecoder: (Detector{}).DecodeID}
 	for _, option := range options {
 		if option != nil {
 			option(&config)
 		}
 	}
+
 	return graphFor(ctx, repo, config)
 }
 
@@ -145,7 +145,7 @@ func graphFor(ctx context.Context, repo *attegit.Repo, options graphset.Options)
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		r, err := addEvaluatedTargetGraph(ctx, repo, block, declarations, addEntity, options.AttachToTree)
+		r, err := addEvaluatedTargetGraph(ctx, repo, block, declarations, addEntity, options.AttachToTree, options.EntityDecoder)
 		if err != nil {
 			return nil, err
 		}
@@ -162,6 +162,7 @@ func addEvaluatedTargetGraph(
 	declarations declarationIndex,
 	addEntity func(graph.Entity),
 	containment bool,
+	entityDecoder graphset.EntityDecoder,
 ) ([]graph.Relationship, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -176,16 +177,18 @@ func addEvaluatedTargetGraph(
 			if err != nil {
 				return graph.Entity{}, err
 			}
-			return graph.Entity{ID: declaration.ID, Kind: Namespace + ":" + string(declaration.Kind)}, nil
+			return graph.Entity{ID: declaration.ID, Kind: graph.EntityKind(Namespace + ":" + string(declaration.Kind))}, nil
 		},
 		ResolveTargetAt: func(file reference.Blob, traversal hcl.Traversal) (graph.Entity, error) {
 			declaration, err := resolveTargetTraversal(file, traversal, declarations)
 			if err != nil {
 				return graph.Entity{}, err
 			}
-			return graph.Entity{ID: declaration.ID, Kind: Namespace + ":" + string(declaration.Kind)}, nil
+			return graph.Entity{ID: declaration.ID, Kind: graph.EntityKind(Namespace + ":" + string(declaration.Kind))}, nil
 		},
-		EntityKind: entityDependencyKind,
+		EntityKind: func(id graph.EntityID) (graph.EntityKind, error) {
+			return entityDependencyKind(entityDecoder, id)
+		},
 	}
 	projected, err := native.graph(ctx, repo, native, graphContext, containment)
 	if err != nil {
@@ -213,21 +216,13 @@ func resolveTargetTraversal(file reference.Blob, traversal hcl.Traversal, declar
 	return declaration, nil
 }
 
-func entityDependencyKind(id graph.EntityID) (string, error) {
-	value := string(id)
-	if strings.HasPrefix(value, "attego:") {
-		kind, _, _, err := attego.DecodeEntityID(id)
-		if err != nil {
-			return "", fmt.Errorf("decode Go dependency entity %q: %w", id, err)
-		}
-		return kind, nil
+func entityDependencyKind(decoder graphset.EntityDecoder, id graph.EntityID) (graph.EntityKind, error) {
+	if decoder == nil {
+		return "", fmt.Errorf("no entity decoder configured for dependency %q", id)
 	}
-	if strings.HasPrefix(value, Namespace+":") {
-		kind, _, _, err := DecodeEntityID(id)
-		if err != nil {
-			return "", fmt.Errorf("decode HCL dependency entity %q: %w", id, err)
-		}
-		return kind, nil
+	entity, err := decoder(id)
+	if err != nil {
+		return "", fmt.Errorf("decode dependency entity %q: %w", id, err)
 	}
-	return "", fmt.Errorf("dependency entity %q has unknown namespace", id)
+	return entity.Kind, nil
 }

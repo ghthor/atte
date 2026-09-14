@@ -234,7 +234,7 @@ func addGraphChildren(
 			switch {
 			case relation.To == parentID:
 				child = id
-			case id == parentID && isGraphChildKind(g.Entities[relation.To].Kind):
+			case id == parentID && isGraphChildKind(string(g.Entities[relation.To].Kind)):
 				child = relation.To
 			default:
 				continue

@@ -38,6 +38,20 @@ func EntityPath(id graph.EntityID) (reference.Path, error) {
 	return reference.ParsePath(value)
 }
 
+// Detector adapts the Git repository graph to the shared detector registry.
+type Detector struct{}
+
+func (Detector) Namespace() string { return Namespace }
+
+// DecodeID validates an attegit entity ID. Git entity IDs identify paths, so
+// the specific tree/blob kind cannot be recovered without a repository.
+func (Detector) DecodeID(id graph.EntityID) (graph.Entity, error) {
+	if _, err := EntityPath(id); err != nil {
+		return graph.Entity{}, err
+	}
+	return graph.Entity{ID: id, Kind: graph.EntityKind(Namespace)}, nil
+}
+
 type Graphs struct {
 	Full *graph.Graph
 	Tree *graph.Graph
