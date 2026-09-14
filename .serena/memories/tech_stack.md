@@ -1,10 +1,7 @@
----
-name: tech_stack
-description: Language and build toolchain
-metadata:
-  type: project
----
-- Go 1.26.0 (`go.mod`).
-- Nix flake provides development shell and pinned tooling; `treefmt` uses gofmt/nixfmt according to `treefmt.toml`.
-- Tests use `github.com/shoenig/test/must`; CLI uses Cobra.
-- Shell tooling includes Bash scripts under `tools/`, packaged into the Nix development shell.
+# Tooling
+
+- Go 1.26 module.
+- Nix development shell provides project commands.
+- Tests use github.com/shoenig/test and github.com/shoenig/test/must.
+- HCL uses hashicorp/hcl/v2; Git access uses go-git.
+- Formatting/lint/code generation are orchestrated by atte targets under nix develop.
