@@ -11,7 +11,7 @@ import (
 	"github.com/ghthor/atte/detector/attegittest"
 	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/detector/graphset"
-	"github.com/ghthor/atte/detector/registry"
+	"github.com/ghthor/atte/detector/plugin"
 	"github.com/ghthor/atte/reference"
 	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
@@ -70,7 +70,7 @@ func TestDeployTargetIdentityAndGraph(t *testing.T) {
 	t.Parallel()
 
 	repository := newAcceptanceRepository(t)
-	builtIns, err := registry.NewBuiltIn()
+	builtIns, err := plugin.NewBuiltIn()
 	must.NoError(t, err)
 
 	config, err := attehcl.ConfigFor(t.Context(), repository.repo, "", builtIns.FunctionProvider())

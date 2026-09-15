@@ -18,7 +18,7 @@ import (
 	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphset"
-	"github.com/ghthor/atte/detector/registry"
+	"github.com/ghthor/atte/detector/plugin"
 	"github.com/ghthor/atte/reference"
 	"github.com/ghthor/atte/reference/selector"
 	"github.com/spf13/cobra"
@@ -120,7 +120,7 @@ func printGraph(ctx context.Context, w io.Writer, repo *attegit.Repo, relativePa
 	if err != nil {
 		return fmt.Errorf("build Git graph: %w", err)
 	}
-	registry, err := registry.NewBuiltIn()
+	registry, err := plugin.NewBuiltIn()
 	if err != nil {
 		return fmt.Errorf("register detectors: %w", err)
 	}
@@ -145,7 +145,7 @@ func printGraph(ctx context.Context, w io.Writer, repo *attegit.Repo, relativePa
 
 func graphRunTargetSelectors(ctx context.Context, repo *attegit.Repo) (map[graph.EntityID]string, error) {
 	selectors := make(map[graph.EntityID]string)
-	registry, err := registry.NewBuiltIn()
+	registry, err := plugin.NewBuiltIn()
 	if err != nil {
 		return nil, err
 	}

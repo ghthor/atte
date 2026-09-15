@@ -1,5 +1,5 @@
-// Package registry provides runtime registration for detector capabilities.
-package registry
+// Package plugin provides runtime registration for detector capabilities.
+package plugin
 
 import (
 	"context"

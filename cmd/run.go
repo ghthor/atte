@@ -16,7 +16,7 @@ import (
 	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphtarget"
-	"github.com/ghthor/atte/detector/registry"
+	"github.com/ghthor/atte/detector/plugin"
 	"github.com/ghthor/atte/reference/selector"
 	fzf "github.com/junegunn/fzf/src"
 	"github.com/spf13/cobra"
@@ -190,7 +190,7 @@ func runCmdValidArgsFromTargets(args []string, toComplete, root, cwd string, tar
 }
 
 func runTargets(ctx context.Context, repo *attegit.Repo, root, cwd, relative string) ([]runTarget, error) {
-	builtIns, err := registry.NewBuiltIn()
+	builtIns, err := plugin.NewBuiltIn()
 	if err != nil {
 		return nil, err
 	}

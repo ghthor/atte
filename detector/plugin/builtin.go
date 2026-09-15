@@ -1,4 +1,4 @@
-package registry
+package plugin
 
 import (
 	"context"
