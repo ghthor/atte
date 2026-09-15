@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -13,6 +14,8 @@ import (
 	"github.com/ghthor/atte/detector/attegittest"
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/attehcl"
+	"github.com/ghthor/atte/detector/plugin"
+	"github.com/hashicorp/hcl/v2"
 	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
 )
@@ -247,6 +250,31 @@ var Value = 1
 	test.StrNotContains(t, got, "attego:")
 }
 
+func TestPrintGraphIncludesCustomHCLTargets(t *testing.T) {
+	repo := repoWithFiles(t, map[string]string{
+		"atte.hcl": "deploy \"release\" {}",
+	})
+	registry, err := plugin.NewBuiltIn()
+	must.NoError(t, err)
+	must.NoError(t, plugin.RegisterHCLBlock(registry, "deploy", attehcl.TargetKindSpec{
+		Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
+			return struct{}{}, nil
+		},
+		Graph: func(
+			_ context.Context,
+			_ *attegit.Repo,
+			target attehcl.Target,
+			_ attehcl.TargetGraphContext,
+			attachToTree bool,
+		) (attehcl.TargetGraph, error) {
+			return target.GraphProjectionBase(attachToTree), nil
+		},
+	}))
+
+	got := renderTestGraphWithDetector(t, repo, registry)
+	test.StrContains(t, got, "deploy attehcl:deploy:atte.hcl:release")
+}
+
 func TestPrintGraphTargetDependencies(t *testing.T) {
 	repo := repoWithFiles(t, map[string]string{
 		"atte.hcl": `
@@ -316,6 +344,7 @@ func TestIsGraphChildKind(t *testing.T) {
 	childKind(attehcl.TestKind, true)
 	childKind(attehcl.CodegenKind, true)
 	childKind(attehcl.LintKind, true)
+	childKind("attehcl:deploy", true)
 	childKind(attegit.TreeKind, false)
 	childKind(attegit.BlobKind, false)
 	childKind("unknown", false)
@@ -340,5 +369,13 @@ func renderTestGraph(t *testing.T, repo *attegit.Repo, options ...PrintGraphOpti
 	t.Helper()
 	var output bytes.Buffer
 	must.NoError(t, printGraph(t.Context(), &output, repo, "", options...))
+	return output.String()
+}
+
+func renderTestGraphWithDetector(t *testing.T, repo *attegit.Repo, detector *plugin.Registry, options ...PrintGraphOptions) string {
+	t.Helper()
+	ctx := context.WithValue(t.Context(), executionContextKey{}, executionContext{detector: detector})
+	var output bytes.Buffer
+	must.NoError(t, printGraph(ctx, &output, repo, "", options...))
 	return output.String()
 }

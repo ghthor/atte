@@ -117,6 +117,11 @@ func TestDeployTargetIdentityAndGraph(t *testing.T) {
 	}
 	test.EqOp(t, attegit.EntityID(reference.Blob("atte.hcl")), out[0].To)
 	test.EqOp(t, attehcl.SourceFileRelation, out[0].Kind)
+
+	stdout, stderr, err := executeAcceptanceCommand(t, repository, "graph")
+	test.NoError(t, err)
+	test.EqOp(t, "", stderr)
+	test.StrContains(t, stdout, "deploy attehcl:deploy:atte.hcl:release")
 }
 
 func TestDeployConfigShow(t *testing.T) {

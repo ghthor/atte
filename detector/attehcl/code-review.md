@@ -167,24 +167,3 @@ The existing pipeline should be retained. Its important property is that each ph
 DeclaredTargets does not require local values, provider functions, registered decoders, or graph projections. Targets and ConfigFor consume decoded output and add common target identity, selector, script, execution, and configuration data. Graph consumes the same declaration index and decoded output while invoking graph projections.
 
 The best algorithmic improvement is deterministic, dependency-ordered local evaluation. A large rewrite of the capability registry is not recommended; its snapshot and projection interfaces are relatively clean and appear to be the intended extensibility boundary.
-
-## Refactoring review follow-ups
-
-### 1. Custom HCL target kinds are still omitted from atte graph — high priority
-
-cmd/graph.go still hard-codes the built-in HCL kinds:
-
-- isGraphChildKind only accepts test, codegen, and lint (cmd/graph.go:200).
-- addGraphChildren only dispatches those three kinds (cmd/graph.go:281-305).
-- graphDependencyLabel likewise only recognizes those kinds (cmd/graph.go:357).
-
-This defeats the new plugin target-kind extension for graph rendering. The custom-block example registers deploy, and its graph contains the deploy entity, but:
-
-```bash
-cd examples/attehcl-custom-block
-go run . graph
-```
-
-prints only the atte.hcl node; the deploy target is absent.
-
-The graph command should recognize arbitrary attehcl:<kind> entities and derive their label through the registry rather than enumerating built-in kinds.

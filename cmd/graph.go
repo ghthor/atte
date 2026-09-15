@@ -197,13 +197,28 @@ func printGitGraph(
 	return err
 }
 
+func isHCLTargetKind(kind string) bool {
+	return strings.HasPrefix(kind, attehcl.Namespace+":")
+}
+
 func isGraphChildKind(kind string) bool {
+	if isHCLTargetKind(kind) {
+		return true
+	}
 	switch kind {
-	case attego.PackageKind, attego.PackageTestKind, attehcl.TestKind, attehcl.CodegenKind, attehcl.LintKind:
+	case attego.PackageKind, attego.PackageTestKind:
 		return true
 	default:
 		return false
 	}
+}
+
+func graphHCLTargetLabel(id graph.EntityID, detector *plugin.Registry) (string, error) {
+	kind, _, _, err := attehcl.DecodeEntityID(id, detector)
+	if err != nil {
+		return "", fmt.Errorf("decode HCL entity %q: %w", id, err)
+	}
+	return strings.TrimPrefix(kind, attehcl.Namespace+":") + " " + string(id), nil
 }
 
 func addGraphChildren(
@@ -250,6 +265,19 @@ func addGraphChildren(
 	slices.Sort(children)
 	for _, id := range children {
 		entity := g.Entities[id]
+		if isHCLTargetKind(string(entity.Kind)) {
+			label, err := graphHCLTargetLabel(id, detector)
+			if err != nil {
+				return err
+			}
+			if options.IncludeRunTargets {
+				if value, ok := selectors[id]; ok {
+					label = value
+				}
+			}
+			addTargetNode(parent, repo, g, id, label, options, detector)
+			continue
+		}
 		switch entity.Kind {
 		case attegit.TreeKind:
 			entityPath, err := attegit.EntityPath(id)
@@ -278,30 +306,6 @@ func addGraphChildren(
 			if err := addPackageNode(parent, repo, g, id, options); err != nil {
 				return err
 			}
-		case attehcl.TestKind:
-			label := "test " + string(id)
-			if options.IncludeRunTargets {
-				if value, ok := selectors[id]; ok {
-					label = value
-				}
-			}
-			addTargetNode(parent, repo, g, id, label, options, detector)
-		case attehcl.CodegenKind:
-			label := "codegen " + string(id)
-			if options.IncludeRunTargets {
-				if value, ok := selectors[id]; ok {
-					label = value
-				}
-			}
-			addTargetNode(parent, repo, g, id, label, options, detector)
-		case attehcl.LintKind:
-			label := "lint " + string(id)
-			if options.IncludeRunTargets {
-				if value, ok := selectors[id]; ok {
-					label = value
-				}
-			}
-			addTargetNode(parent, repo, g, id, label, options, detector)
 		default:
 			return fmt.Errorf("unsupported entity kind %q for %q", entity.Kind, id)
 		}
@@ -344,6 +348,12 @@ func addTargetNode(
 
 func graphDependencyLabel(g *graph.Graph, id graph.EntityID, detector *plugin.Registry) string {
 	entity := g.Entities[id]
+	if isHCLTargetKind(string(entity.Kind)) {
+		kind, _, name, err := attehcl.DecodeEntityID(id, detector)
+		if err == nil {
+			return atteHCLStyle.Render(strings.TrimPrefix(kind, attehcl.Namespace+":") + " " + name)
+		}
+	}
 	switch entity.Kind {
 	case attego.PackageKind, attego.PackageTestKind:
 		_, _, importPath, err := attego.DecodeEntityID(id)
@@ -353,11 +363,6 @@ func graphDependencyLabel(g *graph.Graph, id graph.EntityID, detector *plugin.Re
 				label = "go package-test"
 			}
 			return goPackageStyle.Render(label + " " + importPath)
-		}
-	case attehcl.TestKind, attehcl.CodegenKind, attehcl.LintKind:
-		kind, _, name, err := attehcl.DecodeEntityID(id, detector)
-		if err == nil {
-			return atteHCLStyle.Render(strings.TrimPrefix(kind, attehcl.Namespace+":") + " " + name)
 		}
 	case attegit.BlobKind:
 		if dependencyPath, err := entityPathString(id); err == nil {
