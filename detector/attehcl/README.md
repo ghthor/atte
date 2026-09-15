@@ -1,14 +1,106 @@
 # `atte.hcl` targets
 
-The HCL detector discovers directory-local `test`, `codegen`, and `lint`
-targets in `atte.hcl` files. Each target may have a `script` and may also have
-`depends_on` and `triggered_by` expressions. Declaration-only target discovery
-permits a missing script and does not evaluate target bodies; graph construction
-and execution reject missing scripts for script-backed target kinds.
+The HCL detector discovers directory-local target kinds registered in a plugin
+registry. The built-in registry provides the `test`, `codegen`, and `lint`
+targets; applications can add their own target kinds without changing this
+package. Each target may have a `script` and may also have `depends_on` and
+`triggered_by` expressions. Declaration-only target discovery permits a missing
+script and does not evaluate target bodies; graph construction and execution
+reject missing scripts for script-backed target kinds.
 
 A file is evaluated independently. Target expressions cannot read declarations
 from an ancestor, sibling, or child `atte.hcl` file. Repository-wide target
 dependency resolution is a later graph-assembly concern.
+
+## Registering target kinds
+
+Use `plugin.NewBuiltIn` when an application wants the standard detectors, target
+kinds, and HCL functions. Register custom HCL blocks on the returned registry
+with `plugin.RegisterHCLBlock`. The registration requires a decoder and can
+optionally provide graph, execution, configuration, and script projections.
+Those optional projections determine which capabilities are available for the
+custom target.
+
+```go
+registry, err := plugin.NewBuiltIn()
+if err != nil {
+	return err
+}
+
+err = plugin.RegisterHCLBlock(registry, "deploy", attehcl.TargetKindSpec{
+	Schema:    &deploySchema,
+	Decoder:   decodeDeploy,
+	Graph:     graphDeploy,
+	Execution: executeDeploy,
+	Config:    configDeploy,
+})
+if err != nil {
+	return err
+}
+```
+
+`deploySchema` and the projection functions in this example are application
+code. See `examples/attehcl-custom-block` for a complete custom target. The
+registry returned by `plugin.NewBuiltIn` already contains the HCL detector and
+its built-in target kinds, so registering a custom kind on that same registry
+makes it available to all subsequent HCL evaluation. Target kind names must be
+valid HCL identifiers and cannot be registered more than once in a registry.
+
+Pass the same registry to the direct `attehcl` APIs that evaluate targets or
+build graphs:
+
+```go
+targets, err := attehcl.Targets(ctx, repo, registry)
+config, err := attehcl.ConfigFor(ctx, repo, relativePath, registry)
+graph, err := attehcl.Graph(ctx, repo, registry)
+```
+
+When adapting the HCL detector directly, use `attehcl.NewDetector(registry)`.
+For CLI execution, provide the registry through `cmd.ExecuteOptions.Detector`;
+repository discovery remains unchanged when only the detector registry is
+injected:
+
+```go
+err := cmd.ExecuteWithOptions(ctx, args, cmd.ExecuteOptions{
+	Repository:     repo,
+	RepositoryRoot: root,
+	Detector:       registry,
+})
+```
+
+## Registering HCL functions
+
+Applications can add repository- and file-aware HCL functions to the same
+registry with `Registry.RegisterHCLFunction`. The registration takes a function
+name and an `HCLFunctionFactory`. At evaluation time, the factory receives the
+context, repository, and `atte.hcl` file being evaluated, and returns a fresh
+`cty/function.Function`.
+
+```go
+err = registry.RegisterHCLFunction("source_file", func(
+	_ context.Context,
+	_ *attegit.Repo,
+	file reference.Blob,
+) (function.Function, error) {
+	return function.New(&function.Spec{
+		Type: function.StaticReturnType(cty.String),
+		Impl: func([]cty.Value, cty.Type) (cty.Value, error) {
+			return cty.StringVal(file.String()), nil
+		},
+	}), nil
+})
+```
+
+This example makes the current `atte.hcl` file available through
+`source_file()`. Provider functions are available under both their registered
+name and the `atte::<name>` namespace, so the same function can also be called
+as `atte::source_file()`. The factory can use the repository and context to
+construct functions backed by repository state or to return contextual errors.
+
+Built-in functions such as `path`, `gopkg`, and `gopkg_test` are already
+registered by `plugin.NewBuiltIn`. Custom function names must not conflict with
+the built-in HCL functions or another registered function, and a function name
+can only be registered once in a registry.
 
 ## Evaluation phases
 

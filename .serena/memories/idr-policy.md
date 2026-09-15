@@ -1,0 +1,1 @@
+Implementation Decision Records are immutable historical records after they are committed. Very rarely should a committed IDR be updated or modified after it has been implemented; prefer adding a follow-up note or creating a superseding decision record when the architecture changes.

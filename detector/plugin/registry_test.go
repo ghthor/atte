@@ -6,8 +6,10 @@ import (
 	"testing"
 
 	"github.com/ghthor/atte/detector/attegit"
+	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphtarget"
+	"github.com/hashicorp/hcl/v2"
 	"github.com/shoenig/test"
 )
 
@@ -15,6 +17,7 @@ func TestNewBuiltIn(t *testing.T) {
 	r, err := NewBuiltIn()
 	test.NoError(t, err)
 	test.NotNil(t, r)
+	test.EqOp(t, 3, len(r.TargetKinds()))
 
 	functions, err := r.HCLFunctions(t.Context(), nil, "")
 	test.NoError(t, err)
@@ -37,6 +40,29 @@ func TestRegisterDetector(t *testing.T) {
 	r := New()
 	test.NoError(t, r.RegisterDetector(methodDetector{}))
 	test.Error(t, r.RegisterDetector(methodDetector{}))
+}
+
+func TestRegisterTarget(t *testing.T) {
+	r := New()
+	decoder := func(*hcl.BodyContent, *hcl.EvalContext) (any, error) { return struct{}{}, nil }
+	schema := hcl.BodySchema{}
+	spec := attehcl.TargetKindSpec{Schema: &schema, Decoder: decoder}
+	test.NoError(t, RegisterHCLBlock(r, "custom", spec))
+	test.Error(t, RegisterHCLBlock(r, "custom", spec))
+
+	registered := r.TargetKinds()
+	test.EqOp(t, 1, len(registered))
+	registeredSpec, ok := registered["custom"]
+	test.True(t, ok, test.Sprintf("custom target kind should be registered: %#v", registered))
+	test.NotNil(t, registeredSpec.Schema)
+}
+
+func TestRegisterTargetValidation(t *testing.T) {
+	decoder := func(*hcl.BodyContent, *hcl.EvalContext) (any, error) { return struct{}{}, nil }
+	test.Error(t, RegisterHCLBlock(nil, "custom", attehcl.TargetKindSpec{Decoder: decoder}))
+	r := New()
+	test.Error(t, RegisterHCLBlock(r, "bad name", attehcl.TargetKindSpec{Decoder: decoder}))
+	test.Error(t, RegisterHCLBlock(r, "missing_decoder", attehcl.TargetKindSpec{}))
 }
 
 func TestDecodeID(t *testing.T) {

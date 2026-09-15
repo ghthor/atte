@@ -18,8 +18,9 @@ import (
 )
 
 type acceptanceRepository struct {
-	repo *attegit.Repo
-	dir  string
+	repo     *attegit.Repo
+	dir      string
+	detector *plugin.Registry
 }
 
 func newAcceptanceRepository(t *testing.T) acceptanceRepository {
@@ -37,7 +38,10 @@ deploy "release" {
 
 	repo, err := attegit.Open(git.Dir(), "HEAD", attegit.WithWorkingTree())
 	must.NoError(t, err)
-	return acceptanceRepository{repo: repo, dir: git.Dir()}
+	detector, err := plugin.NewBuiltIn()
+	must.NoError(t, err)
+	must.NoError(t, registerDeployBlock(detector))
+	return acceptanceRepository{repo: repo, dir: git.Dir(), detector: detector}
 }
 
 func executeAcceptanceCommand(t *testing.T, repository acceptanceRepository, args ...string) (stdout, stderr string, err error) {
@@ -48,6 +52,7 @@ func executeAcceptanceCommand(t *testing.T, repository acceptanceRepository, arg
 	err = cmd.ExecuteWithOptions(t.Context(), args, cmd.ExecuteOptions{
 		Repository:     repository.repo,
 		RepositoryRoot: repository.dir,
+		Detector:       repository.detector,
 		Out:            &out,
 		Err:            &errOut,
 	})
@@ -70,10 +75,8 @@ func TestDeployTargetIdentityAndGraph(t *testing.T) {
 	t.Parallel()
 
 	repository := newAcceptanceRepository(t)
-	builtIns, err := plugin.NewBuiltIn()
-	must.NoError(t, err)
 
-	config, err := attehcl.ConfigFor(t.Context(), repository.repo, "", builtIns.FunctionProvider())
+	config, err := attehcl.ConfigFor(t.Context(), repository.repo, "", repository.detector)
 	test.NoError(t, err)
 	if err != nil {
 		return
@@ -94,7 +97,12 @@ func TestDeployTargetIdentityAndGraph(t *testing.T) {
 	}
 	test.EqOp(t, "dev", decoded.Env)
 
-	graph, err := attehcl.Graph(t.Context(), repository.repo, graphset.WithAttachToTree(), attehcl.WithFunctions(builtIns.FunctionProvider()))
+	graph, err := attehcl.Graph(
+		t.Context(),
+		repository.repo,
+		repository.detector,
+		graphset.WithAttachToTree(),
+	)
 	test.NoError(t, err)
 	if err != nil {
 		return

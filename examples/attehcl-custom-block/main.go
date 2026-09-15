@@ -12,6 +12,7 @@ import (
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attegitmock"
 	"github.com/ghthor/atte/detector/attehcl"
+	"github.com/ghthor/atte/detector/plugin"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/zclconf/go-cty/cty"
 )
@@ -34,16 +35,14 @@ type deployTarget struct {
 	Env string
 }
 
-func init() {
-	if err := attehcl.Register(KindDeploy, attehcl.TargetKindSpec{
+func registerDeployBlock(detector *plugin.Registry) error {
+	return plugin.RegisterHCLBlock(detector, KindDeploy, attehcl.TargetKindSpec{
 		Schema:    &deploySchema,
 		Decoder:   decodeDeployTarget,
 		Graph:     graphDeployTarget,
 		Execution: executeDeployTarget,
 		Config:    configDeployTarget,
-	}); err != nil {
-		panic(err)
-	}
+	})
 }
 
 func decodeDeployTarget(content *hcl.BodyContent, ctx *hcl.EvalContext) (any, error) {
@@ -109,9 +108,17 @@ func execute() error {
 	}
 	defer cleanup()
 
+	builtIns, err := plugin.NewBuiltIn()
+	if err != nil {
+		return fmt.Errorf("create built-in registry: %w", err)
+	}
+	if err := registerDeployBlock(builtIns); err != nil {
+		return fmt.Errorf("register deploy target: %w", err)
+	}
 	return cmd.ExecuteWithOptions(ctx, os.Args[1:], cmd.ExecuteOptions{
 		Repository:     repository,
 		RepositoryRoot: directory,
+		Detector:       builtIns,
 	})
 }
 

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/ghthor/atte/detector/attegit"
+	"github.com/ghthor/atte/detector/plugin"
 	"github.com/spf13/cobra"
 )
 
@@ -51,6 +52,8 @@ type ExecuteOptions struct {
 	// WorkingDirectory is the repository-relative command working directory. An
 	// empty value selects the repository root.
 	WorkingDirectory string
+	// Detector overrides the built-in plugin registry for this command execution.
+	Detector *plugin.Registry
 	// In, Out, and Err override the Cobra command streams. Nil values use the
 	// process's standard input, output, and error streams, respectively.
 	In  io.Reader
@@ -64,6 +67,7 @@ type executionContext struct {
 	repository       *attegit.Repo
 	root             string
 	workingDirectory string
+	detector         *plugin.Registry
 	relative         string
 }
 
@@ -78,6 +82,8 @@ func ExecuteWithOptions(ctx context.Context, args []string, options ExecuteOptio
 			return err
 		}
 		ctx = context.WithValue(ctx, executionContextKey{}, execution)
+	} else if options.Detector != nil {
+		ctx = context.WithValue(ctx, executionContextKey{}, executionContext{detector: options.Detector})
 	}
 
 	rootCmd := newRootCommand()
@@ -98,6 +104,13 @@ func ExecuteWithOptions(ctx context.Context, args []string, options ExecuteOptio
 		rootCmd.SetErr(options.Err)
 	}
 	return rootCmd.ExecuteContext(ctx)
+}
+
+func detectorForContext(ctx context.Context) (*plugin.Registry, error) {
+	if execution, ok := executionFromContext(ctx); ok && execution.detector != nil {
+		return execution.detector, nil
+	}
+	return plugin.NewBuiltIn()
 }
 
 func executionContextForOptions(options ExecuteOptions) (executionContext, error) {
@@ -126,12 +139,13 @@ func executionContextForOptions(options ExecuteOptions) (executionContext, error
 		repository:       options.Repository,
 		root:             root,
 		workingDirectory: workingDirectory,
+		detector:         options.Detector,
 		relative:         filepath.ToSlash(relative),
 	}, nil
 }
 
 func commandWorkingDirectory(ctx context.Context) (string, error) {
-	if execution, ok := executionFromContext(ctx); ok {
+	if execution, ok := executionFromContext(ctx); ok && execution.workingDirectory != "" {
 		return execution.workingDirectory, nil
 	}
 	return os.Getwd()

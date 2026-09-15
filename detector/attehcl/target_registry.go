@@ -6,7 +6,6 @@ import (
 	"maps"
 	"reflect"
 	"strings"
-	"sync"
 
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/graph"
@@ -35,6 +34,10 @@ type TargetExecutionProjection func(Target, string) (TargetCommand, error)
 // returned keys must not overlap the standard target identity fields.
 type TargetConfigProjection func(Target) (map[string]any, error)
 
+// TargetScriptProjection resolves a decoded target's script into a repository
+// path or inline command.
+type TargetScriptProjection func(*attegit.Repo, reference.Blob, any) (reference.Blob, string, error)
+
 // TargetKindSpec describes the independent capabilities of a registered kind.
 // Decoder is required; the other projections are optional.
 type TargetKindSpec struct {
@@ -43,6 +46,28 @@ type TargetKindSpec struct {
 	Graph     TargetGraphProjection
 	Execution TargetExecutionProjection
 	Config    TargetConfigProjection
+	Script    TargetScriptProjection
+}
+
+// TargetRegistry exposes target-kind capabilities to HCL evaluation.
+type TargetRegistry interface {
+	TargetKinds() map[Kind]TargetKindSpec
+}
+
+type FunctionProvider interface {
+	HCLFunctions(context.Context, *attegit.Repo, reference.Blob) (map[string]function.Function, error)
+}
+
+type EntityDecoder interface {
+	DecodeID(graph.EntityID) (graph.Entity, error)
+}
+
+// Plugin provides the capabilities HCL evaluation needs from the plugin
+// registry without importing the plugin package.
+type Plugin interface {
+	TargetRegistry
+	FunctionProvider
+	EntityDecoder
 }
 
 // TargetGraphContext provides common dependency resolution to a graph projector.
@@ -78,111 +103,30 @@ var testSchema = hcl.BodySchema{
 	},
 }
 
-type targetScriptProjection func(*attegit.Repo, reference.Blob, any) (reference.Blob, string, error)
-
-type targetKindSpec struct {
-	TargetKindSpec
-	script targetScriptProjection
-}
-
-var (
-	registryMu sync.RWMutex
-	registry   = make(map[Kind]targetKindSpec)
-)
-
-func init() {
-	for _, kind := range []Kind{KindTest, KindCodegen, KindLint} {
-		if err := registerBuiltIn(kind, TargetKindSpec{
+// BuiltInTargetKinds returns the target kinds provided by atte itself.
+func BuiltInTargetKinds() map[Kind]TargetKindSpec {
+	return map[Kind]TargetKindSpec{
+		KindTest: {
 			Decoder:   decodeScriptTarget,
 			Graph:     graphScriptTarget,
 			Execution: executeScriptTarget,
 			Config:    configScriptTarget,
-		}); err != nil {
-			panic(err)
-		}
-	}
-}
-
-// Register adds a target kind to the process-wide target registry. A nil schema
-// uses the built-in script-target schema. Registration rejects duplicate kinds.
-// Each evaluator takes a stable registry snapshot when it is created.
-func Register[K ~string](kind K, spec TargetKindSpec) error {
-	return register(kind, spec, nil)
-}
-
-func registerBuiltIn[K ~string](kind K, spec TargetKindSpec) error {
-	return register(kind, spec, builtinTargetScript)
-}
-
-func register[K ~string](kind K, spec TargetKindSpec, script targetScriptProjection) error {
-	name := string(kind)
-	if kind == "" {
-		return fmt.Errorf("target kind is empty")
-	}
-	if !hclsyntax.ValidIdentifier(name) {
-		return fmt.Errorf("target kind %q is not a valid HCL identifier", kind)
-	}
-	if spec.Decoder == nil {
-		return fmt.Errorf("target kind %q has no decoder", kind)
-	}
-
-	schema := testSchema
-	if spec.Schema != nil {
-		schema = copyBodySchema(*spec.Schema)
-	} else {
-		schema = copyBodySchema(schema)
-	}
-
-	key := Kind(kind)
-	registryMu.Lock()
-	defer registryMu.Unlock()
-	if _, exists := registry[key]; exists {
-		return fmt.Errorf("target kind %q is already registered", kind)
-	}
-	registry[key] = targetKindSpec{
-		TargetKindSpec: TargetKindSpec{
-			Schema:    &schema,
-			Decoder:   spec.Decoder,
-			Graph:     spec.Graph,
-			Execution: spec.Execution,
-			Config:    spec.Config,
+			Script:    builtinTargetScript,
 		},
-		script: script,
-	}
-	return nil
-}
-
-func registeredKind(kind Kind) bool {
-	registryMu.RLock()
-	defer registryMu.RUnlock()
-	_, registered := registry[kind]
-	return registered
-}
-
-func targetRegistrySnapshot() map[Kind]targetKindSpec {
-	registryMu.RLock()
-	defer registryMu.RUnlock()
-	snapshot := make(map[Kind]targetKindSpec, len(registry))
-	for kind, spec := range registry {
-		schema := copyBodySchema(*spec.Schema)
-		snapshot[kind] = targetKindSpec{
-			TargetKindSpec: TargetKindSpec{
-				Schema:    &schema,
-				Decoder:   spec.Decoder,
-				Graph:     spec.Graph,
-				Execution: spec.Execution,
-				Config:    spec.Config,
-			},
-			script: spec.script,
-		}
-	}
-	return snapshot
-}
-
-func copyBodySchema(schema hcl.BodySchema) hcl.BodySchema {
-	return hcl.BodySchema{
-		Attributes: append([]hcl.AttributeSchema(nil), schema.Attributes...),
-		Blocks:     append([]hcl.BlockHeaderSchema(nil), schema.Blocks...),
+		KindCodegen: {
+			Decoder:   decodeScriptTarget,
+			Graph:     graphScriptTarget,
+			Execution: executeScriptTarget,
+			Config:    configScriptTarget,
+			Script:    builtinTargetScript,
+		},
+		KindLint: {
+			Decoder:   decodeScriptTarget,
+			Graph:     graphScriptTarget,
+			Execution: executeScriptTarget,
+			Config:    configScriptTarget,
+			Script:    builtinTargetScript,
+		},
 	}
 }
 
@@ -203,6 +147,32 @@ func validateDecoderResult(kind Kind, decoded any) error {
 }
 
 const targetTraversalValuePrefix = "attehcl-target:"
+
+var defaultTargetKinds = BuiltInTargetKinds()
+
+func targetKinds(plugin TargetRegistry) map[Kind]TargetKindSpec {
+	provided := defaultTargetKinds
+	if plugin != nil {
+		provided = plugin.TargetKinds()
+	}
+	result := make(map[Kind]TargetKindSpec, len(provided))
+	for kind, spec := range provided {
+		schema := testSchema
+		if spec.Schema != nil {
+			schema = copyBodySchema(*spec.Schema)
+		}
+		spec.Schema = &schema
+		result[kind] = spec
+	}
+	return result
+}
+
+func copyBodySchema(schema hcl.BodySchema) hcl.BodySchema {
+	return hcl.BodySchema{
+		Attributes: append([]hcl.AttributeSchema(nil), schema.Attributes...),
+		Blocks:     append([]hcl.BlockHeaderSchema(nil), schema.Blocks...),
+	}
+}
 
 func targetTraversalValue(kind Kind, name string) string {
 	return targetTraversalValuePrefix + string(kind) + "." + name

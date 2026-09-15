@@ -6,26 +6,30 @@ import (
 	"slices"
 
 	"github.com/ghthor/atte/detector/attegit"
-	"github.com/ghthor/atte/detector/graphset"
 	"github.com/ghthor/atte/detector/graphtarget"
 	"github.com/ghthor/atte/reference"
 )
 
+type targetsPlugin interface {
+	TargetRegistry
+	FunctionProvider
+}
+
 // Targets evaluates all atte.hcl files independently and groups declarations by kind.
-func Targets(ctx context.Context, repo *attegit.Repo, provider graphset.FunctionProvider) (map[Kind][]Target, error) {
+func Targets(ctx context.Context, repo *attegit.Repo, plugin targetsPlugin) (map[Kind][]Target, error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
-	return targetsWithProvider(ctx, repo, provider)
+	return targetsWithProvider(ctx, repo, plugin)
 }
 
 // DeclaredTargets returns target identities without evaluating target bodies.
 // Results are ordered by repository-relative file path and source order.
-func DeclaredTargets(ctx context.Context, repo *attegit.Repo) ([]graphtarget.ID, error) {
+func DeclaredTargets(ctx context.Context, repo *attegit.Repo, plugin targetsPlugin) ([]graphtarget.ID, error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
-	evaluator, err := newEvaluator(ctx, repo, nil)
+	evaluator, err := newEvaluator(ctx, repo, plugin)
 	if err != nil {
 		return nil, err
 	}
@@ -54,8 +58,8 @@ func SortedTargets(grouped map[Kind][]Target) []Target {
 	return targets
 }
 
-func targetsWithProvider(ctx context.Context, repo *attegit.Repo, provider graphset.FunctionProvider) (map[Kind][]Target, error) {
-	evaluator, err := newEvaluator(ctx, repo, provider)
+func targetsWithProvider(ctx context.Context, repo *attegit.Repo, plugin targetsPlugin) (map[Kind][]Target, error) {
+	evaluator, err := newEvaluator(ctx, repo, plugin)
 	if err != nil {
 		return nil, err
 	}
@@ -72,14 +76,19 @@ type Config struct {
 }
 
 // ConfigFor evaluates the file-local target configuration for a repository-relative directory.
-func ConfigFor(ctx context.Context, repo *attegit.Repo, relativePath string, provider graphset.FunctionProvider) (Config, error) {
+func ConfigFor(ctx context.Context, repo *attegit.Repo, relativePath string, plugin targetsPlugin) (Config, error) {
 	if err := checkContext(ctx); err != nil {
 		return Config{}, err
 	}
-	return configForWithProvider(ctx, repo, relativePath, provider)
+	return configForWithProvider(ctx, repo, relativePath, plugin)
 }
 
-func configForWithProvider(ctx context.Context, repo *attegit.Repo, relativePath string, provider graphset.FunctionProvider) (Config, error) {
+func configForWithProvider(
+	ctx context.Context,
+	repo *attegit.Repo,
+	relativePath string,
+	plugin targetsPlugin,
+) (Config, error) {
 	if repo == nil {
 		return Config{}, fmt.Errorf("repository is nil")
 	}
@@ -91,7 +100,7 @@ func configForWithProvider(ctx context.Context, repo *attegit.Repo, relativePath
 	if err != nil {
 		return Config{}, err
 	}
-	evaluator, err := newEvaluatorForFile(ctx, repo, currentBlob, provider)
+	evaluator, err := newEvaluatorForFile(ctx, repo, currentBlob, plugin)
 	if err != nil {
 		return Config{}, err
 	}
@@ -104,9 +113,4 @@ func configForWithProvider(ctx context.Context, repo *attegit.Repo, relativePath
 		return Config{}, err
 	}
 	return Config{Targets: allTargets}, nil
-}
-
-// WithFunctions adds provider-supplied HCL functions.
-func WithFunctions(provider graphset.FunctionProvider) graphset.Option {
-	return func(options *graphset.Options) { options.Functions = provider }
 }

@@ -14,25 +14,19 @@ import (
 
 // Detector adapts the HCL detector to the shared detector capabilities.
 type Detector struct {
-	Provider      graphset.FunctionProvider
-	EntityDecoder graphset.EntityDecoder
+	Plugin Plugin
 }
 
-// NewDetector creates an HCL detector. An optional entity decoder resolves
-// detector-specific entity dependencies during graph projection.
-func NewDetector(provider graphset.FunctionProvider, decoders ...graphset.EntityDecoder) Detector {
-	detector := Detector{Provider: provider}
-	if len(decoders) > 0 {
-		detector.EntityDecoder = decoders[0]
-	}
-	return detector
+// NewDetector creates an HCL detector backed by the supplied plugin registry.
+func NewDetector(registry Plugin) Detector {
+	return Detector{Plugin: registry}
 }
 
 func (d Detector) Namespace() string { return Namespace }
 
 // DecodeID converts an attehcl entity ID into the shared graph representation.
 func (d Detector) DecodeID(id graph.EntityID) (graph.Entity, error) {
-	kind, _, _, err := DecodeEntityID(id)
+	kind, _, _, err := DecodeEntityID(id, d.Plugin)
 	if err != nil {
 		return graph.Entity{}, err
 	}
@@ -55,19 +49,9 @@ func renderSelector(target graphtarget.ID) string {
 }
 
 func (d Detector) Graph(ctx context.Context, repo *attegit.Repo, options ...graphset.Option) (*graph.Graph, error) {
-	graphOptions := make([]graphset.Option, 0, len(options)+3)
-	graphOptions = append(graphOptions, graphset.WithAttachToTree(), WithFunctions(d.Provider))
-	if d.EntityDecoder != nil {
-		graphOptions = append(graphOptions, graphset.WithEntityDecoder(d.EntityDecoder))
-	}
-	for _, option := range options {
-		if option != nil {
-			graphOptions = append(graphOptions, option)
-		}
-	}
-	return Graph(ctx, repo, graphOptions...)
+	return Graph(ctx, repo, d.Plugin, options...)
 }
 
 func (d Detector) Targets(ctx context.Context, repo *attegit.Repo) ([]graphtarget.ID, error) {
-	return DeclaredTargets(ctx, repo)
+	return DeclaredTargets(ctx, repo, d.Plugin)
 }

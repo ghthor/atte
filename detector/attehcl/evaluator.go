@@ -9,7 +9,6 @@ import (
 
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/graph"
-	"github.com/ghthor/atte/detector/graphset"
 	"github.com/ghthor/atte/detector/graphtarget"
 	"github.com/ghthor/atte/reference"
 	"github.com/hashicorp/hcl/v2"
@@ -22,9 +21,9 @@ type evaluator struct {
 	ctx          context.Context
 	repo         *attegit.Repo
 	files        hclFiles
-	provider     graphset.FunctionProvider
+	plugin       targetsPlugin
 	functions    map[reference.Blob]map[string]function.Function
-	kindSpecs    map[Kind]targetKindSpec
+	kindSpecs    map[Kind]TargetKindSpec
 	declarations declarationIndex
 }
 
@@ -53,7 +52,7 @@ type evaluatedTarget struct {
 	Label   string
 	Index   int
 	Decoded any
-	Spec    targetKindSpec
+	Spec    TargetKindSpec
 	Source  hcl.Range
 }
 
@@ -76,7 +75,7 @@ func checkContext(ctx context.Context) error {
 	return ctx.Err()
 }
 
-func newEvaluator(ctx context.Context, repo *attegit.Repo, provider graphset.FunctionProvider) (*evaluator, error) {
+func newEvaluator(ctx context.Context, repo *attegit.Repo, plugin targetsPlugin) (*evaluator, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("repository is nil")
 	}
@@ -87,10 +86,15 @@ func newEvaluator(ctx context.Context, repo *attegit.Repo, provider graphset.Fun
 	if err != nil {
 		return nil, err
 	}
-	return newEvaluatorWithFiles(ctx, repo, files, provider), nil
+	return newEvaluatorWithFiles(ctx, repo, files, plugin), nil
 }
 
-func newEvaluatorForFile(ctx context.Context, repo *attegit.Repo, file reference.Blob, provider graphset.FunctionProvider) (*evaluator, error) {
+func newEvaluatorForFile(
+	ctx context.Context,
+	repo *attegit.Repo,
+	file reference.Blob,
+	plugin targetsPlugin,
+) (*evaluator, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("repository is nil")
 	}
@@ -108,17 +112,22 @@ func newEvaluatorForFile(ctx context.Context, repo *attegit.Repo, file reference
 			locals: make(map[string]hcl.Expression),
 		}
 	}
-	return newEvaluatorWithFiles(ctx, repo, files, provider), nil
+	return newEvaluatorWithFiles(ctx, repo, files, plugin), nil
 }
 
-func newEvaluatorWithFiles(ctx context.Context, repo *attegit.Repo, files hclFiles, provider graphset.FunctionProvider) *evaluator {
+func newEvaluatorWithFiles(
+	ctx context.Context,
+	repo *attegit.Repo,
+	files hclFiles,
+	plugin targetsPlugin,
+) *evaluator {
 	return &evaluator{
 		ctx:       ctx,
 		repo:      repo,
 		files:     files,
-		provider:  provider,
+		plugin:    plugin,
 		functions: make(map[reference.Blob]map[string]function.Function),
-		kindSpecs: targetRegistrySnapshot(),
+		kindSpecs: targetKinds(plugin),
 	}
 }
 
@@ -170,7 +179,7 @@ func (e *evaluator) hclFunctions(file reference.Blob) (map[string]function.Funct
 	if functions, ok := e.functions[file]; ok {
 		return functions, nil
 	}
-	functions, err := mergedHCLFunctions(e.ctx, e.repo, file, e.provider)
+	functions, err := mergedHCLFunctions(e.ctx, e.repo, file, e.plugin)
 	if err != nil {
 		return nil, err
 	}
@@ -404,13 +413,13 @@ func mergedHCLFunctions(
 	ctx context.Context,
 	repo *attegit.Repo,
 	file reference.Blob,
-	provider graphset.FunctionProvider,
+	plugin FunctionProvider,
 ) (map[string]function.Function, error) {
 	functions := baseHCLFunctions(file)
-	if provider == nil {
+	if plugin == nil {
 		return functions, nil
 	}
-	extra, err := provider(ctx, repo, file)
+	extra, err := plugin.HCLFunctions(ctx, repo, file)
 	if err != nil {
 		return nil, err
 	}

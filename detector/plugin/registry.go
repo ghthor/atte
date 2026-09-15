@@ -10,10 +10,13 @@ import (
 
 	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
+	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphset"
 	"github.com/ghthor/atte/detector/graphtarget"
 	"github.com/ghthor/atte/reference"
+	"github.com/hashicorp/hcl/v2"
+	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/zclconf/go-cty/cty/function"
 )
 
@@ -28,16 +31,80 @@ type Detector struct {
 // HCLFunctionFactory constructs a function for one repository and HCL file.
 type HCLFunctionFactory func(context.Context, *attegit.Repo, reference.Blob) (function.Function, error)
 
-// Registry stores runtime detector registrations.
+// Registry stores runtime detector, target-kind, and HCL function registrations.
 type Registry struct {
-	mu        sync.RWMutex
-	detectors map[string]Detector
-	functions map[string]HCLFunctionFactory
+	mu          sync.RWMutex
+	detectors   map[string]Detector
+	functions   map[string]HCLFunctionFactory
+	targetKinds map[attehcl.Kind]attehcl.TargetKindSpec
 }
 
 // New returns an empty detector registry.
 func New() *Registry {
-	return &Registry{detectors: make(map[string]Detector), functions: make(map[string]HCLFunctionFactory)}
+	return &Registry{
+		detectors:   make(map[string]Detector),
+		functions:   make(map[string]HCLFunctionFactory),
+		targetKinds: make(map[attehcl.Kind]attehcl.TargetKindSpec),
+	}
+}
+
+// RegisterHCLBlock adds a target kind to a plugin registry. A nil schema uses the
+// built-in script-target schema. Registration rejects duplicate kinds.
+//
+// This is a function rather than a method because Go does not yet support
+// generic methods on non-generic types. Once the minimum Go version reaches
+// Go 1.27 and generic methods are available, this can become a Registry method.
+func RegisterHCLBlock[K ~string](r *Registry, kind K, spec attehcl.TargetKindSpec) error {
+	if r == nil {
+		return fmt.Errorf("registry is nil")
+	}
+	name := string(kind)
+	if name == "" {
+		return fmt.Errorf("target kind is empty")
+	}
+	if !hclsyntax.ValidIdentifier(name) {
+		return fmt.Errorf("target kind %q is not a valid HCL identifier", kind)
+	}
+	if spec.Decoder == nil {
+		return fmt.Errorf("target kind %q has no decoder", kind)
+	}
+	if spec.Schema != nil {
+		schema := copyBodySchema(*spec.Schema)
+		spec.Schema = &schema
+	}
+	key := attehcl.Kind(kind)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.targetKinds[key]; exists {
+		return fmt.Errorf("target kind %q is already registered", kind)
+	}
+	r.targetKinds[key] = spec
+	return nil
+}
+
+// TargetKinds returns a snapshot of target-kind capabilities registered with r.
+func (r *Registry) TargetKinds() map[attehcl.Kind]attehcl.TargetKindSpec {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	result := make(map[attehcl.Kind]attehcl.TargetKindSpec, len(r.targetKinds))
+	for kind, spec := range r.targetKinds {
+		if spec.Schema != nil {
+			schema := copyBodySchema(*spec.Schema)
+			spec.Schema = &schema
+		}
+		result[kind] = spec
+	}
+	return result
+}
+
+func copyBodySchema(schema hcl.BodySchema) hcl.BodySchema {
+	return hcl.BodySchema{
+		Attributes: append([]hcl.AttributeSchema(nil), schema.Attributes...),
+		Blocks:     append([]hcl.BlockHeaderSchema(nil), schema.Blocks...),
+	}
 }
 
 // Register adds a detector. Namespaces must be unique and non-empty.
@@ -96,13 +163,6 @@ func (r *Registry) RegisterHCLFunction(name string, factory HCLFunctionFactory) 
 	}
 	r.functions[name] = factory
 	return nil
-}
-
-// FunctionProvider adapts registry HCL functions to detector evaluation.
-func (r *Registry) FunctionProvider() graphset.FunctionProvider {
-	return func(ctx context.Context, repo *attegit.Repo, file reference.Blob) (map[string]function.Function, error) {
-		return r.HCLFunctions(ctx, repo, file)
-	}
 }
 
 // HCLFunctions returns fresh functions for the repository and file.

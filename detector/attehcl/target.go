@@ -18,8 +18,8 @@ func targetsFromEvaluated(repo *attegit.Repo, evaluated []evaluatedTarget) (map[
 	targets := make(map[Kind][]Target, len(evaluated))
 	for _, item := range evaluated {
 		target := targetFromEvaluated(item)
-		if item.Spec.script != nil {
-			script, inline, err := item.Spec.script(repo, item.File, item.Decoded)
+		if item.Spec.Script != nil {
+			script, inline, err := item.Spec.Script(repo, item.File, item.Decoded)
 			if err != nil {
 				return nil, err
 			}
@@ -104,13 +104,15 @@ func targetIdentityFor(file reference.Blob, kind Kind, name string, index int) t
 	}
 }
 
-func DecodeEntityID(id graph.EntityID) (string, reference.Blob, string, error) {
+func DecodeEntityID(id graph.EntityID, plugin TargetRegistry) (string, reference.Blob, string, error) {
 	parts := strings.SplitN(string(id), ":", 4)
 	if len(parts) != 4 || parts[0] != Namespace {
 		return "", "", "", fmt.Errorf("invalid attehcl entity ID %q", id)
 	}
 	kind := parts[0] + ":" + parts[1]
-	if !registeredKind(Kind(parts[1])) {
+
+	kinds := targetKinds(plugin)
+	if _, ok := kinds[Kind(parts[1])]; !ok {
 		return "", "", "", fmt.Errorf("invalid attehcl entity ID %q", id)
 	}
 	file, err := reference.ParseBlob(parts[2])

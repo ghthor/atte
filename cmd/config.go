@@ -7,7 +7,6 @@ import (
 
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attehcl"
-	"github.com/ghthor/atte/detector/plugin"
 	"github.com/ghthor/atte/reference/target"
 	"github.com/hashicorp/hcl/v2/hclwrite"
 	"github.com/spf13/cobra"
@@ -45,11 +44,11 @@ func newConfigCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			builtIns, err := plugin.NewBuiltIn()
+			detector, err := detectorForContext(ctx)
 			if err != nil {
 				return fmt.Errorf("register detectors: %w", err)
 			}
-			config, err := attehcl.ConfigFor(cmd.Context(), repo, relative, builtIns.FunctionProvider())
+			config, err := attehcl.ConfigFor(cmd.Context(), repo, relative, detector)
 			if err != nil {
 				return fmt.Errorf("evaluate attehcl configuration: %w", err)
 			}

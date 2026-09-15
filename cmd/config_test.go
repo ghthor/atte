@@ -7,8 +7,8 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attehcl"
+	"github.com/ghthor/atte/detector/plugin"
 	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
 )
@@ -32,7 +32,9 @@ test "child2" {
 `,
 		"child/child.sh": "#!/bin/sh\n",
 	})
-	config, err := attehcl.ConfigFor(t.Context(), repo, "child", attegit.PathHCLFunctions)
+	detector, err := plugin.NewBuiltIn()
+	must.NoError(t, err)
+	config, err := attehcl.ConfigFor(t.Context(), repo, "child", detector)
 	test.NoError(t, err)
 	targets := attehcl.SortedTargets(config.Targets)
 	test.Len(t, 2, targets)

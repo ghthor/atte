@@ -100,29 +100,29 @@ func projectDependency(
 	return entity, graph.Relationship{From: target.ID, To: entity.ID, Kind: DependsOnRelation}, nil
 }
 
-// Graph builds the HCL detector graph using the supplied options.
-func Graph(ctx context.Context, repo *attegit.Repo, options ...graphset.Option) (*graph.Graph, error) {
+// Graph builds the HCL detector graph using capabilities from the supplied plugin registry.
+func Graph(ctx context.Context, repo *attegit.Repo, plugin Plugin, options ...graphset.Option) (*graph.Graph, error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
-	config := graphset.Options{EntityDecoder: (Detector{}).DecodeID}
+	config := graphset.Options{}
 	for _, option := range options {
 		if option != nil {
 			option(&config)
 		}
 	}
 
-	return graphFor(ctx, repo, config)
+	return graphFor(ctx, repo, plugin, config)
 }
 
-func graphFor(ctx context.Context, repo *attegit.Repo, options graphset.Options) (*graph.Graph, error) {
+func graphFor(ctx context.Context, repo *attegit.Repo, plugin Plugin, options graphset.Options) (*graph.Graph, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if repo == nil {
 		return nil, fmt.Errorf("repository is nil")
 	}
-	evaluator, err := newEvaluator(ctx, repo, options.Functions)
+	evaluator, err := newEvaluator(ctx, repo, plugin)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +145,7 @@ func graphFor(ctx context.Context, repo *attegit.Repo, options graphset.Options)
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		r, err := addEvaluatedTargetGraph(ctx, repo, block, declarations, addEntity, options.AttachToTree, options.EntityDecoder)
+		r, err := addEvaluatedTargetGraph(ctx, repo, block, declarations, addEntity, options.AttachToTree, plugin)
 		if err != nil {
 			return nil, err
 		}
@@ -162,7 +162,7 @@ func addEvaluatedTargetGraph(
 	declarations declarationIndex,
 	addEntity func(graph.Entity),
 	containment bool,
-	entityDecoder graphset.EntityDecoder,
+	entityDecoder EntityDecoder,
 ) ([]graph.Relationship, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -216,11 +216,11 @@ func resolveTargetTraversal(file reference.Blob, traversal hcl.Traversal, declar
 	return declaration, nil
 }
 
-func entityDependencyKind(decoder graphset.EntityDecoder, id graph.EntityID) (graph.EntityKind, error) {
+func entityDependencyKind(decoder EntityDecoder, id graph.EntityID) (graph.EntityKind, error) {
 	if decoder == nil {
 		return "", fmt.Errorf("no entity decoder configured for dependency %q", id)
 	}
-	entity, err := decoder(id)
+	entity, err := decoder.DecodeID(id)
 	if err != nil {
 		return "", fmt.Errorf("decode dependency entity %q: %w", id, err)
 	}

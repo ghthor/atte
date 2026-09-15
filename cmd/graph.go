@@ -120,11 +120,11 @@ func printGraph(ctx context.Context, w io.Writer, repo *attegit.Repo, relativePa
 	if err != nil {
 		return fmt.Errorf("build Git graph: %w", err)
 	}
-	registry, err := plugin.NewBuiltIn()
+	detector, err := detectorForContext(ctx)
 	if err != nil {
 		return fmt.Errorf("register detectors: %w", err)
 	}
-	detectorGraph, err := registry.Graph(ctx, repo, graphset.WithAttachToTree())
+	detectorGraph, err := detector.Graph(ctx, repo, graphset.WithAttachToTree())
 	if err != nil {
 		return fmt.Errorf("build detector graph: %w", err)
 	}
@@ -140,16 +140,16 @@ func printGraph(ctx context.Context, w io.Writer, repo *attegit.Repo, relativePa
 			return fmt.Errorf("discover run targets: %w", err)
 		}
 	}
-	return printGitGraph(w, repo, gitGraph, relativePath, printOptions, runSelectors)
+	return printGitGraph(w, repo, gitGraph, relativePath, printOptions, detector, runSelectors)
 }
 
 func graphRunTargetSelectors(ctx context.Context, repo *attegit.Repo) (map[graph.EntityID]string, error) {
 	selectors := make(map[graph.EntityID]string)
-	registry, err := plugin.NewBuiltIn()
+	detector, err := detectorForContext(ctx)
 	if err != nil {
 		return nil, err
 	}
-	targets, err := registry.Targets(ctx, repo)
+	targets, err := detector.Targets(ctx, repo)
 	if err != nil {
 		return nil, err
 	}
@@ -176,6 +176,7 @@ func printGitGraph(
 	g *graph.Graph,
 	relativePath string,
 	options PrintGraphOptions,
+	detector *plugin.Registry,
 	runSelectors ...map[graph.EntityID]string,
 ) error {
 	var selectors map[graph.EntityID]string
@@ -189,7 +190,7 @@ func printGitGraph(
 		}
 		tree, _ := reference.ParseTree(relativePath)
 		return attegit.EntityID(tree)
-	}(), options, selectors); err != nil {
+	}(), options, detector, selectors); err != nil {
 		return err
 	}
 	_, err := fmt.Fprint(w, tree.String())
@@ -211,6 +212,7 @@ func addGraphChildren(
 	g *graph.Graph,
 	parentID graph.EntityID,
 	options PrintGraphOptions,
+	detector *plugin.Registry,
 	runSelectors ...map[graph.EntityID]string,
 ) error {
 	var selectors map[graph.EntityID]string
@@ -255,7 +257,7 @@ func addGraphChildren(
 				return fmt.Errorf("decode Git entity %q: %w", id, err)
 			}
 			branch := parent.AddBranch(plainStyle.Render(path.Base(entityPath.String()) + "/"))
-			if err := addGraphChildren(branch, repo, g, id, options, selectors); err != nil {
+			if err := addGraphChildren(branch, repo, g, id, options, detector, selectors); err != nil {
 				return err
 			}
 		case attegit.BlobKind:
@@ -283,7 +285,7 @@ func addGraphChildren(
 					label = value
 				}
 			}
-			addTargetNode(parent, repo, g, id, label, options)
+			addTargetNode(parent, repo, g, id, label, options, detector)
 		case attehcl.CodegenKind:
 			label := "codegen " + string(id)
 			if options.IncludeRunTargets {
@@ -291,7 +293,7 @@ func addGraphChildren(
 					label = value
 				}
 			}
-			addTargetNode(parent, repo, g, id, label, options)
+			addTargetNode(parent, repo, g, id, label, options, detector)
 		case attehcl.LintKind:
 			label := "lint " + string(id)
 			if options.IncludeRunTargets {
@@ -299,7 +301,7 @@ func addGraphChildren(
 					label = value
 				}
 			}
-			addTargetNode(parent, repo, g, id, label, options)
+			addTargetNode(parent, repo, g, id, label, options, detector)
 		default:
 			return fmt.Errorf("unsupported entity kind %q for %q", entity.Kind, id)
 		}
@@ -307,7 +309,15 @@ func addGraphChildren(
 	return nil
 }
 
-func addTargetNode(parent treeprint.Tree, repo *attegit.Repo, g *graph.Graph, id graph.EntityID, label string, options PrintGraphOptions) {
+func addTargetNode(
+	parent treeprint.Tree,
+	repo *attegit.Repo,
+	g *graph.Graph,
+	id graph.EntityID,
+	label string,
+	options PrintGraphOptions,
+	detector *plugin.Registry,
+) {
 	dependencies := make([]graph.EntityID, 0)
 	for _, relation := range g.Out(id) {
 		if relation.Kind == attehcl.DependsOnRelation {
@@ -324,15 +334,15 @@ func addTargetNode(parent treeprint.Tree, repo *attegit.Repo, g *graph.Graph, id
 	for _, dependency := range dependencies {
 		if g.Entities[dependency].Kind == attego.PackageKind || g.Entities[dependency].Kind == attego.PackageTestKind {
 			if err := addPackageNode(branch, repo, g, dependency, options); err != nil {
-				branch.AddNode(graphDependencyLabel(g, dependency))
+				branch.AddNode(graphDependencyLabel(g, dependency, detector))
 			}
 			continue
 		}
-		branch.AddNode(graphDependencyLabel(g, dependency))
+		branch.AddNode(graphDependencyLabel(g, dependency, detector))
 	}
 }
 
-func graphDependencyLabel(g *graph.Graph, id graph.EntityID) string {
+func graphDependencyLabel(g *graph.Graph, id graph.EntityID, detector *plugin.Registry) string {
 	entity := g.Entities[id]
 	switch entity.Kind {
 	case attego.PackageKind, attego.PackageTestKind:
@@ -345,7 +355,7 @@ func graphDependencyLabel(g *graph.Graph, id graph.EntityID) string {
 			return goPackageStyle.Render(label + " " + importPath)
 		}
 	case attehcl.TestKind, attehcl.CodegenKind, attehcl.LintKind:
-		kind, _, name, err := attehcl.DecodeEntityID(id)
+		kind, _, name, err := attehcl.DecodeEntityID(id, detector)
 		if err == nil {
 			return atteHCLStyle.Render(strings.TrimPrefix(kind, attehcl.Namespace+":") + " " + name)
 		}

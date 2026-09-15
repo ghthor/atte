@@ -7,6 +7,9 @@ import (
 
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attegittest"
+	"github.com/ghthor/atte/detector/attehcl"
+	"github.com/ghthor/atte/detector/plugin"
+	"github.com/hashicorp/hcl/v2"
 	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
 )
@@ -95,6 +98,31 @@ func TestExecuteWithOptionsIsolatesConfigFormat(t *testing.T) {
 	test.EqOp(t, "", stderr)
 	test.StrHasPrefix(t, "{\n", json)
 	test.StrNotContains(t, json, "target =")
+}
+
+func TestExecuteWithOptionsUsesInjectedDetectorWithoutRepositoryOverride(t *testing.T) {
+	repository := newExecutionRepository(t, map[string]string{
+		"atte.hcl": `custom "unit" {}`,
+	})
+	registry, err := plugin.NewBuiltIn()
+	must.NoError(t, err)
+	must.NoError(t, plugin.RegisterHCLBlock(registry, "custom", attehcl.TargetKindSpec{
+		Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
+			return struct{}{}, nil
+		},
+	}))
+	t.Chdir(repository.root)
+
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	err = ExecuteWithOptions(t.Context(), []string{"config", "show"}, ExecuteOptions{
+		Detector: registry,
+		Out:      &out,
+		Err:      &errOut,
+	})
+	test.NoError(t, err)
+	test.EqOp(t, "", errOut.String())
+	test.StrContains(t, out.String(), "custom.unit")
 }
 
 func TestExecuteWithOptionsIsolatesRepositoriesAndWorkingDirectories(t *testing.T) {

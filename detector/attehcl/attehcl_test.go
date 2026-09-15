@@ -16,11 +16,76 @@ import (
 	"github.com/ghthor/atte/reference"
 	"github.com/ghthor/atte/reference/selector"
 	"github.com/hashicorp/hcl/v2"
+	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
 	"github.com/zclconf/go-cty/cty"
 	"github.com/zclconf/go-cty/cty/function"
 )
+
+func registerTestTarget[K ~string](kind K, spec TargetKindSpec) error {
+	name := string(kind)
+	if name == "" {
+		return fmt.Errorf("target kind is empty")
+	}
+	if !hclsyntax.ValidIdentifier(name) {
+		return fmt.Errorf("target kind %q is not a valid HCL identifier", kind)
+	}
+	if spec.Decoder == nil {
+		return fmt.Errorf("target kind %q has no decoder", kind)
+	}
+	key := Kind(kind)
+	if _, exists := defaultTargetKinds[key]; exists {
+		return fmt.Errorf("target kind %q is already registered", kind)
+	}
+	if spec.Schema != nil {
+		schema := copyBodySchema(*spec.Schema)
+		spec.Schema = &schema
+	}
+	defaultTargetKinds[key] = spec
+	return nil
+}
+
+type testPlugin struct {
+	functions     func(context.Context, *attegit.Repo, reference.Blob) (map[string]function.Function, error)
+	entityDecoder func(graph.EntityID) (graph.Entity, error)
+}
+
+func (p testPlugin) TargetKinds() map[Kind]TargetKindSpec { return defaultTargetKinds }
+func (p testPlugin) HCLFunctions(ctx context.Context, repo *attegit.Repo, file reference.Blob) (map[string]function.Function, error) {
+	if p.functions == nil {
+		return nil, nil
+	}
+	return p.functions(ctx, repo, file)
+}
+
+func (p testPlugin) DecodeID(id graph.EntityID) (graph.Entity, error) {
+	if p.entityDecoder != nil {
+		return p.entityDecoder(id)
+	}
+	kind, _, _, err := DecodeEntityID(id, p)
+	if err != nil {
+		return graph.Entity{}, err
+	}
+	return graph.Entity{ID: id, Kind: graph.EntityKind(kind)}, nil
+}
+
+func testTargets(
+	ctx context.Context,
+	repo *attegit.Repo,
+	functions func(context.Context, *attegit.Repo, reference.Blob) (map[string]function.Function, error),
+) (map[Kind][]Target, error) {
+	return Targets(ctx, repo, testPlugin{functions: functions})
+}
+
+func testConfigFor(
+	ctx context.Context,
+	repo *attegit.Repo,
+	relativePath string,
+	functions func(context.Context, *attegit.Repo, reference.Blob) (map[string]function.Function, error),
+) (Config, error) {
+	return ConfigFor(ctx, repo, relativePath, testPlugin{functions: functions})
+}
 
 func testPath(raw string) reference.Path {
 	if raw == "" {
@@ -64,7 +129,7 @@ test { script = local.script }
 `,
 	})
 
-	grouped, err := Targets(t.Context(), repo, nil)
+	grouped, err := testTargets(t.Context(), repo, nil)
 	must.NoError(t, err)
 	test.EqOp(t, "ECHO", grouped[KindTest][0].Inline)
 }
@@ -102,7 +167,7 @@ test {
 		"test.sh": "#!/bin/sh\n",
 	})
 
-	grouped, err := Targets(t.Context(), repo, provider)
+	grouped, err := testTargets(t.Context(), repo, provider)
 	must.NoError(t, err)
 	decoded := grouped[KindTest][0].Decoded.(decodedTarget)
 	test.EqOp(t, DecodingPathPrefix+"test.sh", decoded.Script)
@@ -136,7 +201,7 @@ func TestCrossFileTargetDependenciesWithRootRelativePath(t *testing.T) {
 `, "\n"),
 	})
 
-	got, err := Graph(t.Context(), repo)
+	got, err := Graph(t.Context(), repo, testPlugin{})
 	must.NoError(t, err)
 	graphtest.MustHaveRelation(t, got, EntityID(TestKind, "path2/atte.hcl", "py"), EntityID(TestKind, "path1/atte.hcl", "go"), DependsOnRelation)
 }
@@ -171,7 +236,7 @@ go 1.24
 	must.NoError(t, err)
 	goTest := graph.EntityID(value.AsString())
 
-	got, err := Graph(t.Context(), repo, WithFunctions(attego.HCLFunctions), graphset.WithEntityDecoder((attego.Detector{}).DecodeID))
+	got, err := Graph(t.Context(), repo, testPlugin{functions: attego.HCLFunctions, entityDecoder: (attego.Detector{}).DecodeID})
 	must.NoError(t, err)
 	graphtest.MustHaveRelation(t, got, EntityID(TestKind, "path1/atte.hcl", "go"), goTest, DependsOnRelation)
 	graphtest.MustHaveRelation(t, got, EntityID(TestKind, "path2/atte.hcl", "py"), EntityID(TestKind, "path1/atte.hcl", "go"), DependsOnRelation)
@@ -193,7 +258,7 @@ func TestCrossFileTargetDependenciesWithRelativePaths(t *testing.T) {
 `, "\n"),
 	})
 
-	got, err := Graph(t.Context(), repo)
+	got, err := Graph(t.Context(), repo, testPlugin{})
 	must.NoError(t, err)
 	graphtest.MustHaveRelation(t, got, EntityID(TestKind, "path1/atte.hcl", "go"), EntityID(TestKind, "path2/atte.hcl", "py"), DependsOnRelation)
 	graphtest.MustHaveRelation(t, got, EntityID(TestKind, "path2/atte.hcl", "py"), EntityID(TestKind, "path1/atte.hcl", "go"), DependsOnRelation)
@@ -208,7 +273,7 @@ func TestCrossFileTargetDependencyRejectsDanglingTarget(t *testing.T) {
 }`,
 	})
 
-	_, err := Targets(t.Context(), repo, nil)
+	_, err := testTargets(t.Context(), repo, nil)
 	test.ErrorContains(t, err, "target test.missing in \"path1/atte.hcl\" was not declared")
 }
 
@@ -232,7 +297,7 @@ test "unit" {
 		"trigger.yaml": "trigger\n",
 	})
 
-	got, err := Graph(t.Context(), repo, graphset.WithAttachToTree(), WithFunctions(attegit.PathHCLFunctions))
+	got, err := Graph(t.Context(), repo, testPlugin{functions: attegit.PathHCLFunctions}, graphset.WithAttachToTree())
 	must.NoError(t, err)
 
 	first := EntityID(TestKind, "atte.hcl", "0")
@@ -281,7 +346,7 @@ lint "vet" {
 		"lint.sh":    "#!/bin/sh\n",
 	})
 
-	got, err := Graph(t.Context(), repo, graphset.WithAttachToTree(), WithFunctions(attegit.PathHCLFunctions))
+	got, err := Graph(t.Context(), repo, testPlugin{functions: attegit.PathHCLFunctions}, graphset.WithAttachToTree())
 	must.NoError(t, err)
 
 	testTarget := EntityID(TestKind, "atte.hcl", "0")
@@ -318,7 +383,7 @@ codegen "go" {
 		"go.mod": "module example.com/root\n",
 	})
 
-	_, err := Graph(t.Context(), repo, WithFunctions(attego.HCLFunctions), graphset.WithEntityDecoder((attego.Detector{}).DecodeID))
+	_, err := Graph(t.Context(), repo, testPlugin{functions: attego.HCLFunctions, entityDecoder: (attego.Detector{}).DecodeID})
 	test.ErrorContains(t, err, `decode HCL "atte.hcl": atte.hcl:3,17-23:`)
 	test.ErrorContains(t, err, "  3 |   depends_on = [gopkg(\"./cmd/mis\")]\n")
 	test.ErrorContains(t, err, "Call to function \"gopkg\" failed")
@@ -326,7 +391,7 @@ codegen "go" {
 
 func TestGraphRejectsNilContext(t *testing.T) {
 	var ctx context.Context
-	_, err := Graph(ctx, nil)
+	_, err := Graph(ctx, nil, testPlugin{})
 	test.ErrorContains(t, err, "context must not be nil")
 }
 
@@ -358,7 +423,7 @@ func TestGraphRejectsInvalidConfiguration(t *testing.T) {
 			repo := newHCLFixture(t, map[string]string{
 				"nested/atte.hcl": tt.file,
 			})
-			_, err := Graph(t.Context(), repo, WithFunctions(attegit.PathHCLFunctions))
+			_, err := Graph(t.Context(), repo, testPlugin{functions: attegit.PathHCLFunctions})
 			test.Error(t, err)
 		})
 	}
@@ -378,7 +443,7 @@ test { script = local.script }
 `,
 		"root.sh": "#!/bin/sh\n",
 	})
-	_, err := Targets(t.Context(), repo, attegit.PathHCLFunctions)
+	_, err := testTargets(t.Context(), repo, attegit.PathHCLFunctions)
 	test.Error(t, err)
 }
 
@@ -387,7 +452,7 @@ func TestTargetRegistrySupportsCustomKindAndWrapperForm(t *testing.T) {
 		Command string
 	}
 	schema := hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "command", Required: true}}}
-	must.NoError(t, Register("package_test", TargetKindSpec{
+	must.NoError(t, registerTestTarget("package_test", TargetKindSpec{
 		Schema: &schema,
 		Decoder: func(content *hcl.BodyContent, ctx *hcl.EvalContext) (any, error) {
 			value, diagnostics := content.Attributes["command"].Expr.Value(ctx)
@@ -404,7 +469,7 @@ func TestTargetRegistrySupportsCustomKindAndWrapperForm(t *testing.T) {
 }
 `,
 	})
-	config, err := ConfigFor(t.Context(), repo, "", nil)
+	config, err := testConfigFor(t.Context(), repo, "", nil)
 	must.NoError(t, err)
 	test.Len(t, 1, SortedTargets(config.Targets))
 	test.EqOp(t, "package_test", strings.TrimPrefix(SortedTargets(config.Targets)[0].Kind, Namespace+":"))
@@ -416,14 +481,14 @@ func TestTargetRegistrySupportsCustomKindAndWrapperForm(t *testing.T) {
 
 func TestTargetKindCapabilitiesAreIndependent(t *testing.T) {
 	kind := Kind("non_runnable_capability_test")
-	must.NoError(t, Register(kind, TargetKindSpec{
+	must.NoError(t, registerTestTarget(kind, TargetKindSpec{
 		Schema: &hcl.BodySchema{},
 		Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
 			return struct{ Value string }{Value: "decoded"}, nil
 		},
 	}))
 	repo := newHCLFixture(t, map[string]string{"atte.hcl": "non_runnable_capability_test \"target\" {}"})
-	config, err := ConfigFor(t.Context(), repo, "", nil)
+	config, err := testConfigFor(t.Context(), repo, "", nil)
 	must.NoError(t, err)
 	targets := SortedTargets(config.Targets)
 	test.Len(t, 1, targets)
@@ -431,7 +496,7 @@ func TestTargetKindCapabilitiesAreIndependent(t *testing.T) {
 	decoded, ok := targets[0].Decoded.(struct{ Value string })
 	test.True(t, ok, test.Sprintf("non-runnable target should preserve its decoded value"))
 	test.EqOp(t, "decoded", decoded.Value)
-	graph, err := Graph(t.Context(), repo)
+	graph, err := Graph(t.Context(), repo, testPlugin{})
 	must.NoError(t, err)
 	test.EqOp(t, 0, len(graph.Entities))
 }
@@ -441,7 +506,7 @@ func TestTargetRegistrySnapshotsCapabilities(t *testing.T) {
 	repo := newHCLFixture(t, map[string]string{"atte.hcl": "registry_snapshot_test {}"})
 	evaluator, err := newEvaluator(t.Context(), repo, nil)
 	must.NoError(t, err)
-	must.NoError(t, Register(kind, TargetKindSpec{
+	must.NoError(t, registerTestTarget(kind, TargetKindSpec{
 		Schema: &hcl.BodySchema{},
 		Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
 			return struct{}{}, nil
@@ -449,7 +514,7 @@ func TestTargetRegistrySnapshotsCapabilities(t *testing.T) {
 	}))
 	_, err = evaluator.evaluatedTargets()
 	test.ErrorContains(t, err, "unknown target kind \"registry_snapshot_test\"")
-	_, err = Targets(t.Context(), repo, nil)
+	_, err = testTargets(t.Context(), repo, nil)
 	test.NoError(t, err)
 }
 
@@ -457,15 +522,15 @@ func TestTargetRegistryRegistrationValidation(t *testing.T) {
 	decoder := func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
 		return struct{}{}, nil
 	}
-	test.Error(t, Register("test", TargetKindSpec{Decoder: decoder}))
-	test.Error(t, Register("bad name", TargetKindSpec{Decoder: decoder}))
-	test.Error(t, Register("valid_registration", TargetKindSpec{}))
+	test.Error(t, registerTestTarget("test", TargetKindSpec{Decoder: decoder}))
+	test.Error(t, registerTestTarget("bad name", TargetKindSpec{Decoder: decoder}))
+	test.Error(t, registerTestTarget("valid_registration", TargetKindSpec{}))
 }
 
 func TestTargetRegistryCopiesSchema(t *testing.T) {
 	schema := hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "command", Required: true}}}
 	kind := "schema_copy_test"
-	must.NoError(t, Register(kind, TargetKindSpec{
+	must.NoError(t, registerTestTarget(kind, TargetKindSpec{
 		Schema: &schema,
 		Decoder: func(content *hcl.BodyContent, _ *hcl.EvalContext) (any, error) {
 			return content.Attributes["command"].Name, nil
@@ -476,7 +541,7 @@ func TestTargetRegistryCopiesSchema(t *testing.T) {
 	repo := newHCLFixture(t, map[string]string{
 		"atte.hcl": `schema_copy_test { command = "kept" }`,
 	})
-	config, err := ConfigFor(t.Context(), repo, "", nil)
+	config, err := testConfigFor(t.Context(), repo, "", nil)
 	must.NoError(t, err)
 	test.EqOp(t, "command", SortedTargets(config.Targets)[0].Decoded)
 }
@@ -485,7 +550,7 @@ func TestTargetRegistryRejectsInvalidTargetNames(t *testing.T) {
 	repo := newHCLFixture(t, map[string]string{
 		"atte.hcl": `test "0" { script = "echo" }`,
 	})
-	_, err := Targets(t.Context(), repo, nil)
+	_, err := testTargets(t.Context(), repo, nil)
 	test.ErrorContains(t, err, "must not be numeric")
 }
 
@@ -496,7 +561,7 @@ test "short" { script = "echo short" }
 target "test" "wrapper" { script = "echo wrapper" }
 `,
 	})
-	got, err := ConfigFor(t.Context(), repo, "", nil)
+	got, err := testConfigFor(t.Context(), repo, "", nil)
 	must.NoError(t, err)
 	test.Len(t, 2, SortedTargets(got.Targets))
 	test.EqOp(t, "short", SortedTargets(got.Targets)[0].Name)
@@ -509,7 +574,7 @@ func TestTargetRegistryRejectsUnknownAndMalformedBlocks(t *testing.T) {
 	reject := func(file, want string) {
 		t.Helper()
 		repo := newHCLFixture(t, map[string]string{"atte.hcl": file})
-		_, err := Targets(t.Context(), repo, nil)
+		_, err := testTargets(t.Context(), repo, nil)
 		test.ErrorContains(t, err, want)
 	}
 
@@ -554,7 +619,7 @@ test {
 		"some/file": "dependency\n",
 	})
 
-	grouped, err := Targets(t.Context(), repo, attegit.PathHCLFunctions)
+	grouped, err := testTargets(t.Context(), repo, attegit.PathHCLFunctions)
 	must.NoError(t, err)
 	decoded := grouped[KindTest][2].Decoded.(decodedTarget)
 	must.Len(t, 3, decoded.Deps)
@@ -585,7 +650,7 @@ test {
 		"config.yaml": "config\n",
 	})
 
-	got, err := Graph(t.Context(), repo, WithFunctions(attegit.PathHCLFunctions))
+	got, err := Graph(t.Context(), repo, testPlugin{functions: attegit.PathHCLFunctions})
 	must.NoError(t, err)
 	testTarget := EntityID(TestKind, "atte.hcl", "0")
 	graphtest.MustHaveRelation(t, got, testTarget, attegit.EntityID(testPath("config.yaml")), DependsOnRelation)
@@ -628,7 +693,7 @@ test {
 		"some/file": "dependency\n",
 	})
 
-	got, err := Graph(t.Context(), repo, WithFunctions(attegit.PathHCLFunctions))
+	got, err := Graph(t.Context(), repo, testPlugin{functions: attegit.PathHCLFunctions})
 	must.NoError(t, err)
 
 	all := EntityID(TestKind, "atte.hcl", "2")
@@ -656,7 +721,7 @@ lint {
 		"codegen.sh": "#!/bin/sh\n",
 		"lint.sh":    "#!/bin/sh\n",
 	})
-	grouped, err := Targets(t.Context(), repo, attegit.PathHCLFunctions)
+	grouped, err := testTargets(t.Context(), repo, attegit.PathHCLFunctions)
 	must.NoError(t, err)
 	targets := SortedTargets(grouped)
 	test.Len(t, 3, targets)
@@ -670,7 +735,7 @@ lint {
 	must.Len(t, 1, decoded.Deps)
 	test.Len(t, 2, decoded.Deps[0].traversal)
 
-	config, err := ConfigFor(t.Context(), repo, "", attegit.PathHCLFunctions)
+	config, err := testConfigFor(t.Context(), repo, "", attegit.PathHCLFunctions)
 	must.NoError(t, err)
 	configTargets := SortedTargets(config.Targets)
 	test.Len(t, len(targets), configTargets)
@@ -681,7 +746,7 @@ lint {
 		test.EqOp(t, targets[index].Index, configTargets[index].Index)
 	}
 
-	graph, err := Graph(t.Context(), repo, WithFunctions(attegit.PathHCLFunctions))
+	graph, err := Graph(t.Context(), repo, testPlugin{functions: attegit.PathHCLFunctions})
 	must.NoError(t, err)
 	graphtest.MustHaveRelation(t, graph, grouped[KindTest][0].ID, grouped[KindCodegen][0].ID, DependsOnRelation)
 	for _, target := range targets {
@@ -704,7 +769,7 @@ func TestTargetEvaluationProviderIsFileLocal(t *testing.T) {
 		"child/atte.hcl":   `test { script = "child" }`,
 		"sibling/atte.hcl": `test { script = "sibling" }`,
 	})
-	_, err := ConfigFor(t.Context(), repo, "child", provider)
+	_, err := testConfigFor(t.Context(), repo, "child", provider)
 	must.NoError(t, err)
 	test.Len(t, 1, calls)
 	test.EqOp(t, reference.Blob("child/atte.hcl"), calls[0])
@@ -716,7 +781,7 @@ func TestConfigForReturnsOnlyRequestedFile(t *testing.T) {
 		"child/atte.hcl":   `test "child" { script = "child" }`,
 		"sibling/atte.hcl": `test "sibling" { script = "sibling" }`,
 	})
-	config, err := ConfigFor(t.Context(), repo, "child", nil)
+	config, err := testConfigFor(t.Context(), repo, "child", nil)
 	must.NoError(t, err)
 	targets := SortedTargets(config.Targets)
 	test.Len(t, 1, targets)
@@ -728,7 +793,7 @@ func TestEntityIDRoundTrip(t *testing.T) {
 	for _, kind := range []string{TestKind, CodegenKind, LintKind} {
 		t.Run(kind, func(t *testing.T) {
 			id := EntityID(kind, "nested/atte.hcl", "unit")
-			gotKind, file, name, err := DecodeEntityID(id)
+			gotKind, file, name, err := DecodeEntityID(id, testPlugin{})
 			must.NoError(t, err)
 			test.EqOp(t, kind, gotKind)
 			test.EqOp(t, reference.Blob("nested/atte.hcl"), file)
@@ -739,7 +804,7 @@ func TestEntityIDRoundTrip(t *testing.T) {
 
 func TestDecodeEntityIDRejectsUnknownKind(t *testing.T) {
 	id := EntityID(Namespace+":unknown", "nested/atte.hcl", "unit")
-	_, _, _, err := DecodeEntityID(id)
+	_, _, _, err := DecodeEntityID(id, testPlugin{})
 	test.ErrorContains(t, err, "invalid attehcl entity ID")
 }
 
@@ -761,7 +826,7 @@ func TestDeclaredTargetsDoesNotEvaluateBodies(t *testing.T) {
 		return nil, nil
 	}
 
-	declarations, err := DeclaredTargets(t.Context(), repo)
+	declarations, err := DeclaredTargets(t.Context(), repo, testPlugin{})
 	must.NoError(t, err)
 	test.Len(t, 2, declarations)
 	test.EqOp(t, "atte.hcl", declarations[0].Path)
@@ -774,7 +839,7 @@ func TestDeclaredTargetsDoesNotEvaluateBodies(t *testing.T) {
 	test.EqOp(t, "0", declarations[1].Name)
 	test.EqOp(t, 0, declarations[1].Index)
 
-	detectorTargets, err := NewDetector(provider).Targets(t.Context(), repo)
+	detectorTargets, err := NewDetector(testPlugin{functions: provider}).Targets(t.Context(), repo)
 	must.NoError(t, err)
 	test.Len(t, 2, detectorTargets)
 	test.EqOp(t, 0, calls)
@@ -794,7 +859,7 @@ test "same" {}`},
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newHCLFixture(t, map[string]string{"atte.hcl": tt.file})
-			_, err := DeclaredTargets(t.Context(), repo)
+			_, err := DeclaredTargets(t.Context(), repo, testPlugin{})
 			test.Error(t, err)
 		})
 	}
