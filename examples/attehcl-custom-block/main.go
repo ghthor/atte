@@ -9,10 +9,10 @@ import (
 	"syscall"
 
 	"github.com/ghthor/atte/cmd"
+	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attegitmock"
 	"github.com/ghthor/atte/detector/attehcl"
-	"github.com/ghthor/atte/detector/plugin"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/zclconf/go-cty/cty"
 )
@@ -35,8 +35,8 @@ type deployTarget struct {
 	Env string
 }
 
-func registerDeployBlock(detector *plugin.Builder) error {
-	return plugin.RegisterHCLBlock(detector, KindDeploy, attehcl.TargetKindSpec{
+func registerDeployBlock(builder *detector.Builder) error {
+	return detector.RegisterHCLBlock(builder, KindDeploy, attehcl.TargetKindSpec{
 		Schema:    &deploySchema,
 		Decoder:   decodeDeployTarget,
 		Graph:     graphDeployTarget,
@@ -108,18 +108,18 @@ func execute() error {
 	}
 	defer cleanup()
 
-	builtIns, err := plugin.NewDefaultBuilder()
+	builtIns, err := detector.NewDefaultBuilder()
 	if err != nil {
-		return fmt.Errorf("create built-in registry: %w", err)
+		return fmt.Errorf("create built-in Scanner: %w", err)
 	}
 	if err := registerDeployBlock(builtIns); err != nil {
 		return fmt.Errorf("register deploy target: %w", err)
 	}
-	detector := builtIns.Compile()
+	scanner := builtIns.Compile()
 	return cmd.ExecuteWithOptions(ctx, os.Args[1:], cmd.ExecuteOptions{
 		Repository:     repository,
 		RepositoryRoot: directory,
-		Detector:       detector,
+		Detector:       scanner,
 	})
 }
 

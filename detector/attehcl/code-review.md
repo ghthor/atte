@@ -30,24 +30,24 @@
 
 ## Executive summary
 
-The package has a sound pipeline and good separation between declaration discovery, local evaluation, target decoding, and graph projection. The target capability registry is a useful extensibility boundary, and the recent evaluator-construction cleanup has removed the earlier duplication there.
+The package has a sound pipeline and good separation between declaration discovery, local evaluation, target decoding, and graph projection. The target capability set is a useful extensibility boundary, and the recent evaluator-construction cleanup has removed the earlier duplication there.
 
 The main remaining opportunity is algorithmic: local evaluation repeatedly retries expressions. The remaining smaller refactorings remove unused state.
 
 ## Resolved architectural follow-ups
 
-### Plugin registry lifecycle
+### Builder and Scanner lifecycle
 
-The plugin registry lifecycle has been refactored since this review was written:
+The detector composition lifecycle has been refactored since this review was written:
 
-- plugin.Builder is setup-only and owns detector, target-kind, and HCL-function registration.
-- Builder.Compile creates an immutable plugin.Registry read-only interface.
-- Runtime graph, target, entity-decoding, and HCL-evaluation operations consume the compiled registry rather than the builder.
-- The compiled registry snapshots all capabilities together, including target schemas and HCL function factories, and does not require a mutex.
-- The built-in HCL detector is created against the compiled registry, preventing runtime evaluation from retaining the mutable builder.
-- Compiled registries are isolated from later builder registrations.
+- detector.Builder is setup-only and owns Sensor, target-kind, and HCL-function registration.
+- Builder.Compile creates an immutable detector.Scanner read-only interface.
+- Runtime graph, target, entity-decoding, and HCL-evaluation operations consume the compiled Scanner rather than the Builder.
+- The compiled Scanner snapshots all capabilities together, including target schemas and HCL function factories, and does not require a mutex.
+- The built-in HCL Sensor is created against the compiled Scanner, preventing runtime evaluation from retaining the mutable Builder.
+- Compiled Scanners are isolated from later Builder registrations.
 
-This resolves the previous concern about combining setup-time mutation with runtime reads. It also makes the capability snapshot coherent across detectors, target kinds, and HCL functions. The remaining findings below concern HCL evaluation, diagnostics, and graph construction rather than registry synchronization or lifecycle.
+This resolves the previous concern about combining setup-time mutation with runtime reads. It also makes the capability snapshot coherent across Sensors, target kinds, and HCL functions. The remaining findings below concern HCL evaluation, diagnostics, and graph construction rather than setup/runtime synchronization or lifecycle.
 
 ## Findings
 
@@ -127,8 +127,8 @@ Define whether relationships are a set at the graph.New boundary and enforce tha
 | Dependency decoding | O(V + A × dependency data) | Dependency context transformation is shared per target |
 | Target decoding | O(blocks + expression evaluation) | Provider function cost is external |
 | Graph assembly | O(targets + dependencies + projected entities) | Duplicate relationships can increase output and consumer work |
-| Registry compilation | O(registered capabilities + schema size) | One immutable capability snapshot is created before runtime evaluation |
-| Registry runtime access | O(1) capability lookup | Compiled detector and capability maps are immutable and require no mutex |
+| Scanner compilation | O(registered capabilities + schema size) | One immutable capability snapshot is created before runtime evaluation |
+| Scanner runtime access | O(1) capability lookup | Compiled detector and capability maps are immutable and require no mutex |
 | Diagnostic rendering | O(diagnostics × file size) | File contents are reread per diagnostic |
 
 ## Recommended implementation order
@@ -187,4 +187,4 @@ The existing pipeline should be retained. Its important property is that each ph
 
 DeclaredTargets does not require local values, provider functions, registered decoders, or graph projections. Targets and ConfigFor consume decoded output and add common target identity, selector, script, execution, and configuration data. Graph consumes the same declaration index and decoded output while invoking graph projections.
 
-The best remaining algorithmic improvement is deterministic, dependency-ordered local evaluation. The capability registry lifecycle is now explicit: setup uses plugin.Builder, runtime evaluation uses an immutable compiled plugin.Registry, and no further registry rewrite is currently indicated. Future work should focus on the local-evaluation, diagnostic, and graph findings above.
+The best remaining algorithmic improvement is deterministic, dependency-ordered local evaluation. The detector composition lifecycle is now explicit: setup uses detector.Builder, runtime evaluation uses an immutable compiled detector.Scanner, and no further composition rewrite is currently indicated. Future work should focus on the local-evaluation, diagnostic, and graph findings above.

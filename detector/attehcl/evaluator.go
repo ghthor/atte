@@ -21,7 +21,7 @@ type evaluator struct {
 	ctx          context.Context
 	repo         *attegit.Repo
 	files        hclFiles
-	plugin       targetsPlugin
+	scanner      targetEvaluationCapabilities
 	functions    map[reference.Blob]map[string]function.Function
 	kindSpecs    map[Kind]TargetKindSpec
 	declarations declarationIndex
@@ -75,7 +75,7 @@ func checkContext(ctx context.Context) error {
 	return ctx.Err()
 }
 
-func newEvaluator(ctx context.Context, repo *attegit.Repo, plugin targetsPlugin) (*evaluator, error) {
+func newEvaluator(ctx context.Context, repo *attegit.Repo, scanner targetEvaluationCapabilities) (*evaluator, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("repository is nil")
 	}
@@ -86,14 +86,14 @@ func newEvaluator(ctx context.Context, repo *attegit.Repo, plugin targetsPlugin)
 	if err != nil {
 		return nil, err
 	}
-	return newEvaluatorWithFiles(ctx, repo, files, plugin), nil
+	return newEvaluatorWithFiles(ctx, repo, files, scanner), nil
 }
 
 func newEvaluatorForFile(
 	ctx context.Context,
 	repo *attegit.Repo,
 	file reference.Blob,
-	plugin targetsPlugin,
+	scanner targetEvaluationCapabilities,
 ) (*evaluator, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("repository is nil")
@@ -112,22 +112,22 @@ func newEvaluatorForFile(
 			locals: make(map[string]hcl.Expression),
 		}
 	}
-	return newEvaluatorWithFiles(ctx, repo, files, plugin), nil
+	return newEvaluatorWithFiles(ctx, repo, files, scanner), nil
 }
 
 func newEvaluatorWithFiles(
 	ctx context.Context,
 	repo *attegit.Repo,
 	files hclFiles,
-	plugin targetsPlugin,
+	scanner targetEvaluationCapabilities,
 ) *evaluator {
 	return &evaluator{
 		ctx:       ctx,
 		repo:      repo,
 		files:     files,
-		plugin:    plugin,
+		scanner:   scanner,
 		functions: make(map[reference.Blob]map[string]function.Function),
-		kindSpecs: targetKinds(plugin),
+		kindSpecs: targetKinds(scanner),
 	}
 }
 
@@ -179,7 +179,7 @@ func (e *evaluator) hclFunctions(file reference.Blob) (map[string]function.Funct
 	if functions, ok := e.functions[file]; ok {
 		return functions, nil
 	}
-	functions, err := mergedHCLFunctions(e.ctx, e.repo, file, e.plugin)
+	functions, err := mergedHCLFunctions(e.ctx, e.repo, file, e.scanner)
 	if err != nil {
 		return nil, err
 	}
@@ -413,13 +413,13 @@ func mergedHCLFunctions(
 	ctx context.Context,
 	repo *attegit.Repo,
 	file reference.Blob,
-	plugin FunctionProvider,
+	scanner FunctionCapabilities,
 ) (map[string]function.Function, error) {
 	functions := baseHCLFunctions(file)
-	if plugin == nil {
+	if scanner == nil {
 		return functions, nil
 	}
-	extra, err := plugin.HCLFunctions(ctx, repo, file)
+	extra, err := scanner.HCLFunctions(ctx, repo, file)
 	if err != nil {
 		return nil, err
 	}

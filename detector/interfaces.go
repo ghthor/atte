@@ -9,31 +9,31 @@ import (
 	"github.com/ghthor/atte/detector/graphtarget"
 )
 
-// Detector describes the capabilities used to register a detector.
-type Detector interface {
+// Sensor identifies one registered detector implementation.
+type Sensor interface {
 	Namespace() string
 }
 
-// GraphDetector constructs a detector graph.
-// Detector implementations may expose additional methods that convert their
+// SensorGraph constructs a detector graph.
+// Sensor implementations may expose additional methods that convert their
 // neutral Targets into selector.Target values for user-facing matching.
-type GraphDetector interface {
-	Detector
+type SensorGraph interface {
+	Sensor
 	Graph(context.Context, *attegit.Repo, ...graphset.Option) (*graph.Graph, error)
 }
 
-// TargetDetector discovers detector targets. Selector mappings are registered
+// SensorTarget discovers detector targets. Selector mappings are registered
 // independently by the detector package with reference/selector.
-type TargetDetector interface {
-	Detector
+type SensorTarget interface {
+	Sensor
 	Targets(context.Context, *attegit.Repo) ([]graphtarget.ID, error)
 }
 
-// EntityDecoder validates an entity ID and returns its detector-specific kind.
-// IDs must begin with the detector namespace followed by a colon. A detector
-// may return its namespace as the kind when the ID does not encode a more
-// specific kind, as with attegit path IDs.
-type EntityDecoder interface {
-	Detector
+// SensorEntityDecoder validates an entity ID and returns its detector-specific
+// kind. IDs must begin with the detector namespace followed by a colon. A
+// Sensor may return its namespace as the kind when the ID does not encode a
+// more specific kind, as with attegit path IDs.
+type SensorEntityDecoder interface {
+	Sensor
 	DecodeID(id graph.EntityID) (graph.Entity, error)
 }

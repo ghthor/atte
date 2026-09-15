@@ -7,11 +7,11 @@ import (
 	"testing"
 
 	"github.com/ghthor/atte/cmd"
+	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attegittest"
 	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/detector/graphset"
-	"github.com/ghthor/atte/detector/plugin"
 	"github.com/ghthor/atte/reference"
 	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
@@ -20,7 +20,7 @@ import (
 type acceptanceRepository struct {
 	repo     *attegit.Repo
 	dir      string
-	detector plugin.Registry
+	detector detector.Scanner
 }
 
 func newAcceptanceRepository(t *testing.T) acceptanceRepository {
@@ -38,7 +38,7 @@ deploy "release" {
 
 	repo, err := attegit.Open(git.Dir(), "HEAD", attegit.WithWorkingTree())
 	must.NoError(t, err)
-	builder, err := plugin.NewDefaultBuilder()
+	builder, err := detector.NewDefaultBuilder()
 	must.NoError(t, err)
 	must.NoError(t, registerDeployBlock(builder))
 	return acceptanceRepository{repo: repo, dir: git.Dir(), detector: builder.Compile()}

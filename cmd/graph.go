@@ -13,12 +13,12 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphset"
-	"github.com/ghthor/atte/detector/plugin"
 	"github.com/ghthor/atte/reference"
 	"github.com/ghthor/atte/reference/selector"
 	"github.com/spf13/cobra"
@@ -120,7 +120,7 @@ func printGraph(ctx context.Context, w io.Writer, repo *attegit.Repo, relativePa
 	if err != nil {
 		return fmt.Errorf("build Git graph: %w", err)
 	}
-	detector, err := detectorForContext(ctx)
+	detector, err := scannerForContext(ctx)
 	if err != nil {
 		return fmt.Errorf("register detectors: %w", err)
 	}
@@ -145,7 +145,7 @@ func printGraph(ctx context.Context, w io.Writer, repo *attegit.Repo, relativePa
 
 func graphRunTargetSelectors(ctx context.Context, repo *attegit.Repo) (map[graph.EntityID]string, error) {
 	selectors := make(map[graph.EntityID]string)
-	detector, err := detectorForContext(ctx)
+	detector, err := scannerForContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +176,7 @@ func printGitGraph(
 	g *graph.Graph,
 	relativePath string,
 	options PrintGraphOptions,
-	detector plugin.Registry,
+	detector detector.Scanner,
 	runSelectors ...map[graph.EntityID]string,
 ) error {
 	var selectors map[graph.EntityID]string
@@ -213,7 +213,7 @@ func isGraphChildKind(kind string) bool {
 	}
 }
 
-func graphHCLTargetLabel(id graph.EntityID, detector plugin.Registry) (string, error) {
+func graphHCLTargetLabel(id graph.EntityID, detector detector.Scanner) (string, error) {
 	kind, _, _, err := attehcl.DecodeEntityID(id, detector)
 	if err != nil {
 		return "", fmt.Errorf("decode HCL entity %q: %w", id, err)
@@ -227,7 +227,7 @@ func addGraphChildren(
 	g *graph.Graph,
 	parentID graph.EntityID,
 	options PrintGraphOptions,
-	detector plugin.Registry,
+	detector detector.Scanner,
 	runSelectors ...map[graph.EntityID]string,
 ) error {
 	var selectors map[graph.EntityID]string
@@ -320,7 +320,7 @@ func addTargetNode(
 	id graph.EntityID,
 	label string,
 	options PrintGraphOptions,
-	detector plugin.Registry,
+	detector detector.Scanner,
 ) {
 	dependencies := make([]graph.EntityID, 0)
 	for _, relation := range g.Out(id) {
@@ -346,7 +346,7 @@ func addTargetNode(
 	}
 }
 
-func graphDependencyLabel(g *graph.Graph, id graph.EntityID, detector plugin.Registry) string {
+func graphDependencyLabel(g *graph.Graph, id graph.EntityID, detector detector.Scanner) string {
 	entity := g.Entities[id]
 	if isHCLTargetKind(string(entity.Kind)) {
 		kind, _, name, err := attehcl.DecodeEntityID(id, detector)

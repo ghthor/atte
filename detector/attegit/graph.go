@@ -38,7 +38,7 @@ func EntityPath(id graph.EntityID) (reference.Path, error) {
 	return reference.ParsePath(value)
 }
 
-// Detector adapts the Git repository graph to the shared detector registry.
+// Detector adapts the Git repository graph to the shared detector Sensor contract.
 type Detector struct{}
 
 func (Detector) Namespace() string { return Namespace }

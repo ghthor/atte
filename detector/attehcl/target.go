@@ -104,14 +104,14 @@ func targetIdentityFor(file reference.Blob, kind Kind, name string, index int) t
 	}
 }
 
-func DecodeEntityID(id graph.EntityID, plugin TargetRegistry) (string, reference.Blob, string, error) {
+func DecodeEntityID(id graph.EntityID, scanner TargetCapabilities) (string, reference.Blob, string, error) {
 	parts := strings.SplitN(string(id), ":", 4)
 	if len(parts) != 4 || parts[0] != Namespace {
 		return "", "", "", fmt.Errorf("invalid attehcl entity ID %q", id)
 	}
 	kind := parts[0] + ":" + parts[1]
 
-	kinds := targetKinds(plugin)
+	kinds := targetKinds(scanner)
 	if _, ok := kinds[Kind(parts[1])]; !ok {
 		return "", "", "", fmt.Errorf("invalid attehcl entity ID %q", id)
 	}

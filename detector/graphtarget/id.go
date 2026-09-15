@@ -10,7 +10,7 @@ type Namespace string
 //
 // It preserves the graph entity ID and detector namespace alongside the
 // detector-specific kind and repository path. This representation is intended
-// for graph and registry operations; it is not the user-facing selector format.
+// for graph and Scanner operations; it is not the user-facing selector format.
 // Convert it to a selector.Target when constructing CLI identifiers.
 //
 // TODO: Consider moving ID into the graph package because it directly

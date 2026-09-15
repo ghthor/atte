@@ -5,10 +5,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attegittest"
 	"github.com/ghthor/atte/detector/attehcl"
-	"github.com/ghthor/atte/detector/plugin"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
@@ -104,9 +104,9 @@ func TestExecuteWithOptionsUsesInjectedDetectorWithoutRepositoryOverride(t *test
 	repository := newExecutionRepository(t, map[string]string{
 		"atte.hcl": `custom "unit" {}`,
 	})
-	builder, err := plugin.NewDefaultBuilder()
+	builder, err := detector.NewDefaultBuilder()
 	must.NoError(t, err)
-	must.NoError(t, plugin.RegisterHCLBlock(builder, "custom", attehcl.TargetKindSpec{
+	must.NoError(t, detector.RegisterHCLBlock(builder, "custom", attehcl.TargetKindSpec{
 		Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
 			return struct{}{}, nil
 		},

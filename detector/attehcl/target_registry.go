@@ -49,25 +49,28 @@ type TargetKindSpec struct {
 	Script    TargetScriptProjection
 }
 
-// TargetRegistry exposes target-kind capabilities to HCL evaluation.
-type TargetRegistry interface {
+// TargetCapabilities exposes target-kind capabilities to HCL evaluation.
+type TargetCapabilities interface {
 	TargetKinds() map[Kind]TargetKindSpec
 }
 
-type FunctionProvider interface {
+// FunctionCapabilities provides repository- and file-aware HCL functions to
+// HCL evaluation.
+type FunctionCapabilities interface {
 	HCLFunctions(context.Context, *attegit.Repo, reference.Blob) (map[string]function.Function, error)
 }
 
-type EntityDecoder interface {
+// EntityCapabilities provides entity-ID decoding to HCL evaluation.
+type EntityCapabilities interface {
 	DecodeID(graph.EntityID) (graph.Entity, error)
 }
 
-// Plugin provides the capabilities HCL evaluation needs from the plugin
-// registry without importing the plugin package.
-type Plugin interface {
-	TargetRegistry
-	FunctionProvider
-	EntityDecoder
+// Capabilities provides the capabilities HCL evaluation needs from the
+// compiled Scanner without importing the detector package.
+type Capabilities interface {
+	TargetCapabilities
+	FunctionCapabilities
+	EntityCapabilities
 }
 
 // TargetGraphContext provides common dependency resolution to a graph projector.
@@ -150,10 +153,10 @@ const targetTraversalValuePrefix = "attehcl-target:"
 
 var defaultTargetKinds = BuiltInTargetKinds()
 
-func targetKinds(plugin TargetRegistry) map[Kind]TargetKindSpec {
+func targetKinds(scanner TargetCapabilities) map[Kind]TargetKindSpec {
 	provided := defaultTargetKinds
-	if plugin != nil {
-		provided = plugin.TargetKinds()
+	if scanner != nil {
+		provided = scanner.TargetKinds()
 	}
 	result := make(map[Kind]TargetKindSpec, len(provided))
 	for kind, spec := range provided {

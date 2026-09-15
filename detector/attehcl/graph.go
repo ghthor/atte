@@ -100,8 +100,8 @@ func projectDependency(
 	return entity, graph.Relationship{From: target.ID, To: entity.ID, Kind: DependsOnRelation}, nil
 }
 
-// Graph builds the HCL detector graph using capabilities from the supplied plugin registry.
-func Graph(ctx context.Context, repo *attegit.Repo, plugin Plugin, options ...graphset.Option) (*graph.Graph, error) {
+// Graph builds the HCL Sensor graph using capabilities from the supplied Scanner.
+func Graph(ctx context.Context, repo *attegit.Repo, scanner Capabilities, options ...graphset.Option) (*graph.Graph, error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
@@ -112,17 +112,17 @@ func Graph(ctx context.Context, repo *attegit.Repo, plugin Plugin, options ...gr
 		}
 	}
 
-	return graphFor(ctx, repo, plugin, config)
+	return graphFor(ctx, repo, scanner, config)
 }
 
-func graphFor(ctx context.Context, repo *attegit.Repo, plugin Plugin, options graphset.Options) (*graph.Graph, error) {
+func graphFor(ctx context.Context, repo *attegit.Repo, scanner Capabilities, options graphset.Options) (*graph.Graph, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if repo == nil {
 		return nil, fmt.Errorf("repository is nil")
 	}
-	evaluator, err := newEvaluator(ctx, repo, plugin)
+	evaluator, err := newEvaluator(ctx, repo, scanner)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +145,7 @@ func graphFor(ctx context.Context, repo *attegit.Repo, plugin Plugin, options gr
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		r, err := addEvaluatedTargetGraph(ctx, repo, block, declarations, addEntity, options.AttachToTree, plugin)
+		r, err := addEvaluatedTargetGraph(ctx, repo, block, declarations, addEntity, options.AttachToTree, scanner)
 		if err != nil {
 			return nil, err
 		}
@@ -162,7 +162,7 @@ func addEvaluatedTargetGraph(
 	declarations declarationIndex,
 	addEntity func(graph.Entity),
 	containment bool,
-	entityDecoder EntityDecoder,
+	decodeID EntityCapabilities,
 ) ([]graph.Relationship, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -187,7 +187,7 @@ func addEvaluatedTargetGraph(
 			return graph.Entity{ID: declaration.ID, Kind: graph.EntityKind(Namespace + ":" + string(declaration.Kind))}, nil
 		},
 		EntityKind: func(id graph.EntityID) (graph.EntityKind, error) {
-			return entityDependencyKind(entityDecoder, id)
+			return entityDependencyKind(decodeID, id)
 		},
 	}
 	projected, err := native.graph(ctx, repo, native, graphContext, containment)
@@ -216,11 +216,11 @@ func resolveTargetTraversal(file reference.Blob, traversal hcl.Traversal, declar
 	return declaration, nil
 }
 
-func entityDependencyKind(decoder EntityDecoder, id graph.EntityID) (graph.EntityKind, error) {
-	if decoder == nil {
+func entityDependencyKind(decodeID EntityCapabilities, id graph.EntityID) (graph.EntityKind, error) {
+	if decodeID == nil {
 		return "", fmt.Errorf("no entity decoder configured for dependency %q", id)
 	}
-	entity, err := decoder.DecodeID(id)
+	entity, err := decodeID.DecodeID(id)
 	if err != nil {
 		return "", fmt.Errorf("decode dependency entity %q: %w", id, err)
 	}

@@ -1,7 +1,6 @@
 # `atte.hcl` targets
 
-The HCL detector discovers directory-local target kinds registered in a plugin
-registry. The built-in registry provides the `test`, `codegen`, and `lint`
+The HCL Sensor discovers directory-local target kinds registered in a Scanner. The built-in Scanner provides the `test`, `codegen`, and `lint`
 targets; applications can add their own target kinds without changing this
 package. Each target may have a `script` and may also have `depends_on` and
 `triggered_by` expressions. Declaration-only target discovery permits a missing
@@ -14,20 +13,20 @@ dependency resolution is a later graph-assembly concern.
 
 ## Registering target kinds
 
-Use `plugin.NewDefaultBuilder` when an application wants the standard detectors, target
+Use `detector.NewDefaultBuilder` when an application wants the standard Sensors, target
 kinds, and HCL functions. Register custom HCL blocks on the setup builder
-with `plugin.RegisterHCLBlock`. The registration requires a decoder and can
+with `detector.RegisterHCLBlock`. The registration requires a decoder and can
 optionally provide graph, execution, configuration, and script projections.
 Those optional projections determine which capabilities are available for the
 custom target.
 
 ```go
-builder, err := plugin.NewDefaultBuilder()
+builder, err := detector.NewDefaultBuilder()
 if err != nil {
 	return err
 }
 
-err = plugin.RegisterHCLBlock(builder, "deploy", attehcl.TargetKindSpec{
+err = detector.RegisterHCLBlock(builder, "deploy", attehcl.TargetKindSpec{
 	Schema:    &deploySchema,
 	Decoder:   decodeDeploy,
 	Graph:     graphDeploy,
@@ -38,36 +37,35 @@ if err != nil {
 	return err
 }
 
-registry := builder.Compile()
+scanner := builder.Compile()
 ```
 
 `deploySchema` and the projection functions in this example are application
 code. See `examples/attehcl-custom-block` for a complete custom target. The
-builder returned by `plugin.NewDefaultBuilder` contains the built-in target kinds,
-detectors, and HCL functions. Compilation adds the HCL detector with a reference
-to the immutable registry, so all subsequent HCL evaluation uses one consistent
+builder returned by `detector.NewDefaultBuilder` contains the built-in target kinds,
+Sensors, and HCL functions. Compilation adds the HCL Sensor with a reference
+to the immutable Scanner, so all subsequent HCL evaluation uses one consistent
 capability set. Target kind names must be valid HCL identifiers and cannot be
 registered more than once in a builder.
 
-Pass the same registry to the direct `attehcl` APIs that evaluate targets or
+Pass the same scanner to the direct `attehcl` APIs that evaluate targets or
 build graphs:
 
 ```go
-targets, err := attehcl.Targets(ctx, repo, registry)
-config, err := attehcl.ConfigFor(ctx, repo, relativePath, registry)
-graph, err := attehcl.Graph(ctx, repo, registry)
+targets, err := attehcl.Targets(ctx, repo, scanner)
+config, err := attehcl.ConfigFor(ctx, repo, relativePath, scanner)
+graph, err := attehcl.Graph(ctx, repo, scanner)
 ```
 
-When adapting the HCL detector directly, use `attehcl.NewDetector(registry)`.
-For CLI execution, provide the registry through `cmd.ExecuteOptions.Detector`;
-repository discovery remains unchanged when only the detector registry is
-injected:
+When adapting the HCL Sensor directly, use `attehcl.NewDetector(scanner)`.
+For CLI execution, provide the scanner through `cmd.ExecuteOptions.Detector`;
+repository discovery remains unchanged when only the Scanner is injected:
 
 ```go
 err := cmd.ExecuteWithOptions(ctx, args, cmd.ExecuteOptions{
 	Repository:     repo,
 	RepositoryRoot: root,
-	Detector:       registry,
+	Detector:       scanner,
 })
 ```
 
@@ -101,7 +99,7 @@ as `atte::source_file()`. The factory can use the repository and context to
 construct functions backed by repository state or to return contextual errors.
 
 Built-in functions such as `path`, `gopkg`, and `gopkg_test` are already
-registered by `plugin.NewDefaultBuilder`. Custom function names must not conflict with
+registered by `detector.NewDefaultBuilder`. Custom function names must not conflict with
 the built-in HCL functions or another registered function, and a function name
 can only be registered once in a builder.
 

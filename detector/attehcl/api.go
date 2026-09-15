@@ -10,26 +10,26 @@ import (
 	"github.com/ghthor/atte/reference"
 )
 
-type targetsPlugin interface {
-	TargetRegistry
-	FunctionProvider
+type targetEvaluationCapabilities interface {
+	TargetCapabilities
+	FunctionCapabilities
 }
 
 // Targets evaluates all atte.hcl files independently and groups declarations by kind.
-func Targets(ctx context.Context, repo *attegit.Repo, plugin targetsPlugin) (map[Kind][]Target, error) {
+func Targets(ctx context.Context, repo *attegit.Repo, scanner targetEvaluationCapabilities) (map[Kind][]Target, error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
-	return targetsWithProvider(ctx, repo, plugin)
+	return targetsWithCapabilities(ctx, repo, scanner)
 }
 
 // DeclaredTargets returns target identities without evaluating target bodies.
 // Results are ordered by repository-relative file path and source order.
-func DeclaredTargets(ctx context.Context, repo *attegit.Repo, plugin targetsPlugin) ([]graphtarget.ID, error) {
+func DeclaredTargets(ctx context.Context, repo *attegit.Repo, scanner targetEvaluationCapabilities) ([]graphtarget.ID, error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
-	evaluator, err := newEvaluator(ctx, repo, plugin)
+	evaluator, err := newEvaluator(ctx, repo, scanner)
 	if err != nil {
 		return nil, err
 	}
@@ -58,8 +58,8 @@ func SortedTargets(grouped map[Kind][]Target) []Target {
 	return targets
 }
 
-func targetsWithProvider(ctx context.Context, repo *attegit.Repo, plugin targetsPlugin) (map[Kind][]Target, error) {
-	evaluator, err := newEvaluator(ctx, repo, plugin)
+func targetsWithCapabilities(ctx context.Context, repo *attegit.Repo, scanner targetEvaluationCapabilities) (map[Kind][]Target, error) {
+	evaluator, err := newEvaluator(ctx, repo, scanner)
 	if err != nil {
 		return nil, err
 	}
@@ -76,18 +76,18 @@ type Config struct {
 }
 
 // ConfigFor evaluates the file-local target configuration for a repository-relative directory.
-func ConfigFor(ctx context.Context, repo *attegit.Repo, relativePath string, plugin targetsPlugin) (Config, error) {
+func ConfigFor(ctx context.Context, repo *attegit.Repo, relativePath string, scanner targetEvaluationCapabilities) (Config, error) {
 	if err := checkContext(ctx); err != nil {
 		return Config{}, err
 	}
-	return configForWithProvider(ctx, repo, relativePath, plugin)
+	return configForWithCapabilities(ctx, repo, relativePath, scanner)
 }
 
-func configForWithProvider(
+func configForWithCapabilities(
 	ctx context.Context,
 	repo *attegit.Repo,
 	relativePath string,
-	plugin targetsPlugin,
+	scanner targetEvaluationCapabilities,
 ) (Config, error) {
 	if repo == nil {
 		return Config{}, fmt.Errorf("repository is nil")
@@ -100,7 +100,7 @@ func configForWithProvider(
 	if err != nil {
 		return Config{}, err
 	}
-	evaluator, err := newEvaluatorForFile(ctx, repo, currentBlob, plugin)
+	evaluator, err := newEvaluatorForFile(ctx, repo, currentBlob, scanner)
 	if err != nil {
 		return Config{}, err
 	}

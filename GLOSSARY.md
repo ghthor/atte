@@ -104,6 +104,10 @@ A Detector identifies possible structure. It does not determine whether an
 Entity experienced an observable change; that responsibility belongs to a
 Refiner.
 
+The detector package's composition vocabulary is defined in
+[detector/GLOSSARY.md](detector/GLOSSARY.md). It defines Sensors, Scanners,
+Builders, Sensor capabilities, and the HCL evaluation Capabilities boundary.
+
 ---
 
 ## Projection

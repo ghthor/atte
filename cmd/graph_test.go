@@ -10,11 +10,11 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attegittest"
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/attehcl"
-	"github.com/ghthor/atte/detector/plugin"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
@@ -254,9 +254,9 @@ func TestPrintGraphIncludesCustomHCLTargets(t *testing.T) {
 	repo := repoWithFiles(t, map[string]string{
 		"atte.hcl": "deploy \"release\" {}",
 	})
-	builder, err := plugin.NewDefaultBuilder()
+	builder, err := detector.NewDefaultBuilder()
 	must.NoError(t, err)
-	must.NoError(t, plugin.RegisterHCLBlock(builder, "deploy", attehcl.TargetKindSpec{
+	must.NoError(t, detector.RegisterHCLBlock(builder, "deploy", attehcl.TargetKindSpec{
 		Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
 			return struct{}{}, nil
 		},
@@ -373,9 +373,9 @@ func renderTestGraph(t *testing.T, repo *attegit.Repo, options ...PrintGraphOpti
 	return output.String()
 }
 
-func renderTestGraphWithDetector(t *testing.T, repo *attegit.Repo, detector plugin.Registry, options ...PrintGraphOptions) string {
+func renderTestGraphWithDetector(t *testing.T, repo *attegit.Repo, scanner detector.Scanner, options ...PrintGraphOptions) string {
 	t.Helper()
-	ctx := context.WithValue(t.Context(), executionContextKey{}, executionContext{detector: detector})
+	ctx := context.WithValue(t.Context(), executionContextKey{}, executionContext{scanner: scanner})
 	var output bytes.Buffer
 	must.NoError(t, printGraph(ctx, &output, repo, "", options...))
 	return output.String()

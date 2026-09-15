@@ -189,7 +189,7 @@ func runCmdValidArgsFromTargets(args []string, toComplete, root, cwd string, tar
 }
 
 func runTargets(ctx context.Context, repo *attegit.Repo, root, cwd, relative string) ([]runTarget, error) {
-	builtIns, err := detectorForContext(ctx)
+	builtIns, err := scannerForContext(ctx)
 	if err != nil {
 		return nil, err
 	}

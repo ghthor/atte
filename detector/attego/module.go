@@ -96,7 +96,7 @@ func DecodeEntityID(id graph.EntityID) (string, reference.Tree, string, error) {
 	return kind, tree, importPath, nil
 }
 
-// Detector adapts the Go detector to the shared detector capabilities.
+// Detector adapts the Go Sensor to the shared detector capabilities.
 type Detector struct{}
 
 func (Detector) Namespace() string { return Namespace }

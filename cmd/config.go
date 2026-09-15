@@ -44,7 +44,7 @@ func newConfigCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			detector, err := detectorForContext(ctx)
+			detector, err := scannerForContext(ctx)
 			if err != nil {
 				return fmt.Errorf("register detectors: %w", err)
 			}

@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
-	"github.com/ghthor/atte/detector/plugin"
 	"github.com/spf13/cobra"
 )
 
@@ -52,8 +52,8 @@ type ExecuteOptions struct {
 	// WorkingDirectory is the repository-relative command working directory. An
 	// empty value selects the repository root.
 	WorkingDirectory string
-	// Detector overrides the built-in plugin registry for this command execution.
-	Detector plugin.Registry
+	// Detector overrides the built-in Scanner for this command execution.
+	Detector detector.Scanner
 	// In, Out, and Err override the Cobra command streams. Nil values use the
 	// process's standard input, output, and error streams, respectively.
 	In  io.Reader
@@ -67,7 +67,7 @@ type executionContext struct {
 	repository       *attegit.Repo
 	root             string
 	workingDirectory string
-	detector         plugin.Registry
+	scanner          detector.Scanner
 	relative         string
 }
 
@@ -83,7 +83,7 @@ func ExecuteWithOptions(ctx context.Context, args []string, options ExecuteOptio
 		}
 		ctx = context.WithValue(ctx, executionContextKey{}, execution)
 	} else if options.Detector != nil {
-		ctx = context.WithValue(ctx, executionContextKey{}, executionContext{detector: options.Detector})
+		ctx = context.WithValue(ctx, executionContextKey{}, executionContext{scanner: options.Detector})
 	}
 
 	rootCmd := newRootCommand()
@@ -106,11 +106,11 @@ func ExecuteWithOptions(ctx context.Context, args []string, options ExecuteOptio
 	return rootCmd.ExecuteContext(ctx)
 }
 
-func detectorForContext(ctx context.Context) (plugin.Registry, error) {
-	if execution, ok := executionFromContext(ctx); ok && execution.detector != nil {
-		return execution.detector, nil
+func scannerForContext(ctx context.Context) (detector.Scanner, error) {
+	if execution, ok := executionFromContext(ctx); ok && execution.scanner != nil {
+		return execution.scanner, nil
 	}
-	builder, err := plugin.NewDefaultBuilder()
+	builder, err := detector.NewDefaultBuilder()
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +143,7 @@ func executionContextForOptions(options ExecuteOptions) (executionContext, error
 		repository:       options.Repository,
 		root:             root,
 		workingDirectory: workingDirectory,
-		detector:         options.Detector,
+		scanner:          options.Detector,
 		relative:         filepath.ToSlash(relative),
 	}, nil
 }
