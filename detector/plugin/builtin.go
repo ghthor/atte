@@ -10,8 +10,8 @@ import (
 	"github.com/zclconf/go-cty/cty/function"
 )
 
-// NewBuiltIn returns a registry containing atte's built-in detectors, target kinds, and HCL functions.
-func NewBuiltIn() (*Registry, error) {
+// NewDefaultBuilder returns a builder containing atte's built-in detectors, target kinds, and HCL functions.
+func NewDefaultBuilder() (*Builder, error) {
 	r := New()
 
 	for kind, spec := range attehcl.BuiltInTargetKinds() {
@@ -25,9 +25,7 @@ func NewBuiltIn() (*Registry, error) {
 	if err := r.RegisterDetector(attego.Detector{}); err != nil {
 		return nil, err
 	}
-	if err := r.RegisterDetector(attehcl.NewDetector(r)); err != nil {
-		return nil, err
-	}
+	r.includeHCL = true
 	if err := r.RegisterHCLFunction("path", attegit.PathHCLFunction); err != nil {
 		return nil, err
 	}

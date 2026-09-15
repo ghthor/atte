@@ -35,7 +35,7 @@ type deployTarget struct {
 	Env string
 }
 
-func registerDeployBlock(detector *plugin.Registry) error {
+func registerDeployBlock(detector *plugin.Builder) error {
 	return plugin.RegisterHCLBlock(detector, KindDeploy, attehcl.TargetKindSpec{
 		Schema:    &deploySchema,
 		Decoder:   decodeDeployTarget,
@@ -108,17 +108,18 @@ func execute() error {
 	}
 	defer cleanup()
 
-	builtIns, err := plugin.NewBuiltIn()
+	builtIns, err := plugin.NewDefaultBuilder()
 	if err != nil {
 		return fmt.Errorf("create built-in registry: %w", err)
 	}
 	if err := registerDeployBlock(builtIns); err != nil {
 		return fmt.Errorf("register deploy target: %w", err)
 	}
+	detector := builtIns.Compile()
 	return cmd.ExecuteWithOptions(ctx, os.Args[1:], cmd.ExecuteOptions{
 		Repository:     repository,
 		RepositoryRoot: directory,
-		Detector:       builtIns,
+		Detector:       detector,
 	})
 }
 

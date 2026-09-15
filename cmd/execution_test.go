@@ -104,19 +104,20 @@ func TestExecuteWithOptionsUsesInjectedDetectorWithoutRepositoryOverride(t *test
 	repository := newExecutionRepository(t, map[string]string{
 		"atte.hcl": `custom "unit" {}`,
 	})
-	registry, err := plugin.NewBuiltIn()
+	builder, err := plugin.NewDefaultBuilder()
 	must.NoError(t, err)
-	must.NoError(t, plugin.RegisterHCLBlock(registry, "custom", attehcl.TargetKindSpec{
+	must.NoError(t, plugin.RegisterHCLBlock(builder, "custom", attehcl.TargetKindSpec{
 		Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
 			return struct{}{}, nil
 		},
 	}))
+	detector := builder.Compile()
 	t.Chdir(repository.root)
 
 	var out bytes.Buffer
 	var errOut bytes.Buffer
 	err = ExecuteWithOptions(t.Context(), []string{"config", "show"}, ExecuteOptions{
-		Detector: registry,
+		Detector: detector,
 		Out:      &out,
 		Err:      &errOut,
 	})

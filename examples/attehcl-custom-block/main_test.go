@@ -20,7 +20,7 @@ import (
 type acceptanceRepository struct {
 	repo     *attegit.Repo
 	dir      string
-	detector *plugin.Registry
+	detector plugin.Registry
 }
 
 func newAcceptanceRepository(t *testing.T) acceptanceRepository {
@@ -38,10 +38,10 @@ deploy "release" {
 
 	repo, err := attegit.Open(git.Dir(), "HEAD", attegit.WithWorkingTree())
 	must.NoError(t, err)
-	detector, err := plugin.NewBuiltIn()
+	builder, err := plugin.NewDefaultBuilder()
 	must.NoError(t, err)
-	must.NoError(t, registerDeployBlock(detector))
-	return acceptanceRepository{repo: repo, dir: git.Dir(), detector: detector}
+	must.NoError(t, registerDeployBlock(builder))
+	return acceptanceRepository{repo: repo, dir: git.Dir(), detector: builder.Compile()}
 }
 
 func executeAcceptanceCommand(t *testing.T, repository acceptanceRepository, args ...string) (stdout, stderr string, err error) {

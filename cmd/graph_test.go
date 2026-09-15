@@ -254,9 +254,9 @@ func TestPrintGraphIncludesCustomHCLTargets(t *testing.T) {
 	repo := repoWithFiles(t, map[string]string{
 		"atte.hcl": "deploy \"release\" {}",
 	})
-	registry, err := plugin.NewBuiltIn()
+	builder, err := plugin.NewDefaultBuilder()
 	must.NoError(t, err)
-	must.NoError(t, plugin.RegisterHCLBlock(registry, "deploy", attehcl.TargetKindSpec{
+	must.NoError(t, plugin.RegisterHCLBlock(builder, "deploy", attehcl.TargetKindSpec{
 		Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
 			return struct{}{}, nil
 		},
@@ -271,7 +271,8 @@ func TestPrintGraphIncludesCustomHCLTargets(t *testing.T) {
 		},
 	}))
 
-	got := renderTestGraphWithDetector(t, repo, registry)
+	detector := builder.Compile()
+	got := renderTestGraphWithDetector(t, repo, detector)
 	test.StrContains(t, got, "deploy attehcl:deploy:atte.hcl:release")
 }
 
@@ -372,7 +373,7 @@ func renderTestGraph(t *testing.T, repo *attegit.Repo, options ...PrintGraphOpti
 	return output.String()
 }
 
-func renderTestGraphWithDetector(t *testing.T, repo *attegit.Repo, detector *plugin.Registry, options ...PrintGraphOptions) string {
+func renderTestGraphWithDetector(t *testing.T, repo *attegit.Repo, detector plugin.Registry, options ...PrintGraphOptions) string {
 	t.Helper()
 	ctx := context.WithValue(t.Context(), executionContextKey{}, executionContext{detector: detector})
 	var output bytes.Buffer

@@ -14,20 +14,20 @@ dependency resolution is a later graph-assembly concern.
 
 ## Registering target kinds
 
-Use `plugin.NewBuiltIn` when an application wants the standard detectors, target
-kinds, and HCL functions. Register custom HCL blocks on the returned registry
+Use `plugin.NewDefaultBuilder` when an application wants the standard detectors, target
+kinds, and HCL functions. Register custom HCL blocks on the setup builder
 with `plugin.RegisterHCLBlock`. The registration requires a decoder and can
 optionally provide graph, execution, configuration, and script projections.
 Those optional projections determine which capabilities are available for the
 custom target.
 
 ```go
-registry, err := plugin.NewBuiltIn()
+builder, err := plugin.NewDefaultBuilder()
 if err != nil {
 	return err
 }
 
-err = plugin.RegisterHCLBlock(registry, "deploy", attehcl.TargetKindSpec{
+err = plugin.RegisterHCLBlock(builder, "deploy", attehcl.TargetKindSpec{
 	Schema:    &deploySchema,
 	Decoder:   decodeDeploy,
 	Graph:     graphDeploy,
@@ -37,14 +37,17 @@ err = plugin.RegisterHCLBlock(registry, "deploy", attehcl.TargetKindSpec{
 if err != nil {
 	return err
 }
+
+registry := builder.Compile()
 ```
 
 `deploySchema` and the projection functions in this example are application
 code. See `examples/attehcl-custom-block` for a complete custom target. The
-registry returned by `plugin.NewBuiltIn` already contains the HCL detector and
-its built-in target kinds, so registering a custom kind on that same registry
-makes it available to all subsequent HCL evaluation. Target kind names must be
-valid HCL identifiers and cannot be registered more than once in a registry.
+builder returned by `plugin.NewDefaultBuilder` contains the built-in target kinds,
+detectors, and HCL functions. Compilation adds the HCL detector with a reference
+to the immutable registry, so all subsequent HCL evaluation uses one consistent
+capability set. Target kind names must be valid HCL identifiers and cannot be
+registered more than once in a builder.
 
 Pass the same registry to the direct `attehcl` APIs that evaluate targets or
 build graphs:
@@ -71,13 +74,13 @@ err := cmd.ExecuteWithOptions(ctx, args, cmd.ExecuteOptions{
 ## Registering HCL functions
 
 Applications can add repository- and file-aware HCL functions to the same
-registry with `Registry.RegisterHCLFunction`. The registration takes a function
+setup builder with `Builder.RegisterHCLFunction`. The registration takes a function
 name and an `HCLFunctionFactory`. At evaluation time, the factory receives the
 context, repository, and `atte.hcl` file being evaluated, and returns a fresh
 `cty/function.Function`.
 
 ```go
-err = registry.RegisterHCLFunction("source_file", func(
+err = builder.RegisterHCLFunction("source_file", func(
 	_ context.Context,
 	_ *attegit.Repo,
 	file reference.Blob,
@@ -98,9 +101,9 @@ as `atte::source_file()`. The factory can use the repository and context to
 construct functions backed by repository state or to return contextual errors.
 
 Built-in functions such as `path`, `gopkg`, and `gopkg_test` are already
-registered by `plugin.NewBuiltIn`. Custom function names must not conflict with
+registered by `plugin.NewDefaultBuilder`. Custom function names must not conflict with
 the built-in HCL functions or another registered function, and a function name
-can only be registered once in a registry.
+can only be registered once in a builder.
 
 ## Evaluation phases
 

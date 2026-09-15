@@ -176,7 +176,7 @@ func printGitGraph(
 	g *graph.Graph,
 	relativePath string,
 	options PrintGraphOptions,
-	detector *plugin.Registry,
+	detector plugin.Registry,
 	runSelectors ...map[graph.EntityID]string,
 ) error {
 	var selectors map[graph.EntityID]string
@@ -213,7 +213,7 @@ func isGraphChildKind(kind string) bool {
 	}
 }
 
-func graphHCLTargetLabel(id graph.EntityID, detector *plugin.Registry) (string, error) {
+func graphHCLTargetLabel(id graph.EntityID, detector plugin.Registry) (string, error) {
 	kind, _, _, err := attehcl.DecodeEntityID(id, detector)
 	if err != nil {
 		return "", fmt.Errorf("decode HCL entity %q: %w", id, err)
@@ -227,7 +227,7 @@ func addGraphChildren(
 	g *graph.Graph,
 	parentID graph.EntityID,
 	options PrintGraphOptions,
-	detector *plugin.Registry,
+	detector plugin.Registry,
 	runSelectors ...map[graph.EntityID]string,
 ) error {
 	var selectors map[graph.EntityID]string
@@ -320,7 +320,7 @@ func addTargetNode(
 	id graph.EntityID,
 	label string,
 	options PrintGraphOptions,
-	detector *plugin.Registry,
+	detector plugin.Registry,
 ) {
 	dependencies := make([]graph.EntityID, 0)
 	for _, relation := range g.Out(id) {
@@ -346,7 +346,7 @@ func addTargetNode(
 	}
 }
 
-func graphDependencyLabel(g *graph.Graph, id graph.EntityID, detector *plugin.Registry) string {
+func graphDependencyLabel(g *graph.Graph, id graph.EntityID, detector plugin.Registry) string {
 	entity := g.Entities[id]
 	if isHCLTargetKind(string(entity.Kind)) {
 		kind, _, name, err := attehcl.DecodeEntityID(id, detector)

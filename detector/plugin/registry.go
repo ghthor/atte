@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"maps"
 	"sort"
-	"sync"
 
 	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
@@ -31,32 +30,95 @@ type Detector struct {
 // HCLFunctionFactory constructs a function for one repository and HCL file.
 type HCLFunctionFactory func(context.Context, *attegit.Repo, reference.Blob) (function.Function, error)
 
-// Registry stores runtime detector, target-kind, and HCL function registrations.
-type Registry struct {
-	mu          sync.RWMutex
+// Registry exposes the immutable capabilities of a compiled plugin registry.
+type Registry interface {
+	// Targets discovers declared and implicit targets across all registered
+	// detectors for repo.
+	Targets(context.Context, *attegit.Repo) ([]graphtarget.ID, error)
+
+	// Graph combines the graphs produced by all registered detectors for repo.
+	// Each option is passed to every detector that contributes a graph.
+	Graph(context.Context, *attegit.Repo, ...graphset.Option) (*graph.Graph, error)
+
+	// TargetKinds returns the registered HCL target-kind specifications.
+	// The returned map and any schemas it contains are independent copies that
+	// callers may modify without changing the registry.
+	TargetKinds() map[attehcl.Kind]attehcl.TargetKindSpec
+
+	// DecodeID resolves id by dispatching it to the detector registered for its
+	// namespace.
+	DecodeID(graph.EntityID) (graph.Entity, error)
+
+	// HCLFunctions constructs fresh HCL functions for repo and file. Factories
+	// receive the context, repository, and source file so functions can be
+	// scoped to the evaluation being performed.
+	HCLFunctions(context.Context, *attegit.Repo, reference.Blob) (map[string]function.Function, error)
+}
+
+// Builder collects detector, target-kind, and HCL function registrations.
+// Builders are setup-only values, are not safe for concurrent mutation, and
+// must be compiled before being passed to detector consumers.
+type Builder struct {
 	detectors   map[string]Detector
 	functions   map[string]HCLFunctionFactory
 	targetKinds map[attehcl.Kind]attehcl.TargetKindSpec
+	includeHCL  bool
 }
 
-// New returns an empty detector registry.
-func New() *Registry {
-	return &Registry{
+type compiledRegistry struct {
+	detectors       []Detector
+	detectorsByName map[string]Detector
+	functions       map[string]HCLFunctionFactory
+	targetKinds     map[attehcl.Kind]attehcl.TargetKindSpec
+}
+
+var _ Registry = (*compiledRegistry)(nil)
+
+// New returns an empty plugin builder.
+func New() *Builder {
+	return &Builder{
 		detectors:   make(map[string]Detector),
 		functions:   make(map[string]HCLFunctionFactory),
 		targetKinds: make(map[attehcl.Kind]attehcl.TargetKindSpec),
 	}
 }
 
-// RegisterHCLBlock adds a target kind to a plugin registry. A nil schema uses the
-// built-in script-target schema. Registration rejects duplicate kinds.
+// Compile returns an immutable runtime registry containing the registrations
+// made on b. Later changes to b do not affect the returned registry.
+func (b *Builder) Compile() Registry {
+	if b == nil {
+		return nil
+	}
+	result := &compiledRegistry{
+		detectorsByName: make(map[string]Detector, len(b.detectors)+1),
+		functions:       maps.Clone(b.functions),
+		targetKinds:     cloneTargetKinds(b.targetKinds),
+		detectors:       make([]Detector, 0, len(b.detectors)+1),
+	}
+	for _, detector := range b.detectors {
+		result.detectors = append(result.detectors, detector)
+		result.detectorsByName[detector.Namespace] = detector
+	}
+	if b.includeHCL {
+		detector := adaptDetector(attehcl.NewDetector(result))
+		result.detectors = append(result.detectors, detector)
+		result.detectorsByName[detector.Namespace] = detector
+	}
+	sort.Slice(result.detectors, func(i, j int) bool {
+		return result.detectors[i].Namespace < result.detectors[j].Namespace
+	})
+	return result
+}
+
+// RegisterHCLBlock adds a target kind to a plugin builder. A nil schema uses
+// the built-in script-target schema. Registration rejects duplicate kinds.
 //
 // This is a function rather than a method because Go does not yet support
 // generic methods on non-generic types. Once the minimum Go version reaches
-// Go 1.27 and generic methods are available, this can become a Registry method.
-func RegisterHCLBlock[K ~string](r *Registry, kind K, spec attehcl.TargetKindSpec) error {
-	if r == nil {
-		return fmt.Errorf("registry is nil")
+// Go 1.27 and generic methods are available, this can become a Builder method.
+func RegisterHCLBlock[K ~string](b *Builder, kind K, spec attehcl.TargetKindSpec) error {
+	if b == nil {
+		return fmt.Errorf("builder is nil")
 	}
 	name := string(kind)
 	if name == "" {
@@ -73,24 +135,16 @@ func RegisterHCLBlock[K ~string](r *Registry, kind K, spec attehcl.TargetKindSpe
 		spec.Schema = &schema
 	}
 	key := attehcl.Kind(kind)
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, exists := r.targetKinds[key]; exists {
+	if _, exists := b.targetKinds[key]; exists {
 		return fmt.Errorf("target kind %q is already registered", kind)
 	}
-	r.targetKinds[key] = spec
+	b.targetKinds[key] = spec
 	return nil
 }
 
-// TargetKinds returns a snapshot of target-kind capabilities registered with r.
-func (r *Registry) TargetKinds() map[attehcl.Kind]attehcl.TargetKindSpec {
-	if r == nil {
-		return nil
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	result := make(map[attehcl.Kind]attehcl.TargetKindSpec, len(r.targetKinds))
-	for kind, spec := range r.targetKinds {
+func cloneTargetKinds(source map[attehcl.Kind]attehcl.TargetKindSpec) map[attehcl.Kind]attehcl.TargetKindSpec {
+	result := make(map[attehcl.Kind]attehcl.TargetKindSpec, len(source))
+	for kind, spec := range source {
 		if spec.Schema != nil {
 			schema := copyBodySchema(*spec.Schema)
 			spec.Schema = &schema
@@ -107,31 +161,36 @@ func copyBodySchema(schema hcl.BodySchema) hcl.BodySchema {
 	}
 }
 
-// Register adds a detector. Namespaces must be unique and non-empty.
-func (r *Registry) Register(detector Detector) error {
-	if r == nil {
-		return fmt.Errorf("registry is nil")
+// Register adds a detector to a plugin builder. Namespaces must be unique and non-empty.
+func (b *Builder) Register(detector Detector) error {
+	if b == nil {
+		return fmt.Errorf("builder is nil")
 	}
 	if detector.Namespace == "" {
 		return fmt.Errorf("detector namespace is empty")
 	}
+	if b.includeHCL && detector.Namespace == attehcl.Namespace {
+		return fmt.Errorf("detector namespace %q is already registered", detector.Namespace)
+	}
 	if detector.Graph == nil && detector.Targets == nil && detector.DecodeID == nil {
 		return fmt.Errorf("detector %q has no capabilities", detector.Namespace)
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, exists := r.detectors[detector.Namespace]; exists {
+	if _, exists := b.detectors[detector.Namespace]; exists {
 		return fmt.Errorf("detector namespace %q is already registered", detector.Namespace)
 	}
-	r.detectors[detector.Namespace] = detector
+	b.detectors[detector.Namespace] = detector
 	return nil
 }
 
 // RegisterDetector registers a method-based detector and its optional capabilities.
-func (r *Registry) RegisterDetector(value detector.Detector) error {
+func (b *Builder) RegisterDetector(value detector.Detector) error {
 	if value == nil {
 		return fmt.Errorf("detector is nil")
 	}
+	return b.Register(adaptDetector(value))
+}
+
+func adaptDetector(value detector.Detector) Detector {
 	adapted := Detector{Namespace: value.Namespace()}
 	if graphDetector, ok := value.(detector.GraphDetector); ok {
 		adapted.Graph = graphDetector.Graph
@@ -142,13 +201,13 @@ func (r *Registry) RegisterDetector(value detector.Detector) error {
 	if entityDecoder, ok := value.(detector.EntityDecoder); ok {
 		adapted.DecodeID = entityDecoder.DecodeID
 	}
-	return r.Register(adapted)
+	return adapted
 }
 
-// RegisterHCLFunction registers a named HCL function factory.
-func (r *Registry) RegisterHCLFunction(name string, factory HCLFunctionFactory) error {
-	if r == nil {
-		return fmt.Errorf("registry is nil")
+// RegisterHCLFunction registers a named HCL function factory on a plugin builder.
+func (b *Builder) RegisterHCLFunction(name string, factory HCLFunctionFactory) error {
+	if b == nil {
+		return fmt.Errorf("builder is nil")
 	}
 	if name == "" {
 		return fmt.Errorf("HCL function name is empty")
@@ -156,26 +215,22 @@ func (r *Registry) RegisterHCLFunction(name string, factory HCLFunctionFactory) 
 	if factory == nil {
 		return fmt.Errorf("HCL function %q factory is nil", name)
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, exists := r.functions[name]; exists {
+	if _, exists := b.functions[name]; exists {
 		return fmt.Errorf("HCL function %q is already registered", name)
 	}
-	r.functions[name] = factory
+	b.functions[name] = factory
 	return nil
 }
 
+// TargetKinds returns a copy of the compiled target-kind capabilities.
+func (r *compiledRegistry) TargetKinds() map[attehcl.Kind]attehcl.TargetKindSpec {
+	return cloneTargetKinds(r.targetKinds)
+}
+
 // HCLFunctions returns fresh functions for the repository and file.
-func (r *Registry) HCLFunctions(ctx context.Context, repo *attegit.Repo, file reference.Blob) (map[string]function.Function, error) {
-	if r == nil {
-		return nil, fmt.Errorf("registry is nil")
-	}
-	r.mu.RLock()
-	factories := make(map[string]HCLFunctionFactory, len(r.functions))
-	maps.Copy(factories, r.functions)
-	r.mu.RUnlock()
-	result := make(map[string]function.Function, len(factories))
-	for name, factory := range factories {
+func (r *compiledRegistry) HCLFunctions(ctx context.Context, repo *attegit.Repo, file reference.Blob) (map[string]function.Function, error) {
+	result := make(map[string]function.Function, len(r.functions))
+	for name, factory := range r.functions {
 		fn, err := factory(ctx, repo, file)
 		if err != nil {
 			return nil, fmt.Errorf("build HCL function %q: %w", name, err)
@@ -185,10 +240,10 @@ func (r *Registry) HCLFunctions(ctx context.Context, repo *attegit.Repo, file re
 	return result, nil
 }
 
-// Graph combines all registered detector graphs in namespace order.
-func (r *Registry) Graph(ctx context.Context, repo *attegit.Repo, options ...graphset.Option) (*graph.Graph, error) {
+// Graph combines all compiled detector graphs in namespace order.
+func (r *compiledRegistry) Graph(ctx context.Context, repo *attegit.Repo, options ...graphset.Option) (*graph.Graph, error) {
 	var result *graph.Graph
-	for _, detector := range r.snapshot() {
+	for _, detector := range r.detectors {
 		if detector.Graph == nil {
 			continue
 		}
@@ -210,10 +265,10 @@ func (r *Registry) Graph(ctx context.Context, repo *attegit.Repo, options ...gra
 	return result, nil
 }
 
-// Targets returns all registered detector targets in namespace order.
-func (r *Registry) Targets(ctx context.Context, repo *attegit.Repo) ([]graphtarget.ID, error) {
+// Targets returns all compiled detector targets in namespace order.
+func (r *compiledRegistry) Targets(ctx context.Context, repo *attegit.Repo) ([]graphtarget.ID, error) {
 	var targets []graphtarget.ID
-	for _, detector := range r.snapshot() {
+	for _, detector := range r.detectors {
 		if detector.Targets == nil {
 			continue
 		}
@@ -227,17 +282,12 @@ func (r *Registry) Targets(ctx context.Context, repo *attegit.Repo) ([]graphtarg
 }
 
 // DecodeID resolves an entity ID using the detector registered for its namespace.
-func (r *Registry) DecodeID(id graph.EntityID) (graph.Entity, error) {
-	if r == nil {
-		return graph.Entity{}, fmt.Errorf("registry is nil")
-	}
+func (r *compiledRegistry) DecodeID(id graph.EntityID) (graph.Entity, error) {
 	namespace := id.Namespace()
 	if namespace == "" {
 		return graph.Entity{}, fmt.Errorf("entity ID %q has no namespace", id)
 	}
-	r.mu.RLock()
-	d, ok := r.detectors[namespace]
-	r.mu.RUnlock()
+	d, ok := r.detectorsByName[namespace]
 	if !ok {
 		return graph.Entity{}, fmt.Errorf("no detector registered for entity namespace %q", namespace)
 	}
@@ -249,15 +299,4 @@ func (r *Registry) DecodeID(id graph.EntityID) (graph.Entity, error) {
 		return graph.Entity{}, fmt.Errorf("decode %q entity ID: %w", namespace, err)
 	}
 	return entity, nil
-}
-
-func (r *Registry) snapshot() []Detector {
-	r.mu.RLock()
-	result := make([]Detector, 0, len(r.detectors))
-	for _, detector := range r.detectors {
-		result = append(result, detector)
-	}
-	r.mu.RUnlock()
-	sort.Slice(result, func(i, j int) bool { return result[i].Namespace < result[j].Namespace })
-	return result
 }

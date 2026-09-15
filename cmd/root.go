@@ -53,7 +53,7 @@ type ExecuteOptions struct {
 	// empty value selects the repository root.
 	WorkingDirectory string
 	// Detector overrides the built-in plugin registry for this command execution.
-	Detector *plugin.Registry
+	Detector plugin.Registry
 	// In, Out, and Err override the Cobra command streams. Nil values use the
 	// process's standard input, output, and error streams, respectively.
 	In  io.Reader
@@ -67,7 +67,7 @@ type executionContext struct {
 	repository       *attegit.Repo
 	root             string
 	workingDirectory string
-	detector         *plugin.Registry
+	detector         plugin.Registry
 	relative         string
 }
 
@@ -106,11 +106,15 @@ func ExecuteWithOptions(ctx context.Context, args []string, options ExecuteOptio
 	return rootCmd.ExecuteContext(ctx)
 }
 
-func detectorForContext(ctx context.Context) (*plugin.Registry, error) {
+func detectorForContext(ctx context.Context) (plugin.Registry, error) {
 	if execution, ok := executionFromContext(ctx); ok && execution.detector != nil {
 		return execution.detector, nil
 	}
-	return plugin.NewBuiltIn()
+	builder, err := plugin.NewDefaultBuilder()
+	if err != nil {
+		return nil, err
+	}
+	return builder.Compile(), nil
 }
 
 func executionContextForOptions(options ExecuteOptions) (executionContext, error) {

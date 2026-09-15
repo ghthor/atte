@@ -17,10 +17,15 @@
 
 ## Validation
 
-- go test ./detector/attehcl — passed
-- go vet ./detector/attehcl — passed
-- golangci-lint run ./detector/attehcl — passed
-- staticcheck ./detector/attehcl — passed
+- go test ./... — passed
+- go test ./examples/attehcl-custom-block — passed
+- nix develop --command atte run test.build — passed
+- nix develop --command atte run test.go — passed
+- nix develop --command atte run codegen.go — passed
+- nix develop --command atte run codegen.fmt — passed
+- nix develop --command atte run codegen.rendered — passed
+- nix develop --command atte run lint.go — passed
+- git diff --check — passed
 - Serena diagnostics reported no correctness diagnostics.
 
 ## Executive summary
@@ -28,6 +33,21 @@
 The package has a sound pipeline and good separation between declaration discovery, local evaluation, target decoding, and graph projection. The target capability registry is a useful extensibility boundary, and the recent evaluator-construction cleanup has removed the earlier duplication there.
 
 The main remaining opportunity is algorithmic: local evaluation repeatedly retries expressions. The remaining smaller refactorings remove unused state.
+
+## Resolved architectural follow-ups
+
+### Plugin registry lifecycle
+
+The plugin registry lifecycle has been refactored since this review was written:
+
+- plugin.Builder is setup-only and owns detector, target-kind, and HCL-function registration.
+- Builder.Compile creates an immutable plugin.Registry read-only interface.
+- Runtime graph, target, entity-decoding, and HCL-evaluation operations consume the compiled registry rather than the builder.
+- The compiled registry snapshots all capabilities together, including target schemas and HCL function factories, and does not require a mutex.
+- The built-in HCL detector is created against the compiled registry, preventing runtime evaluation from retaining the mutable builder.
+- Compiled registries are isolated from later builder registrations.
+
+This resolves the previous concern about combining setup-time mutation with runtime reads. It also makes the capability snapshot coherent across detectors, target kinds, and HCL functions. The remaining findings below concern HCL evaluation, diagnostics, and graph construction rather than registry synchronization or lifecycle.
 
 ## Findings
 
@@ -107,7 +127,8 @@ Define whether relationships are a set at the graph.New boundary and enforce tha
 | Dependency decoding | O(V + A × dependency data) | Dependency context transformation is shared per target |
 | Target decoding | O(blocks + expression evaluation) | Provider function cost is external |
 | Graph assembly | O(targets + dependencies + projected entities) | Duplicate relationships can increase output and consumer work |
-| Registry snapshots | O(registered kinds × schema size) | One complete snapshot per evaluator is intentional |
+| Registry compilation | O(registered capabilities + schema size) | One immutable capability snapshot is created before runtime evaluation |
+| Registry runtime access | O(1) capability lookup | Compiled detector and capability maps are immutable and require no mutex |
 | Diagnostic rendering | O(diagnostics × file size) | File contents are reread per diagnostic |
 
 ## Recommended implementation order
@@ -166,4 +187,4 @@ The existing pipeline should be retained. Its important property is that each ph
 
 DeclaredTargets does not require local values, provider functions, registered decoders, or graph projections. Targets and ConfigFor consume decoded output and add common target identity, selector, script, execution, and configuration data. Graph consumes the same declaration index and decoded output while invoking graph projections.
 
-The best algorithmic improvement is deterministic, dependency-ordered local evaluation. A large rewrite of the capability registry is not recommended; its snapshot and projection interfaces are relatively clean and appear to be the intended extensibility boundary.
+The best remaining algorithmic improvement is deterministic, dependency-ordered local evaluation. The capability registry lifecycle is now explicit: setup uses plugin.Builder, runtime evaluation uses an immutable compiled plugin.Registry, and no further registry rewrite is currently indicated. Future work should focus on the local-evaluation, diagnostic, and graph findings above.

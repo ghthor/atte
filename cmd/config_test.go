@@ -32,8 +32,9 @@ test "child2" {
 `,
 		"child/child.sh": "#!/bin/sh\n",
 	})
-	detector, err := plugin.NewBuiltIn()
+	builder, err := plugin.NewDefaultBuilder()
 	must.NoError(t, err)
+	detector := builder.Compile()
 	config, err := attehcl.ConfigFor(t.Context(), repo, "child", detector)
 	test.NoError(t, err)
 	targets := attehcl.SortedTargets(config.Targets)
