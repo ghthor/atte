@@ -122,7 +122,7 @@ func DecodeEntityID(id graph.EntityID, scanner TargetCapabilities) (string, refe
 	return kind, file, parts[3], nil
 }
 
-// Target describes one target declared by a registered kind in an atte.hcl
+// Target describes one target declared by a attached kind in an atte.hcl
 // file. Targets are returned in repository order. Named targets retain their
 // source label in Name; anonymous targets retain an empty Name and use Index
 // for their kind-local source position. Script is a repository-relative path
@@ -133,10 +133,10 @@ func DecodeEntityID(id graph.EntityID, scanner TargetCapabilities) (string, refe
 // only when the corresponding value is not present. ID is the corresponding graph entity
 // identifier, and Selector converts the target to the canonical CLI selector.
 //
-// Kind identifies the registered target kind. File identifies the declaring
+// Kind identifies the attached target kind. File identifies the declaring
 // atte.hcl file. Label preserves the HCL block label, when present, while
 // Index records the block's zero-based position within its kind. Decoded contains
-// the value returned by the kind's registered decoder.
+// the value returned by the kind's attached decoder.
 type Target struct {
 	ID      graph.EntityID
 	Kind    string
@@ -161,7 +161,7 @@ func (target Target) DisplayName() string {
 	return displayName(target.Name, target.Index)
 }
 
-// Runnable reports whether the registered kind supplied an execution projection.
+// Runnable reports whether the attached kind supplied an execution projection.
 func (target Target) Runnable() bool {
 	return target.execution != nil
 }
@@ -212,7 +212,7 @@ func (target Target) GraphProjectionBase(attachToTree bool) TargetGraph {
 	return result
 }
 
-// Configuration returns the standard target identity and the registered kind's
+// Configuration returns the standard target identity and the attached kind's
 // optional configuration projection.
 func (value Target) Configuration() (target.Computed, error) {
 	computed := target.Computed{

@@ -35,32 +35,32 @@ type Sensor interface {
 
 The built-in attegit, attego, and attehcl implementations are Sensors.
 
-A Sensor is not the compiled aggregate. It is one participant registered with a Builder.
+A Sensor is not the compiled aggregate. It is one participant attached to a Builder.
 
 ## Sensor Capability
 
 A Sensor Capability is an optional operation supplied by one Sensor.
 
-Sensor capability interfaces use the Sensor prefix so their ownership is explicit:
+Sensor capability interfaces use the Sensor suffix so their capability is explicit:
 
-* SensorGraph provides graph construction.
-* SensorTarget provides target discovery.
-* SensorEntityDecoder provides entity-ID decoding.
+* GraphSensor provides graph construction.
+* TargetSensor provides target discovery.
+* EntityDecodingSensor provides entity-ID decoding.
 
-The proposed interfaces are:
+The capability interfaces are:
 
 ```go
-type SensorGraph interface {
+type GraphSensor interface {
     Sensor
     Graph(context.Context, *attegit.Repo, ...graphset.Option) (*graph.Graph, error)
 }
 
-type SensorTarget interface {
+type TargetSensor interface {
     Sensor
     Targets(context.Context, *attegit.Repo) ([]graphtarget.ID, error)
 }
 
-type SensorEntityDecoder interface {
+type EntityDecodingSensor interface {
     Sensor
     DecodeID(graph.EntityID) (graph.Entity, error)
 }
@@ -68,11 +68,19 @@ type SensorEntityDecoder interface {
 
 Capabilities are optional. A Sensor may provide graph construction, target discovery, entity decoding, or any combination of them.
 
+Sensors may also expose HCL capabilities during attachment:
+
+* SensorProvidingHCLFunctions supplies HCL function factories.
+* SensorProvidingHCLBlocks supplies HCL target-kind specifications.
+
+AttachSensor discovers these interfaces and attaches the supplied HCL
+capabilities to the Builder together with the Sensor.
+
 ## SensorSpec
 
-A SensorSpec is a registration-time description of one Sensor's optional capabilities.
+A SensorSpec is an attachment-time description of one Sensor's optional capabilities.
 
-SensorSpec is useful when registering function-based capabilities directly rather than adapting a method-based Sensor:
+SensorSpec is useful when attaching function-based capabilities directly rather than adapting a method-based Sensor:
 
 ```go
 type SensorSpec struct {
@@ -91,7 +99,7 @@ A Builder is the mutable setup-time object used to collect Sensors, target kinds
 
 A Builder:
 
-* accepts registrations
+* accepts Sensor and capability attachments
 * validates duplicate namespaces, target kinds, and function names
 * may be extended with application-specific Sensors and HCL capabilities
 * is not safe for concurrent mutation
@@ -105,7 +113,7 @@ if err != nil {
     return err
 }
 
-if err := detector.RegisterHCLBlock(builder, "deploy", spec); err != nil {
+if err := detector.AttachHCLBlock(builder, "deploy", spec); err != nil {
     return err
 }
 
@@ -113,6 +121,18 @@ scanner := builder.Compile()
 ```
 
 Builder state is setup state. Applications should not pass a Builder to command execution, HCL evaluation, graph construction, or target discovery.
+
+## Attach
+
+Attach is the setup-time verb for adding capabilities to a Builder:
+
+* Attach adds a SensorSpec.
+* AttachSensor adapts and attaches a method-based Sensor.
+* AttachHCLBlock attaches a target-kind specification.
+* AttachHCLFunction attaches an HCL function factory.
+
+AttachSensor also discovers SensorProvidingHCLFunctions and
+SensorProvidingHCLBlocks implementations and attaches their HCL capabilities.
 
 ## Default Builder
 
@@ -138,14 +158,14 @@ type Scanner interface {
 
 A Scanner:
 
-* contains an immutable snapshot of registrations made before compilation
+* contains an immutable snapshot of sensors made before compilation
 * is safe for concurrent runtime use
 * is isolated from later Builder mutations
 * dispatches graph and target operations across Sensors
 * dispatches entity-ID decoding by namespace
 * supplies the capabilities required by HCL evaluation
 
-Scanner is the compiled runtime object because it actively scans repositories and builds detection results. It is not merely a map of registrations.
+Scanner is the compiled runtime object because it actively scans repositories and builds detection results. It is not merely a map of sensors.
 
 ## Compile
 
@@ -153,20 +173,20 @@ Compile transforms mutable Builder state into an immutable Scanner.
 
 Compilation:
 
-* copies Sensor registrations
+* copies Sensor attachments
 * copies target-kind specifications and schemas
 * copies HCL function factories
 * adds the built-in HCL Sensor when using the default Builder
 * wires the HCL Sensor to the newly compiled Scanner
 * produces a runtime value that does not retain the mutable Builder
 
-A Builder may be compiled more than once. Each compilation produces an independent Scanner snapshot, so later Builder registrations do not affect previously compiled Scanners.
+A Builder may be compiled more than once. Each compilation produces an independent Scanner snapshot, so later Builder attachments do not affect previously compiled Scanners.
 
 ## Capabilities
 
 Capabilities is the HCL package's aggregate interface for the capabilities required during HCL evaluation.
 
-Capabilities describes what evaluation can use, not one registered Sensor:
+Capabilities describes what evaluation can use, not one attached Sensor:
 
 ```go
 type Capabilities interface {
@@ -180,7 +200,7 @@ The HCL Sensor accepts Capabilities rather than depending on the root detector p
 
 ## TargetCapabilities
 
-TargetCapabilities provides registered HCL target-kind specifications to the HCL evaluator.
+TargetCapabilities provides attached HCL target-kind specifications to the HCL evaluator.
 
 ```go
 type TargetCapabilities interface {
@@ -216,11 +236,11 @@ Entity decoding is dispatched by the namespace encoded in the entity ID. This le
 
 ## TargetKindSpec
 
-TargetKindSpec describes the capabilities of one registered HCL target kind.
+TargetKindSpec describes the capabilities of one attached HCL target kind.
 
 It contains the required decoder and optional graph, execution, configuration, and script projections.
 
-TargetKindSpec belongs to attehcl because it describes HCL target semantics. Sensor registration belongs to detector because it composes the complete runtime system.
+TargetKindSpec belongs to attehcl because it describes HCL target semantics. Sensor attachment belongs to detector because it composes the complete runtime system.
 
 ## Namespace
 
@@ -232,7 +252,7 @@ Examples include:
 * attego for Go entities
 * attehcl for HCL target entities
 
-Scanner uses the namespace in an entity ID to select the corresponding SensorEntityDecoder capability.
+Scanner uses the namespace in an entity ID to select the corresponding EntityDecodingSensor capability.
 
 ## Previous Vocabulary
 
@@ -242,7 +262,7 @@ The following generic terms were used by earlier versions of the detector design
 
 Registry was the previous name for the compiled runtime capability interface in detector/plugin.
 
-Registry is a reasonable setup-oriented term for a collection of registrations, but it is misleading for the immutable runtime object because that object actively executes detection operations.
+Registry is a reasonable setup-oriented term for a collection of attachments, but it is misleading for the immutable runtime object because that object actively executes detection operations.
 
 Use Builder for setup state and Scanner for runtime state.
 
@@ -277,7 +297,7 @@ The intended lifecycle is:
 Create a Builder
     |
     v
-Register built-in and application-specific Sensors
+Attach built-in and application-specific Sensors
     |
     v
 Compile the Builder into a Scanner
@@ -289,6 +309,6 @@ Pass the Scanner to commands, HCL evaluation, graph construction, and target dis
 In short:
 
 * Sensors provide capabilities.
-* Builders collect registrations.
+* Builders collect attachments.
 * Compile creates an immutable Scanner.
 * Capabilities provide the HCL evaluation boundary.

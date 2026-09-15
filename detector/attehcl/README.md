@@ -1,6 +1,6 @@
 # `atte.hcl` targets
 
-The HCL Sensor discovers directory-local target kinds registered in a Scanner. The built-in Scanner provides the `test`, `codegen`, and `lint`
+The HCL Sensor discovers directory-local target kinds attached in a Scanner. The built-in Scanner provides the `test`, `codegen`, and `lint`
 targets; applications can add their own target kinds without changing this
 package. Each target may have a `script` and may also have `depends_on` and
 `triggered_by` expressions. Declaration-only target discovery permits a missing
@@ -11,11 +11,11 @@ A file is evaluated independently. Target expressions cannot read declarations
 from an ancestor, sibling, or child `atte.hcl` file. Repository-wide target
 dependency resolution is a later graph-assembly concern.
 
-## Registering target kinds
+## Attaching target kinds
 
 Use `detector.NewDefaultBuilder` when an application wants the standard Sensors, target
-kinds, and HCL functions. Register custom HCL blocks on the setup builder
-with `detector.RegisterHCLBlock`. The registration requires a decoder and can
+kinds, and HCL functions. Attach custom HCL blocks on the setup builder
+with `detector.AttachHCLBlock`. The attachment requires a decoder and can
 optionally provide graph, execution, configuration, and script projections.
 Those optional projections determine which capabilities are available for the
 custom target.
@@ -26,7 +26,7 @@ if err != nil {
 	return err
 }
 
-err = detector.RegisterHCLBlock(builder, "deploy", attehcl.TargetKindSpec{
+err = detector.AttachHCLBlock(builder, "deploy", attehcl.TargetKindSpec{
 	Schema:    &deploySchema,
 	Decoder:   decodeDeploy,
 	Graph:     graphDeploy,
@@ -46,7 +46,7 @@ builder returned by `detector.NewDefaultBuilder` contains the built-in target ki
 Sensors, and HCL functions. Compilation adds the HCL Sensor with a reference
 to the immutable Scanner, so all subsequent HCL evaluation uses one consistent
 capability set. Target kind names must be valid HCL identifiers and cannot be
-registered more than once in a builder.
+attached more than once in a builder.
 
 Pass the same scanner to the direct `attehcl` APIs that evaluate targets or
 build graphs:
@@ -69,16 +69,16 @@ err := cmd.ExecuteWithOptions(ctx, args, cmd.ExecuteOptions{
 })
 ```
 
-## Registering HCL functions
+## Attaching HCL functions
 
 Applications can add repository- and file-aware HCL functions to the same
-setup builder with `Builder.RegisterHCLFunction`. The registration takes a function
+setup builder with `Builder.AttachHCLFunction`. The attachment takes a function
 name and an `HCLFunctionFactory`. At evaluation time, the factory receives the
 context, repository, and `atte.hcl` file being evaluated, and returns a fresh
 `cty/function.Function`.
 
 ```go
-err = builder.RegisterHCLFunction("source_file", func(
+err = builder.AttachHCLFunction("source_file", func(
 	_ context.Context,
 	_ *attegit.Repo,
 	file reference.Blob,
@@ -93,15 +93,15 @@ err = builder.RegisterHCLFunction("source_file", func(
 ```
 
 This example makes the current `atte.hcl` file available through
-`source_file()`. Provider functions are available under both their registered
+`source_file()`. Provider functions are available under both their attached
 name and the `atte::<name>` namespace, so the same function can also be called
 as `atte::source_file()`. The factory can use the repository and context to
 construct functions backed by repository state or to return contextual errors.
 
 Built-in functions such as `path`, `gopkg`, and `gopkg_test` are already
-registered by `detector.NewDefaultBuilder`. Custom function names must not conflict with
-the built-in HCL functions or another registered function, and a function name
-can only be registered once in a builder.
+attached by `detector.NewDefaultBuilder`. Custom function names must not conflict with
+the built-in HCL functions or another attached function, and a function name
+can only be attached once in a builder.
 
 ## Evaluation phases
 
@@ -123,7 +123,7 @@ repository
     v
 [2. Normalize target blocks]
     output: normalizedBlock[]
-      - registered kind
+      - attached kind
       - source label/name
       - kind-local source index
       - source range and body
@@ -170,7 +170,7 @@ phases. The graph branch reuses that declaration lookup when resolving symbolic
 target dependencies.
 
 `DeclaredTargets` returns `graphtarget.ID` values ordered by file path and source
-order without evaluating locals, target attributes, functions, or registered target
+order without evaluating locals, target attributes, functions, or attached target
 decoders. Use `Targets` or `ConfigFor` when decoded target values are needed; use
 `Graph` for repository paths and symbolic target dependencies.
 
@@ -179,7 +179,7 @@ languages, including collection, encoding, crypto, CIDR, UUID, YAML, and filesys
 functions. Filesystem functions resolve relative to the tree containing the HCL
 file. Provider functions are merged on top of this base set and must use names
 that do not conflict with a base function. Each provider function is available
-under both its registered name and the `atte::<name>` namespace. The built-in
+under both its attached name and the `atte::<name>` namespace. The built-in
 `atte::target(path, "kind.name")` function resolves a named target declaration
 from another `atte.hcl` file. Its path may be repository-root-relative, such as
 `//path1`, or relative to the declaring `atte.hcl` file, such as `../path1`.

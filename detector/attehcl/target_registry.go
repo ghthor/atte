@@ -16,7 +16,7 @@ import (
 	"github.com/zclconf/go-cty/cty/function"
 )
 
-// Kind identifies a registered target kind and its target namespace.
+// Kind identifies a attached target kind and its target namespace.
 type Kind string
 
 // TargetDecoder decodes a schema-validated target body into a kind-owned value.
@@ -38,7 +38,7 @@ type TargetConfigProjection func(Target) (map[string]any, error)
 // path or inline command.
 type TargetScriptProjection func(*attegit.Repo, reference.Blob, any) (reference.Blob, string, error)
 
-// TargetKindSpec describes the independent capabilities of a registered kind.
+// TargetKindSpec describes the independent capabilities of a attached kind.
 // Decoder is required; the other projections are optional.
 type TargetKindSpec struct {
 	Schema    *hcl.BodySchema

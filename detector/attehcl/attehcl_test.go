@@ -23,7 +23,7 @@ import (
 	"github.com/zclconf/go-cty/cty/function"
 )
 
-func registerTestTarget[K ~string](kind K, spec TargetKindSpec) error {
+func attachTestTarget[K ~string](kind K, spec TargetKindSpec) error {
 	name := string(kind)
 	if name == "" {
 		return fmt.Errorf("target kind is empty")
@@ -36,7 +36,7 @@ func registerTestTarget[K ~string](kind K, spec TargetKindSpec) error {
 	}
 	key := Kind(kind)
 	if _, exists := defaultTargetKinds[key]; exists {
-		return fmt.Errorf("target kind %q is already registered", kind)
+		return fmt.Errorf("target kind %q is already attached", kind)
 	}
 	if spec.Schema != nil {
 		schema := copyBodySchema(*spec.Schema)
@@ -115,7 +115,7 @@ func TestBaseHCLFunctions(t *testing.T) {
 		"yamldecode", "yamlencode", "zipmap",
 	} {
 		_, ok := functions[name]
-		test.True(t, ok, test.Sprintf("base HCL function %q should be registered", name))
+		test.True(t, ok, test.Sprintf("base HCL function %q should be attached", name))
 	}
 }
 
@@ -452,7 +452,7 @@ func TestTargetCapabilitiesSupportsCustomKindAndWrapperForm(t *testing.T) {
 		Command string
 	}
 	schema := hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "command", Required: true}}}
-	must.NoError(t, registerTestTarget("package_test", TargetKindSpec{
+	must.NoError(t, attachTestTarget("package_test", TargetKindSpec{
 		Schema: &schema,
 		Decoder: func(content *hcl.BodyContent, ctx *hcl.EvalContext) (any, error) {
 			value, diagnostics := content.Attributes["command"].Expr.Value(ctx)
@@ -481,7 +481,7 @@ func TestTargetCapabilitiesSupportsCustomKindAndWrapperForm(t *testing.T) {
 
 func TestTargetKindCapabilitiesAreIndependent(t *testing.T) {
 	kind := Kind("non_runnable_capability_test")
-	must.NoError(t, registerTestTarget(kind, TargetKindSpec{
+	must.NoError(t, attachTestTarget(kind, TargetKindSpec{
 		Schema: &hcl.BodySchema{},
 		Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
 			return struct{ Value string }{Value: "decoded"}, nil
@@ -506,7 +506,7 @@ func TestTargetCapabilitiesSnapshotsCapabilities(t *testing.T) {
 	repo := newHCLFixture(t, map[string]string{"atte.hcl": "registry_snapshot_test {}"})
 	evaluator, err := newEvaluator(t.Context(), repo, nil)
 	must.NoError(t, err)
-	must.NoError(t, registerTestTarget(kind, TargetKindSpec{
+	must.NoError(t, attachTestTarget(kind, TargetKindSpec{
 		Schema: &hcl.BodySchema{},
 		Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
 			return struct{}{}, nil
@@ -518,19 +518,19 @@ func TestTargetCapabilitiesSnapshotsCapabilities(t *testing.T) {
 	test.NoError(t, err)
 }
 
-func TestTargetCapabilitiesRegistrationValidation(t *testing.T) {
+func TestTargetCapabilitiesAttachmentValidation(t *testing.T) {
 	decoder := func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
 		return struct{}{}, nil
 	}
-	test.Error(t, registerTestTarget("test", TargetKindSpec{Decoder: decoder}))
-	test.Error(t, registerTestTarget("bad name", TargetKindSpec{Decoder: decoder}))
-	test.Error(t, registerTestTarget("valid_registration", TargetKindSpec{}))
+	test.Error(t, attachTestTarget("test", TargetKindSpec{Decoder: decoder}))
+	test.Error(t, attachTestTarget("bad name", TargetKindSpec{Decoder: decoder}))
+	test.Error(t, attachTestTarget("valid_attachment", TargetKindSpec{}))
 }
 
 func TestTargetCapabilitiesCopiesSchema(t *testing.T) {
 	schema := hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "command", Required: true}}}
 	kind := "schema_copy_test"
-	must.NoError(t, registerTestTarget(kind, TargetKindSpec{
+	must.NoError(t, attachTestTarget(kind, TargetKindSpec{
 		Schema: &schema,
 		Decoder: func(content *hcl.BodyContent, _ *hcl.EvalContext) (any, error) {
 			return content.Attributes["command"].Name, nil

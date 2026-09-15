@@ -23,6 +23,19 @@ func HCLFunctions(ctx context.Context, repo *attegit.Repo, file reference.Blob) 
 	}, nil
 }
 
+// HCLFunctions provides the HCL function factories contributed by the Go
+// Sensor during sensor attachment.
+func (Detector) HCLFunctions() map[string]func(context.Context, *attegit.Repo, reference.Blob) (function.Function, error) {
+	return map[string]func(context.Context, *attegit.Repo, reference.Blob) (function.Function, error){
+		"gopkg": func(ctx context.Context, repo *attegit.Repo, file reference.Blob) (function.Function, error) {
+			return HCLFunction(ctx, repo, file, "gopkg")
+		},
+		"gopkg_test": func(ctx context.Context, repo *attegit.Repo, file reference.Blob) (function.Function, error) {
+			return HCLFunction(ctx, repo, file, "gopkg_test")
+		},
+	}
+}
+
 func packageHCLFunction(repo *attegit.Repo, file reference.Blob, kind string) function.Function {
 	return function.New(&function.Spec{
 		Params: []function.Parameter{{Name: "path", Type: cty.String}},

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"sort"
 
 	"github.com/ghthor/atte/detector/attegit"
@@ -26,25 +27,25 @@ type SensorSpec struct {
 }
 
 // HCLFunctionFactory constructs a function for one repository and HCL file.
-type HCLFunctionFactory func(context.Context, *attegit.Repo, reference.Blob) (function.Function, error)
+type HCLFunctionFactory = func(context.Context, *attegit.Repo, reference.Blob) (function.Function, error)
 
 // Scanner executes the compiled detector Sensors and scans repositories for
 // targets and relationships.
 type Scanner interface {
-	// Targets discovers declared and implicit targets across all registered
+	// Targets discovers declared and implicit targets across all attached
 	// Sensors for repo.
 	Targets(context.Context, *attegit.Repo) ([]graphtarget.ID, error)
 
-	// Graph combines the graphs produced by all registered Sensors for repo.
+	// Graph combines the graphs produced by all attached Sensors for repo.
 	// Each option is passed to every Sensor that contributes a graph.
 	Graph(context.Context, *attegit.Repo, ...graphset.Option) (*graph.Graph, error)
 
-	// TargetKinds returns the registered HCL target-kind specifications.
+	// TargetKinds returns the attached HCL target-kind specifications.
 	// The returned map and any schemas it contains are independent copies that
 	// callers may modify without changing the Scanner.
 	TargetKinds() map[attehcl.Kind]attehcl.TargetKindSpec
 
-	// DecodeID resolves id by dispatching it to the Sensor registered for its
+	// DecodeID resolves id by dispatching it to the Sensor attached for its
 	// namespace.
 	DecodeID(graph.EntityID) (graph.Entity, error)
 
@@ -54,7 +55,7 @@ type Scanner interface {
 	HCLFunctions(context.Context, *attegit.Repo, reference.Blob) (map[string]function.Function, error)
 }
 
-// Builder collects Sensor, target-kind, and HCL function registrations.
+// Builder collects Sensor, target-kind, and HCL function attachments.
 // Builders are setup-only values, are not safe for concurrent mutation, and
 // must be compiled before being passed to detector consumers.
 type Builder struct {
@@ -85,7 +86,7 @@ func NewBuilder() *Builder {
 	}
 }
 
-// Compile returns an immutable runtime Scanner containing the registrations
+// Compile returns an immutable runtime Scanner containing the attachments
 // made on b. Later changes to b do not affect the returned Scanner.
 func (b *Builder) Compile() Scanner {
 	if b == nil {
@@ -112,36 +113,44 @@ func (b *Builder) Compile() Scanner {
 	return result
 }
 
-// RegisterHCLBlock adds a target kind to a detector Builder. A nil schema uses
-// the built-in script-target schema. Registration rejects duplicate kinds.
+// AttachHCLBlock adds a target kind to a detector Builder. A nil schema uses
+// the built-in script-target schema. Attachment rejects duplicate kinds.
 //
 // This is a function rather than a method because Go does not yet support
 // generic methods on non-generic types. Once the minimum Go version reaches
 // Go 1.27 and generic methods are available, this can become a Builder method.
-func RegisterHCLBlock[K ~string](b *Builder, kind K, spec attehcl.TargetKindSpec) error {
+func AttachHCLBlock[K ~string](b *Builder, kind K, spec attehcl.TargetKindSpec) error {
 	if b == nil {
 		return fmt.Errorf("builder is nil")
 	}
+	key := attehcl.Kind(kind)
+	normalized, err := b.normalizeHCLBlock(key, spec)
+	if err != nil {
+		return err
+	}
+	b.targetKinds[key] = normalized
+	return nil
+}
+
+func (b *Builder) normalizeHCLBlock(kind attehcl.Kind, spec attehcl.TargetKindSpec) (attehcl.TargetKindSpec, error) {
 	name := string(kind)
 	if name == "" {
-		return fmt.Errorf("target kind is empty")
+		return spec, fmt.Errorf("target kind is empty")
 	}
 	if !hclsyntax.ValidIdentifier(name) {
-		return fmt.Errorf("target kind %q is not a valid HCL identifier", kind)
+		return spec, fmt.Errorf("target kind %q is not a valid HCL identifier", kind)
 	}
 	if spec.Decoder == nil {
-		return fmt.Errorf("target kind %q has no decoder", kind)
+		return spec, fmt.Errorf("target kind %q has no decoder", kind)
+	}
+	if _, exists := b.targetKinds[kind]; exists {
+		return spec, fmt.Errorf("target kind %q is already attached", kind)
 	}
 	if spec.Schema != nil {
 		schema := copyBodySchema(*spec.Schema)
 		spec.Schema = &schema
 	}
-	key := attehcl.Kind(kind)
-	if _, exists := b.targetKinds[key]; exists {
-		return fmt.Errorf("target kind %q is already registered", kind)
-	}
-	b.targetKinds[key] = spec
-	return nil
+	return spec, nil
 }
 
 func cloneTargetKinds(source map[attehcl.Kind]attehcl.TargetKindSpec) map[attehcl.Kind]attehcl.TargetKindSpec {
@@ -163,56 +172,141 @@ func copyBodySchema(schema hcl.BodySchema) hcl.BodySchema {
 	}
 }
 
-// Register adds a SensorSpec to a detector Builder. Namespaces must be unique
+// Attach adds a SensorSpec to a detector Builder. Namespaces must be unique
 // and non-empty.
-func (b *Builder) Register(sensor SensorSpec) error {
+func (b *Builder) Attach(sensor SensorSpec) error {
+	if err := b.validateSensor(sensor); err != nil {
+		return err
+	}
+	b.sensors[sensor.Namespace] = sensor
+	return nil
+}
+
+func (b *Builder) validateSensor(sensor SensorSpec) error {
 	if b == nil {
 		return fmt.Errorf("builder is nil")
 	}
 	if sensor.Namespace == "" {
 		return fmt.Errorf("sensor namespace is empty")
 	}
-	if b.includeHCL && sensor.Namespace == attehcl.Namespace {
-		return fmt.Errorf("sensor namespace %q is already registered", sensor.Namespace)
+	if sensor.Namespace == attehcl.Namespace {
+		return fmt.Errorf("sensor namespace %q is reserved", sensor.Namespace)
 	}
 	if sensor.Graph == nil && sensor.Targets == nil && sensor.DecodeID == nil {
 		return fmt.Errorf("sensor %q has no capabilities", sensor.Namespace)
 	}
 	if _, exists := b.sensors[sensor.Namespace]; exists {
-		return fmt.Errorf("sensor namespace %q is already registered", sensor.Namespace)
+		return fmt.Errorf("sensor namespace %q is already attached", sensor.Namespace)
 	}
-	b.sensors[sensor.Namespace] = sensor
 	return nil
 }
 
-// RegisterSensor registers a method-based Sensor and its optional capabilities.
-func (b *Builder) RegisterSensor(value Sensor) error {
+// AttachSensor attaches a method-based Sensor, its optional detector
+// capabilities, and any HCL capabilities it provides.
+func (b *Builder) AttachSensor(value Sensor) error {
+	if b == nil {
+		return fmt.Errorf("builder is nil")
+	}
 	if value == nil {
 		return fmt.Errorf("sensor is nil")
 	}
-	return b.Register(adaptSensor(value))
+	sensor := adaptSensor(value)
+	functions, blocks := sensorCapabilities(value)
+	if sensor.Namespace == attehcl.Namespace {
+		// The HCL Sensor is constructed after compilation so it can receive the
+		// immutable Scanner. Its HCL capabilities are attached now.
+		if b.includeHCL {
+			return fmt.Errorf("sensor namespace %q is already attached", sensor.Namespace)
+		}
+	} else if err := b.validateSensor(sensor); err != nil {
+		return err
+	}
+	if err := b.validateHCLCapabilities(functions, blocks); err != nil {
+		return err
+	}
+	if sensor.Namespace == attehcl.Namespace {
+		b.attachHCLCapabilities(functions, blocks)
+		b.includeHCL = true
+		return nil
+	}
+	b.sensors[sensor.Namespace] = sensor
+	b.attachHCLCapabilities(functions, blocks)
+	return nil
+}
+
+func sensorCapabilities(value Sensor) (map[string]HCLFunctionFactory, map[attehcl.Kind]attehcl.TargetKindSpec) {
+	functions := make(map[string]HCLFunctionFactory)
+	if provider, ok := value.(SensorProvidingHCLFunctions); ok {
+		maps.Copy(functions, provider.HCLFunctions())
+	}
+	blocks := make(map[attehcl.Kind]attehcl.TargetKindSpec)
+	if provider, ok := value.(SensorProvidingHCLBlocks); ok {
+		maps.Copy(blocks, provider.HCLBlocks())
+	}
+	return functions, blocks
+}
+
+func (b *Builder) validateHCLCapabilities(functions map[string]HCLFunctionFactory, blocks map[attehcl.Kind]attehcl.TargetKindSpec) error {
+	functionNames := make([]string, 0, len(functions))
+	for name := range functions {
+		functionNames = append(functionNames, name)
+	}
+	sort.Strings(functionNames)
+	for _, name := range functionNames {
+		if err := b.validateHCLFunction(name, functions[name]); err != nil {
+			return err
+		}
+	}
+
+	blockKinds := make([]attehcl.Kind, 0, len(blocks))
+	for kind := range blocks {
+		blockKinds = append(blockKinds, kind)
+	}
+	slices.Sort(blockKinds)
+	for _, kind := range blockKinds {
+		if _, err := b.normalizeHCLBlock(kind, blocks[kind]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (b *Builder) attachHCLCapabilities(functions map[string]HCLFunctionFactory, blocks map[attehcl.Kind]attehcl.TargetKindSpec) {
+	maps.Copy(b.functions, functions)
+	for kind, spec := range blocks {
+		normalized, _ := b.normalizeHCLBlock(kind, spec)
+		b.targetKinds[kind] = normalized
+	}
 }
 
 func adaptSensor(value Sensor) SensorSpec {
 	adapted := SensorSpec{Namespace: value.Namespace()}
-	if sensor, ok := value.(SensorGraph); ok {
+	if sensor, ok := value.(GraphSensor); ok {
 		adapted.Graph = sensor.Graph
 	}
-	if sensor, ok := value.(SensorTarget); ok {
+	if sensor, ok := value.(TargetSensor); ok {
 		adapted.Targets = sensor.Targets
 	}
-	if sensor, ok := value.(SensorEntityDecoder); ok {
+	if sensor, ok := value.(EntityDecodingSensor); ok {
 		adapted.DecodeID = sensor.DecodeID
 	}
 	return adapted
 }
 
-// RegisterHCLFunction registers a named HCL function factory on a detector
+// AttachHCLFunction attaches a named HCL function factory on a detector
 // Builder.
-func (b *Builder) RegisterHCLFunction(name string, factory HCLFunctionFactory) error {
+func (b *Builder) AttachHCLFunction(name string, factory HCLFunctionFactory) error {
 	if b == nil {
 		return fmt.Errorf("builder is nil")
 	}
+	if err := b.validateHCLFunction(name, factory); err != nil {
+		return err
+	}
+	b.functions[name] = factory
+	return nil
+}
+
+func (b *Builder) validateHCLFunction(name string, factory HCLFunctionFactory) error {
 	if name == "" {
 		return fmt.Errorf("HCL function name is empty")
 	}
@@ -220,9 +314,8 @@ func (b *Builder) RegisterHCLFunction(name string, factory HCLFunctionFactory) e
 		return fmt.Errorf("HCL function %q factory is nil", name)
 	}
 	if _, exists := b.functions[name]; exists {
-		return fmt.Errorf("HCL function %q is already registered", name)
+		return fmt.Errorf("HCL function %q is already attached", name)
 	}
-	b.functions[name] = factory
 	return nil
 }
 
@@ -285,7 +378,7 @@ func (s *compiledScanner) Targets(ctx context.Context, repo *attegit.Repo) ([]gr
 	return targets, nil
 }
 
-// DecodeID resolves an entity ID using the Sensor registered for its namespace.
+// DecodeID resolves an entity ID using the Sensor attached for its namespace.
 func (s *compiledScanner) DecodeID(id graph.EntityID) (graph.Entity, error) {
 	namespace := id.Namespace()
 	if namespace == "" {
@@ -293,7 +386,7 @@ func (s *compiledScanner) DecodeID(id graph.EntityID) (graph.Entity, error) {
 	}
 	sensor, ok := s.sensorsByName[namespace]
 	if !ok {
-		return graph.Entity{}, fmt.Errorf("no Sensor registered for entity namespace %q", namespace)
+		return graph.Entity{}, fmt.Errorf("no Sensor attached for entity namespace %q", namespace)
 	}
 	if sensor.DecodeID == nil {
 		return graph.Entity{}, fmt.Errorf("Sensor %q does not decode entity IDs", namespace)

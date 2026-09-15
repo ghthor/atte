@@ -193,7 +193,7 @@ func (e *evaluator) hclFunctions(file reference.Blob) (map[string]function.Funct
 func (e *evaluator) registerInternalFunctions(file reference.Blob, functions map[string]function.Function) error {
 	target := targetHCLFunction(file, e.declarations)
 	if _, exists := functions["atte::target"]; exists {
-		return fmt.Errorf("HCL function %q is already registered", "atte::target")
+		return fmt.Errorf("HCL function %q is already attached", "atte::target")
 	}
 	functions["atte::target"] = target
 	if _, exists := functions["target"]; !exists {
@@ -382,7 +382,7 @@ func (p declarationsPhase) normalizeBlock(block *hclsyntax.Block) (Kind, string,
 		labelOffset = 1
 	}
 	kind := Kind(kindName)
-	if _, registered := p.evaluator.kindSpecs[kind]; !registered {
+	if _, attached := p.evaluator.kindSpecs[kind]; !attached {
 		return "", "", nil, fmt.Errorf("unknown target kind %q", kindName)
 	}
 	if len(block.Labels)-labelOffset > 1 {
@@ -425,12 +425,12 @@ func mergedHCLFunctions(
 	}
 	for name, fn := range extra {
 		if _, exists := functions[name]; exists {
-			return nil, fmt.Errorf("HCL function %q is already registered", name)
+			return nil, fmt.Errorf("HCL function %q is already attached", name)
 		}
 		functions[name] = fn
 		namespaced := "atte::" + name
 		if _, exists := functions[namespaced]; exists {
-			return nil, fmt.Errorf("HCL function %q is already registered", namespaced)
+			return nil, fmt.Errorf("HCL function %q is already attached", namespaced)
 		}
 		functions[namespaced] = fn
 	}

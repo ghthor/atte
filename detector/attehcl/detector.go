@@ -22,6 +22,12 @@ func NewDetector(scanner Capabilities) Detector {
 	return Detector{scanner: scanner}
 }
 
+// HCLBlocks provides the target-kind specifications contributed by the HCL
+// Sensor during sensor attachment.
+func (Detector) HCLBlocks() map[Kind]TargetKindSpec {
+	return BuiltInTargetKinds()
+}
+
 func (d Detector) Namespace() string { return Namespace }
 
 // DecodeID converts an attehcl entity ID into the shared graph representation.

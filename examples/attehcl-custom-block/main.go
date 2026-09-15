@@ -35,8 +35,8 @@ type deployTarget struct {
 	Env string
 }
 
-func registerDeployBlock(builder *detector.Builder) error {
-	return detector.RegisterHCLBlock(builder, KindDeploy, attehcl.TargetKindSpec{
+func attachDeployBlock(builder *detector.Builder) error {
+	return detector.AttachHCLBlock(builder, KindDeploy, attehcl.TargetKindSpec{
 		Schema:    &deploySchema,
 		Decoder:   decodeDeployTarget,
 		Graph:     graphDeployTarget,
@@ -112,7 +112,7 @@ func execute() error {
 	if err != nil {
 		return fmt.Errorf("create built-in Scanner: %w", err)
 	}
-	if err := registerDeployBlock(builtIns); err != nil {
+	if err := attachDeployBlock(builtIns); err != nil {
 		return fmt.Errorf("register deploy target: %w", err)
 	}
 	scanner := builtIns.Compile()

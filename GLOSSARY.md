@@ -106,7 +106,7 @@ Refiner.
 
 The detector package's composition vocabulary is defined in
 [detector/GLOSSARY.md](detector/GLOSSARY.md). It defines Sensors, Scanners,
-Builders, Sensor capabilities, and the HCL evaluation Capabilities boundary.
+Builders, Attach APIs, Sensor capabilities, and the HCL evaluation Capabilities boundary.
 
 ---
 

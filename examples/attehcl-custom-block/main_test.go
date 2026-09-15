@@ -40,7 +40,7 @@ deploy "release" {
 	must.NoError(t, err)
 	builder, err := detector.NewDefaultBuilder()
 	must.NoError(t, err)
-	must.NoError(t, registerDeployBlock(builder))
+	must.NoError(t, attachDeployBlock(builder))
 	return acceptanceRepository{repo: repo, dir: git.Dir(), detector: builder.Compile()}
 }
 

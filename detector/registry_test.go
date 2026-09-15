@@ -25,57 +25,71 @@ func TestNewDefaultBuilder(t *testing.T) {
 	test.NoError(t, err)
 	test.NotNil(t, functions)
 	test.NotNil(t, functions["path"])
+	test.NotNil(t, functions["gopkg"])
+	test.NotNil(t, functions["gopkg_test"])
 }
 
-func TestRegisterValidation(t *testing.T) {
+func TestAttachValidation(t *testing.T) {
 	var nilBuilder *Builder
-	test.Error(t, nilBuilder.Register(SensorSpec{}))
+	test.Error(t, nilBuilder.Attach(SensorSpec{}))
 
 	builder := NewBuilder()
-	test.Error(t, builder.Register(SensorSpec{}))
+	test.Error(t, builder.Attach(SensorSpec{}))
 	spec := SensorSpec{Namespace: "test", Targets: func(context.Context, *attegit.Repo) ([]graphtarget.ID, error) { return nil, nil }}
-	test.NoError(t, builder.Register(spec))
-	test.Error(t, builder.Register(spec))
+	test.NoError(t, builder.Attach(spec))
+	test.Error(t, builder.Attach(spec))
 }
 
-func TestRegisterSensor(t *testing.T) {
+func TestAttachSensor(t *testing.T) {
 	builder := NewBuilder()
-	test.NoError(t, builder.RegisterSensor(methodSensor{}))
-	test.Error(t, builder.RegisterSensor(methodSensor{}))
+	test.NoError(t, builder.AttachSensor(methodSensor{}))
+	test.Error(t, builder.AttachSensor(methodSensor{}))
+
+	scanner := builder.Compile()
+	functions, err := scanner.HCLFunctions(t.Context(), nil, "")
+	test.NoError(t, err)
+	test.NotNil(t, functions["method"])
+	test.NotNil(t, scanner.TargetKinds()["method"])
 }
 
-func TestRegisterTarget(t *testing.T) {
+func TestAttachTarget(t *testing.T) {
 	builder := NewBuilder()
 	decoder := func(*hcl.BodyContent, *hcl.EvalContext) (any, error) { return struct{}{}, nil }
 	schema := hcl.BodySchema{}
 	spec := attehcl.TargetKindSpec{Schema: &schema, Decoder: decoder}
-	test.NoError(t, RegisterHCLBlock(builder, "custom", spec))
-	test.Error(t, RegisterHCLBlock(builder, "custom", spec))
+	test.NoError(t, AttachHCLBlock(builder, "custom", spec))
+	test.Error(t, AttachHCLBlock(builder, "custom", spec))
 
-	registered := builder.Compile().TargetKinds()
-	test.EqOp(t, 1, len(registered))
-	registeredSpec, ok := registered["custom"]
-	test.True(t, ok, test.Sprintf("custom target kind should be registered: %#v", registered))
-	test.NotNil(t, registeredSpec.Schema)
+	attached := builder.Compile().TargetKinds()
+	test.EqOp(t, 1, len(attached))
+	attachedSpec, ok := attached["custom"]
+	test.True(t, ok, test.Sprintf("custom target kind should be attached: %#v", attached))
+	test.NotNil(t, attachedSpec.Schema)
 }
 
-func TestCompileSnapshotsRegistrations(t *testing.T) {
+func TestAttachHCLFunction(t *testing.T) {
+	builder := NewBuilder()
+	test.NoError(t, builder.AttachHCLFunction("path", attegit.PathHCLFunction))
+	test.Error(t, builder.AttachHCLFunction("path", attegit.PathHCLFunction))
+}
+
+func TestCompileSnapshotsAttachments(t *testing.T) {
 	builder := NewBuilder()
 	decoder := func(*hcl.BodyContent, *hcl.EvalContext) (any, error) { return struct{}{}, nil }
-	must.NoError(t, RegisterHCLBlock(builder, "first", attehcl.TargetKindSpec{Decoder: decoder}))
+	must.NoError(t, AttachHCLBlock(builder, "first", attehcl.TargetKindSpec{Decoder: decoder}))
 	compiled := builder.Compile()
-	must.NoError(t, RegisterHCLBlock(builder, "second", attehcl.TargetKindSpec{Decoder: decoder}))
+	must.NoError(t, AttachHCLBlock(builder, "second", attehcl.TargetKindSpec{Decoder: decoder}))
 
 	test.EqOp(t, 1, len(compiled.TargetKinds()))
 	test.EqOp(t, 2, len(builder.Compile().TargetKinds()))
 }
 
-func TestRegisterTargetValidation(t *testing.T) {
+func TestAttachTargetValidation(t *testing.T) {
 	decoder := func(*hcl.BodyContent, *hcl.EvalContext) (any, error) { return struct{}{}, nil }
-	test.Error(t, RegisterHCLBlock(nil, "custom", attehcl.TargetKindSpec{Decoder: decoder}))
+	test.Error(t, AttachHCLBlock(nil, "custom", attehcl.TargetKindSpec{Decoder: decoder}))
 	builder := NewBuilder()
-	test.Error(t, RegisterHCLBlock(builder, "bad name", attehcl.TargetKindSpec{Decoder: decoder}))
-	test.Error(t, RegisterHCLBlock(builder, "missing_decoder", attehcl.TargetKindSpec{}))
+	test.Error(t, AttachHCLBlock(builder, "bad name", attehcl.TargetKindSpec{Decoder: decoder}))
+	test.Error(t, AttachHCLBlock(builder, "missing_decoder", attehcl.TargetKindSpec{}))
 }
 
 func TestDecodeID(t *testing.T) {
@@ -108,8 +122,8 @@ func TestDecodeIDErrors(t *testing.T) {
 		Namespace: "targets",
 		Targets:   func(context.Context, *attegit.Repo) ([]graphtarget.ID, error) { return nil, nil },
 	}
-	test.NoError(t, builder.Register(spec))
-	test.NoError(t, builder.Register(SensorSpec{
+	test.NoError(t, builder.Attach(spec))
+	test.NoError(t, builder.Attach(SensorSpec{
 		Namespace: "broken",
 		DecodeID: func(graph.EntityID) (graph.Entity, error) {
 			return graph.Entity{}, fmt.Errorf("bad entity")
@@ -121,7 +135,7 @@ func TestDecodeIDErrors(t *testing.T) {
 		return err
 	}
 	test.ErrorContains(t, decode(""), "no namespace")
-	test.ErrorContains(t, decode("unknown:value"), "no Sensor registered")
+	test.ErrorContains(t, decode("unknown:value"), "no Sensor attached")
 	test.ErrorContains(t, decode("targets:value"), "does not decode")
 	test.ErrorContains(t, decode("broken:value"), "bad entity")
 }
@@ -132,4 +146,14 @@ func (methodSensor) Namespace() string { return "method" }
 
 func (methodSensor) Targets(context.Context, *attegit.Repo) ([]graphtarget.ID, error) {
 	return nil, nil
+}
+
+func (methodSensor) HCLFunctions() map[string]HCLFunctionFactory {
+	return map[string]HCLFunctionFactory{"method": attegit.PathHCLFunction}
+}
+
+func (methodSensor) HCLBlocks() map[attehcl.Kind]attehcl.TargetKindSpec {
+	return map[attehcl.Kind]attehcl.TargetKindSpec{
+		"method": {Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) { return struct{}{}, nil }},
+	}
 }

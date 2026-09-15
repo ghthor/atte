@@ -106,7 +106,7 @@ func TestExecuteWithOptionsUsesInjectedDetectorWithoutRepositoryOverride(t *test
 	})
 	builder, err := detector.NewDefaultBuilder()
 	must.NoError(t, err)
-	must.NoError(t, detector.RegisterHCLBlock(builder, "custom", attehcl.TargetKindSpec{
+	must.NoError(t, detector.AttachHCLBlock(builder, "custom", attehcl.TargetKindSpec{
 		Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
 			return struct{}{}, nil
 		},

@@ -29,6 +29,14 @@ func PathHCLFunctions(ctx context.Context, repo *Repo, file reference.Blob) (map
 	return map[string]function.Function{"path": fn}, nil
 }
 
+// HCLFunctions provides the HCL function factories contributed by the Git
+// Sensor during sensor attachment.
+func (Detector) HCLFunctions() map[string]func(context.Context, *Repo, reference.Blob) (function.Function, error) {
+	return map[string]func(context.Context, *Repo, reference.Blob) (function.Function, error){
+		"path": PathHCLFunction,
+	}
+}
+
 // PathHCLFunction constructs the Git-backed path function for an HCL file.
 func PathHCLFunction(_ context.Context, _ *Repo, file reference.Blob) (function.Function, error) {
 	return function.New(&function.Spec{
