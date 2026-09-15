@@ -851,6 +851,7 @@ func TestDeclaredTargetsRejectsDeclarationErrors(t *testing.T) {
 		file string
 	}{
 		{name: "malformed HCL", file: `test {`},
+		{name: "unsupported globals", file: `globals { value = "x" }`},
 		{name: "unknown kind", file: `package {}`},
 		{name: "numeric name", file: `test "123" {}`},
 		{name: "duplicate name", file: `test "same" {}
