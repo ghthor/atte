@@ -113,6 +113,7 @@ func TestResolveRunTarget(t *testing.T) {
 		test.EqOp(t, want, resolved.selector)
 	}
 
+	resolve("//atte.hcl#test.go", "", targets, "//atte.hcl#test.go")
 	resolve("test.go", "", targets, "//atte.hcl#test.go")
 	resolve(".#test.go", "", targets, "//atte.hcl#test.go")
 	resolve("test.1", "", targets, "//atte.hcl#test.py")
@@ -142,13 +143,56 @@ func TestResolveRunTarget(t *testing.T) {
 		test.EqOp(t, "//reference#go_test", resolved.selector)
 	})
 
+	t.Run("local descendant fallback", func(t *testing.T) {
+		localTargets := []runTarget{
+			{selector: "//outside#go_test", kind: attego.PackageTestKind, path: "outside", name: "go_test"},
+			{selector: "//reference/selector#go_test", kind: attego.PackageTestKind, path: "reference/selector", name: "go_test"},
+		}
+		resolved, err := resolveRunTargetAt("go_test", localTargets, "reference")
+		test.NoError(t, err)
+		test.EqOp(t, "//reference/selector#go_test", resolved.selector)
+	})
+	t.Run("HCL label fallback", func(t *testing.T) {
+		labelTarget := runTarget{
+			selector: "//atte.hcl#test.go",
+			kind:     attehcl.TestKind,
+			path:     "atte.hcl",
+			name:     "go",
+			label:    "nightly",
+		}
+		resolved, err := resolveRunTargetAt("nightly", []runTarget{labelTarget}, "")
+		test.NoError(t, err)
+		test.EqOp(t, labelTarget.selector, resolved.selector)
+
+		_, err = resolveRunTargetAt("atte.hcl#nightly", []runTarget{labelTarget}, "")
+		test.ErrorContains(t, err, "not found")
+	})
+	t.Run("selector match precedes label fallback", func(t *testing.T) {
+		labelTarget := runTarget{
+			selector: "//atte.hcl#test.go",
+			kind:     attehcl.TestKind,
+			path:     "atte.hcl",
+			name:     "go",
+			label:    "nightly",
+		}
+		selectorTarget := runTarget{
+			selector: "//reference/selector#go_test",
+			kind:     attego.PackageTestKind,
+			path:     "reference/selector",
+			name:     "go_test",
+			aliases:  []string{"nightly"},
+		}
+		resolved, err := resolveRunTargetAt("nightly", []runTarget{labelTarget, selectorTarget}, "")
+		test.NoError(t, err)
+		test.EqOp(t, selectorTarget.selector, resolved.selector)
+	})
 	t.Run("ambiguity", func(t *testing.T) {
 		_, err := resolveRunTargetAt("test", targets, "")
 		test.Error(t, err)
-		test.StrContains(t, err.Error(), "ambiguous")
-		test.StrContains(t, err.Error(), "atte run //atte.hcl#test.go")
-		test.StrContains(t, err.Error(), "atte run //atte.hcl#test.py")
-		test.StrContains(t, err.Error(), "atte run //atte.hcl#test.2")
+		test.EqOp(t, "selector \"test\" is ambiguous; possible commands:\n"+
+			"atte run //atte.hcl#test.2\n"+
+			"atte run //atte.hcl#test.go\n"+
+			"atte run //atte.hcl#test.py", err.Error())
 	})
 	t.Run("missing target", func(t *testing.T) {
 		_, err := resolveRunTargetAt("missing", targets, "")
