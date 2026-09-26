@@ -19,6 +19,31 @@ const HclFilename = "atte.hcl"
 
 const Seperator = "#"
 
+// NoMatchError reports that a selector did not match any discovered target.
+type NoMatchError struct {
+	Input string
+}
+
+func (e *NoMatchError) Error() string {
+	if e == nil {
+		return "selector matched no targets"
+	}
+	return fmt.Sprintf("selector %q matched no targets", e.Input)
+}
+
+// AmbiguousError reports that a selector matched more than one target.
+type AmbiguousError struct {
+	Input      string
+	Candidates []string
+}
+
+func (e *AmbiguousError) Error() string {
+	if e == nil {
+		return "selector is ambiguous"
+	}
+	return fmt.Sprintf("selector %q is ambiguous", e.Input)
+}
+
 // Target describes the selector-facing identity of a runnable target.
 // Selector is the formal repository selector syntax: <path>#<identifier>.
 //

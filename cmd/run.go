@@ -126,7 +126,7 @@ func runCommand(cmd *cobra.Command, args []string, options runOptions) error {
 			return err
 		}
 	}
-	target, err := resolveRunTargetAt(input, targets, relative)
+	target, err := resolveRunTargetAt(ctx, input, targets, relative)
 	if err != nil {
 		return err
 	}
@@ -293,7 +293,10 @@ func selectRunTarget(cmd *cobra.Command, targets []runTarget) (string, error) {
 	}
 }
 
-func resolveRunTargetAt(input string, targets []runTarget, relative string) (runTarget, error) {
+func resolveRunTargetAt(ctx context.Context, input string, targets []runTarget, relative string) (runTarget, error) {
+	if err := ctx.Err(); err != nil {
+		return runTarget{}, err
+	}
 	for _, target := range targets {
 		if target.selector == input {
 			return target, nil
@@ -301,6 +304,9 @@ func resolveRunTargetAt(input string, targets []runTarget, relative string) (run
 	}
 	candidates := make([]runTarget, 0)
 	for _, target := range targets {
+		if err := ctx.Err(); err != nil {
+			return runTarget{}, err
+		}
 		if matchesRunTargetAt(input, target, relative) {
 			candidates = append(candidates, target)
 		}
@@ -310,6 +316,9 @@ func resolveRunTargetAt(input string, targets []runTarget, relative string) (run
 	}
 	if len(candidates) == 0 {
 		for _, target := range targets {
+			if err := ctx.Err(); err != nil {
+				return runTarget{}, err
+			}
 			if matchesRunTargetLabel(input, target) {
 				candidates = append(candidates, target)
 			}
@@ -321,7 +330,7 @@ func resolveRunTargetAt(input string, targets []runTarget, relative string) (run
 	if len(candidates) > 1 {
 		return runTarget{}, ambiguousRunTargetError(input, candidates)
 	}
-	return runTarget{}, fmt.Errorf("target %q not found", input)
+	return runTarget{}, noRunTargetError(input)
 }
 
 // preferLocalRunTargets narrows candidates to those rooted at relative when a
@@ -357,6 +366,22 @@ func preferLocalRunTargets(candidates []runTarget, relative string) []runTarget 
 	return candidates
 }
 
+type runTargetNotFoundError struct {
+	*selector.NoMatchError
+}
+
+func (e *runTargetNotFoundError) Error() string {
+	return fmt.Sprintf("target %q not found", e.Input)
+}
+
+func (e *runTargetNotFoundError) Unwrap() error {
+	return e.NoMatchError
+}
+
+func noRunTargetError(input string) error {
+	return &runTargetNotFoundError{NoMatchError: &selector.NoMatchError{Input: input}}
+}
+
 func ambiguousRunTargetError(input string, candidates []runTarget) error {
 	ids := make([]string, len(candidates))
 	for i := range candidates {
@@ -367,7 +392,7 @@ func ambiguousRunTargetError(input string, candidates []runTarget) error {
 	for i, id := range ids {
 		commands[i] = "atte run " + id
 	}
-	return fmt.Errorf("selector %q is ambiguous; possible commands:\n%s", input, strings.Join(commands, "\n"))
+	return fmt.Errorf("%w; possible commands:\n%s", &selector.AmbiguousError{Input: input, Candidates: ids}, strings.Join(commands, "\n"))
 }
 
 func runTargetPaths(target runTarget) (string, string) {

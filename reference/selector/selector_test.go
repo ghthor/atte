@@ -6,6 +6,18 @@ import (
 	"github.com/shoenig/test"
 )
 
+func TestResolutionErrors(t *testing.T) {
+	noMatch := &NoMatchError{Input: "missing"}
+	test.EqOp(t, `selector "missing" matched no targets`, noMatch.Error())
+	var nilNoMatch *NoMatchError
+	test.EqOp(t, "selector matched no targets", nilNoMatch.Error())
+
+	ambiguous := &AmbiguousError{Input: "test", Candidates: []string{"//one#test", "//two#test"}}
+	test.EqOp(t, `selector "test" is ambiguous`, ambiguous.Error())
+	var nilAmbiguous *AmbiguousError
+	test.EqOp(t, "selector is ambiguous", nilAmbiguous.Error())
+}
+
 func TestParseCanonicalSelector(t *testing.T) {
 	got, err := Parse("//pkg/atte.hcl#test.default")
 	test.NoError(t, err)
