@@ -1,7 +1,7 @@
 # Tooling
 
-- Go 1.26 module.
-- Nix development shell provides project commands.
-- Tests use github.com/shoenig/test and github.com/shoenig/test/must.
-- HCL uses hashicorp/hcl/v2; Git access uses go-git.
-- Formatting/lint/code generation are orchestrated by atte targets under nix develop.
+- Go module declares Go 1.26.0.
+- Nix flake/development shell provides the project command `atte run` and build/test/codegen/lint targets.
+- Tests use `github.com/shoenig/test` and `github.com/shoenig/test/must`.
+- HCL evaluation uses `hashicorp/hcl/v2`; repository Git access uses go-git.
+- CLI uses Cobra; formatting, generated checks, and lint are orchestrated by Nix `atte` targets.
