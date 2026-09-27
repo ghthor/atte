@@ -4,6 +4,7 @@ package target
 // Computed is the common configuration representation of an evaluated target.
 // Meta contains kind-specific configuration fields.
 type Computed struct {
+	ID     string         `json:"id"`
 	Kind   string         `json:"kind"`
 	File   string         `json:"file"`
 	Name   string         `json:"name"`

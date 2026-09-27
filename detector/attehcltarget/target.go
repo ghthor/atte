@@ -132,6 +132,7 @@ func (target Target) GraphProjectionBase(attachToTree bool) Graph {
 // optional configuration projection.
 func (value Target) Configuration() (referencetarget.Computed, error) {
 	computed := referencetarget.Computed{
+		ID:     string(value.ID),
 		Kind:   value.Kind,
 		File:   value.File.String(),
 		Name:   value.DisplayName(),
@@ -149,7 +150,7 @@ func (value Target) Configuration() (referencetarget.Computed, error) {
 	}
 	for key := range extra {
 		switch key {
-		case "kind", "file", "name", "label", "index", "script", "inline":
+		case "id", "kind", "file", "name", "label", "index", "script", "inline":
 			return referencetarget.Computed{}, fmt.Errorf("project configuration for target %q: key %q conflicts with target identity", value.ID, key)
 		}
 	}

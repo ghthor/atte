@@ -136,6 +136,7 @@ func anyCty(value any) (cty.Value, error) {
 		return cty.ObjectVal(values), nil
 	case target.Computed:
 		values := map[string]any{
+			"id":     value.ID,
 			"kind":   value.Kind,
 			"file":   value.File,
 			"name":   value.Name,

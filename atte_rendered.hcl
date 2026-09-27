@@ -1,6 +1,7 @@
 target = {
   "//atte.hcl#codegen.fmt" = {
     file   = "atte.hcl"
+    id     = "attehcl:codegen:atte.hcl:fmt"
     index  = 0
     inline = ""
     kind   = "attehcl:codegen"
@@ -10,6 +11,7 @@ target = {
   }
   "//atte.hcl#codegen.go" = {
     file   = "atte.hcl"
+    id     = "attehcl:codegen:atte.hcl:go"
     index  = 1
     inline = ""
     kind   = "attehcl:codegen"
@@ -19,6 +21,7 @@ target = {
   }
   "//atte.hcl#codegen.rendered" = {
     file   = "atte.hcl"
+    id     = "attehcl:codegen:atte.hcl:rendered"
     index  = 2
     inline = ""
     kind   = "attehcl:codegen"
@@ -28,6 +31,7 @@ target = {
   }
   "//atte.hcl#lint.go" = {
     file   = "atte.hcl"
+    id     = "attehcl:lint:atte.hcl:go"
     index  = 0
     inline = ""
     kind   = "attehcl:lint"
@@ -37,6 +41,7 @@ target = {
   }
   "//atte.hcl#test.build" = {
     file   = "atte.hcl"
+    id     = "attehcl:test:atte.hcl:build"
     index  = 1
     inline = ""
     kind   = "attehcl:test"
@@ -46,6 +51,7 @@ target = {
   }
   "//atte.hcl#test.go" = {
     file   = "atte.hcl"
+    id     = "attehcl:test:atte.hcl:go"
     index  = 0
     inline = ""
     kind   = "attehcl:test"
