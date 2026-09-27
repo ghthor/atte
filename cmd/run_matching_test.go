@@ -52,7 +52,14 @@ func runTestScanner(t *testing.T, targets []runTarget) detector.Scanner {
 			return graphtarget.Execution{Args: []string{"true"}}, nil
 		},
 	}))
-	return builder.Compile()
+	return compileTestDetector(t, builder)
+}
+
+func compileTestDetector(t *testing.T, builder *detector.Builder) detector.Scanner {
+	t.Helper()
+	scanner, err := builder.Compile()
+	must.NoError(t, err)
+	return scanner
 }
 
 func TestMatchesRunTarget(t *testing.T) {

@@ -14,10 +14,10 @@ func NewDefaultBuilder() (*Builder, error) {
 	if err := builder.AttachSensor(attegit.Detector{}); err != nil {
 		return nil, err
 	}
-	if err := builder.AttachSensor(attego.Detector{}); err != nil {
+	if err := builder.AttachSensor(attego.NewDetector()); err != nil {
 		return nil, err
 	}
-	if err := builder.AttachSensor(attehcl.NewDetector(nil)); err != nil {
+	if err := builder.AttachSensor(attehcl.NewDetector()); err != nil {
 		return nil, err
 	}
 	return builder, nil

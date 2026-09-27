@@ -114,7 +114,7 @@ func scannerForContext(ctx context.Context) (detector.Scanner, error) {
 	if err != nil {
 		return nil, err
 	}
-	return builder.Compile(), nil
+	return builder.Compile()
 }
 
 func executionContextForOptions(options ExecuteOptions) (executionContext, error) {

@@ -78,6 +78,12 @@ Sensors may also expose HCL capabilities during attachment:
 AttachSensor discovers these interfaces and attaches the supplied HCL
 capabilities to the Builder together with the Sensor.
 
+A Sensor that needs runtime capabilities from other attached Sensors may
+implement `SensorWithScanner`. During compilation, the Builder injects the
+compiled Scanner through `AttachScanner(any)`. The Sensor validates the subset
+it needs without importing the detector package; compilation returns an error
+if injection fails.
+
 ## SensorSpec
 
 A SensorSpec is an attachment-time description of one Sensor's optional capabilities.
@@ -121,7 +127,10 @@ if err := detector.AttachHCLTargetBlock(builder, "deploy", spec); err != nil {
     return err
 }
 
-scanner := builder.Compile()
+scanner, err := builder.Compile()
+if err != nil {
+    return err
+}
 ```
 
 Builder state is setup state. Applications should not pass a Builder to command execution, HCL evaluation, graph construction, or target discovery.
@@ -142,7 +151,7 @@ SensorProvidingHCLTargetBlocks implementations and attaches their HCL capabiliti
 
 NewDefaultBuilder creates a Builder containing Atte's built-in Sensors, target kinds, and HCL functions.
 
-The default Builder includes the built-in attegit, attego, and attehcl Sensors. The HCL Sensor is wired during compilation so it receives the immutable Scanner capability set rather than retaining the mutable Builder.
+The default Builder includes the built-in attegit, attego, and attehcl Sensors. The attego and HCL Sensors are wired during compilation to receive the immutable Scanner rather than retaining the mutable Builder.
 
 ## Scanner
 
@@ -186,11 +195,10 @@ Compile transforms mutable Builder state into an immutable Scanner.
 
 Compilation:
 
-* copies Sensor attachments
-* copies target-kind specifications and schemas
-* copies HCL function factories
-* adds the built-in HCL Sensor when using the default Builder
-* wires the HCL Sensor to the newly compiled Scanner
+* copies regular Sensor attachments, target-kind specifications, schemas, and HCL function factories
+* injects the newly compiled Scanner into Sensors implementing SensorWithScanner
+* adapts those Sensors into the compiled runtime snapshot
+* returns an error if a Sensor rejects the Scanner
 * produces a runtime value that does not retain the mutable Builder
 
 A Builder may be compiled more than once. Each compilation produces an independent Scanner snapshot, so later Builder attachments do not affect previously compiled Scanners.
@@ -294,13 +302,19 @@ These previous terms may appear in historical records or migration notes. They s
 
 ## scanner Local Variable
 
-HCL evaluation code should use scanner as the local name for the Capabilities value supplied by the compiled Scanner:
+Scanner-aware Sensor code should use scanner as the local name for the
+capability value supplied to `AttachScanner`:
 
 ```go
-func NewDetector(scanner Capabilities) Detector
+func (Detector) AttachScanner(value any) (any, error) {
+    scanner, ok := value.(Capabilities)
+    // ...
+    return &Detector{scanner: scanner}, nil
+}
 ```
 
-The name communicates that the capabilities are supplied by the runtime Scanner. It also avoids masking Go's predeclared cap function.
+The name communicates that the capabilities are supplied by the runtime
+Scanner. It also avoids masking Go's predeclared `cap` function.
 
 ## Lifecycle
 

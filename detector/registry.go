@@ -77,10 +77,10 @@ type Scanner interface {
 // Builders are setup-only values, are not safe for concurrent mutation, and
 // must be compiled before being passed to detector consumers.
 type Builder struct {
-	sensors     map[string]SensorSpec
-	functions   map[string]HCLFunctionFactory
-	targetKinds map[attehcl.Kind]attehcl.TargetKindSpec
-	includeHCL  bool
+	sensors        map[string]SensorSpec
+	scannerSensors map[string]Sensor
+	functions      map[string]HCLFunctionFactory
+	targetKinds    map[attehcl.Kind]attehcl.TargetKindSpec
 }
 
 type compiledScanner struct {
@@ -98,37 +98,61 @@ var (
 // NewBuilder returns an empty detector Builder.
 func NewBuilder() *Builder {
 	return &Builder{
-		sensors:     make(map[string]SensorSpec),
-		functions:   make(map[string]HCLFunctionFactory),
-		targetKinds: make(map[attehcl.Kind]attehcl.TargetKindSpec),
+		sensors:        make(map[string]SensorSpec),
+		scannerSensors: make(map[string]Sensor),
+		functions:      make(map[string]HCLFunctionFactory),
+		targetKinds:    make(map[attehcl.Kind]attehcl.TargetKindSpec),
 	}
 }
 
 // Compile returns an immutable runtime Scanner containing the attachments
-// made on b. Later changes to b do not affect the returned Scanner.
-func (b *Builder) Compile() Scanner {
+// made on b. Scanner-aware Sensors receive that Scanner during compilation.
+// Later changes to b do not affect the returned Scanner.
+func (b *Builder) Compile() (Scanner, error) {
 	if b == nil {
-		return nil
+		return nil, fmt.Errorf("builder is nil")
 	}
+	sensorCount := len(b.sensors) + len(b.scannerSensors)
 	result := &compiledScanner{
-		sensorsByName: make(map[string]SensorSpec, len(b.sensors)+1),
+		sensorsByName: make(map[string]SensorSpec, sensorCount),
 		functions:     maps.Clone(b.functions),
 		targetKinds:   cloneTargetKinds(b.targetKinds),
-		sensors:       make([]SensorSpec, 0, len(b.sensors)+1),
+		sensors:       make([]SensorSpec, 0, sensorCount),
 	}
 	for _, sensor := range b.sensors {
 		result.sensors = append(result.sensors, sensor)
 		result.sensorsByName[sensor.Namespace] = sensor
 	}
-	if b.includeHCL {
-		sensor := adaptSensor(attehcl.NewDetector(result))
-		result.sensors = append(result.sensors, sensor)
-		result.sensorsByName[sensor.Namespace] = sensor
+	namespaces := make([]string, 0, len(b.scannerSensors))
+	for namespace := range b.scannerSensors {
+		namespaces = append(namespaces, namespace)
+	}
+	sort.Strings(namespaces)
+	for _, namespace := range namespaces {
+		sensor := b.scannerSensors[namespace]
+		scannerSensor, ok := sensor.(SensorWithScanner)
+		if !ok {
+			return nil, fmt.Errorf("sensor %q does not support scanner attachment", namespace)
+		}
+		bound, err := scannerSensor.AttachScanner(result)
+		if err != nil {
+			return nil, fmt.Errorf("attach scanner to sensor %q: %w", namespace, err)
+		}
+		boundSensor, ok := bound.(Sensor)
+		if !ok {
+			return nil, fmt.Errorf("scanner-aware sensor %q returned %T, which is not a Sensor", namespace, bound)
+		}
+		if boundSensor.Namespace() != namespace {
+			return nil, fmt.Errorf("scanner-aware sensor %q returned Sensor with namespace %q", namespace, boundSensor.Namespace())
+		}
+		adapted := adaptSensor(boundSensor)
+		result.sensors = append(result.sensors, adapted)
+		result.sensorsByName[adapted.Namespace] = adapted
 	}
 	sort.Slice(result.sensors, func(i, j int) bool {
 		return result.sensors[i].Namespace < result.sensors[j].Namespace
 	})
-	return result
+	return result, nil
 }
 
 // AttachHCLTargetBlock adds a target kind to a detector Builder. A nil schema uses
@@ -207,9 +231,6 @@ func (b *Builder) validateSensor(sensor SensorSpec) error {
 	if sensor.Namespace == "" {
 		return fmt.Errorf("sensor namespace is empty")
 	}
-	if sensor.Namespace == attehcl.Namespace {
-		return fmt.Errorf("sensor namespace %q is reserved", sensor.Namespace)
-	}
 	targetCapability := sensor.Targets != nil || sensor.TargetSelector != nil || sensor.ExecuteTarget != nil
 	if targetCapability {
 		switch {
@@ -227,11 +248,14 @@ func (b *Builder) validateSensor(sensor SensorSpec) error {
 	if _, exists := b.sensors[sensor.Namespace]; exists {
 		return fmt.Errorf("sensor namespace %q is already attached", sensor.Namespace)
 	}
+	if _, exists := b.scannerSensors[sensor.Namespace]; exists {
+		return fmt.Errorf("sensor namespace %q is already attached", sensor.Namespace)
+	}
 	return nil
 }
 
-// AttachSensor attaches a method-based Sensor, its optional detector
-// capabilities, and any HCL capabilities it provides.
+// AttachSensor attaches a method-based Sensor and any HCL capabilities it
+// provides. Sensors implementing SensorWithScanner receive the compiled Scanner.
 func (b *Builder) AttachSensor(value Sensor) error {
 	if b == nil {
 		return fmt.Errorf("builder is nil")
@@ -240,25 +264,19 @@ func (b *Builder) AttachSensor(value Sensor) error {
 		return fmt.Errorf("sensor is nil")
 	}
 	sensor := adaptSensor(value)
-	functions, blocks := sensorCapabilities(value)
-	if sensor.Namespace == attehcl.Namespace {
-		// The HCL Sensor is constructed after compilation so it can receive the
-		// immutable Scanner. Its HCL capabilities are attached now.
-		if b.includeHCL {
-			return fmt.Errorf("sensor namespace %q is already attached", sensor.Namespace)
-		}
-	} else if err := b.validateSensor(sensor); err != nil {
+	_, scannerAware := value.(SensorWithScanner)
+	if err := b.validateSensor(sensor); err != nil {
 		return err
 	}
+	functions, blocks := sensorCapabilities(value)
 	if err := b.validateHCLCapabilities(functions, blocks); err != nil {
 		return err
 	}
-	if sensor.Namespace == attehcl.Namespace {
-		b.attachHCLCapabilities(functions, blocks)
-		b.includeHCL = true
-		return nil
+	if scannerAware {
+		b.scannerSensors[sensor.Namespace] = value
+	} else {
+		b.sensors[sensor.Namespace] = sensor
 	}
-	b.sensors[sensor.Namespace] = sensor
 	b.attachHCLCapabilities(functions, blocks)
 	return nil
 }

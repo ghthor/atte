@@ -37,16 +37,19 @@ if err != nil {
 	return err
 }
 
-scanner := builder.Compile()
+scanner, err := builder.Compile()
+if err != nil {
+	return err
+}
 ```
 
 `deploySchema` and the projection functions in this example are application
 code. See `examples/attehcl-custom-block` for a complete custom target. The
 builder returned by `detector.NewDefaultBuilder` contains the built-in target kinds,
-Sensors, and HCL functions. Compilation adds the HCL Sensor with a reference
-to the immutable Scanner, so all subsequent HCL evaluation uses one consistent
-capability set. Target kind names must be valid HCL identifiers and cannot be
-attached more than once in a builder.
+Sensors, and HCL functions. During compilation, the HCL Sensor receives the
+immutable Scanner through its `SensorWithScanner` capability, so all subsequent
+HCL evaluation uses one consistent capability set. Target kind names must be
+valid HCL identifiers and cannot be attached more than once in a builder.
 
 Pass the same scanner to the direct `attehcl` APIs that evaluate targets or
 build graphs:
@@ -57,7 +60,11 @@ config, err := attehcl.ConfigFor(ctx, repo, relativePath, scanner)
 graph, err := attehcl.Graph(ctx, repo, scanner)
 ```
 
-When adapting the HCL Sensor directly, use `attehcl.NewDetector(scanner)`.
+`attehcl.NewDetector()` creates an unattached Sensor. Usually `Builder.AttachSensor`
+and `Builder.Compile` perform scanner injection. For manual adaptation,
+`AttachScanner(scanner)` returns the bound Sensor as `any`; check the error and
+assert the result to `*attehcl.Detector`. `Builder.Compile` does this validation
+for attached Sensors.
 For CLI execution, provide the scanner through `cmd.ExecuteOptions.Detector`;
 repository discovery remains unchanged when only the Scanner is injected:
 

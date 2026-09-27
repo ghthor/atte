@@ -236,7 +236,7 @@ go 1.24
 	must.NoError(t, err)
 	goTest := graph.EntityID(value.AsString())
 
-	got, err := Graph(t.Context(), repo, testCapabilities{functions: attego.HCLFunctions, decodeID: (attego.Detector{}).DecodeID})
+	got, err := Graph(t.Context(), repo, testCapabilities{functions: attego.HCLFunctions, decodeID: attego.NewDetector().DecodeID})
 	must.NoError(t, err)
 	graphtest.MustHaveRelation(t, got, EntityID(TestKind, "path1/atte.hcl", "go"), goTest, DependsOnRelation)
 	graphtest.MustHaveRelation(t, got, EntityID(TestKind, "path2/atte.hcl", "py"), EntityID(TestKind, "path1/atte.hcl", "go"), DependsOnRelation)
@@ -383,7 +383,7 @@ codegen "go" {
 		"go.mod": "module example.com/root\n",
 	})
 
-	_, err := Graph(t.Context(), repo, testCapabilities{functions: attego.HCLFunctions, decodeID: (attego.Detector{}).DecodeID})
+	_, err := Graph(t.Context(), repo, testCapabilities{functions: attego.HCLFunctions, decodeID: attego.NewDetector().DecodeID})
 	test.ErrorContains(t, err, `decode HCL "atte.hcl": atte.hcl:3,17-23:`)
 	test.ErrorContains(t, err, "  3 |   depends_on = [gopkg(\"./cmd/mis\")]\n")
 	test.ErrorContains(t, err, "Call to function \"gopkg\" failed")

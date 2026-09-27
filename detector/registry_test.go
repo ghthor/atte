@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/ghthor/atte/detector/attegit"
+	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphtarget"
@@ -29,10 +30,18 @@ func testTargetSensorSpec(namespace string, targets []graphtarget.ID, presentati
 	}
 }
 
+func compileScanner(t *testing.T, builder *Builder) Scanner {
+	t.Helper()
+	scanner, err := builder.Compile()
+	must.NoError(t, err)
+	return scanner
+}
+
 func TestNewDefaultBuilder(t *testing.T) {
 	builder, err := NewDefaultBuilder()
 	test.NoError(t, err)
-	scanner := builder.Compile()
+	test.ErrorContains(t, builder.AttachSensor(attego.NewDetector()), "already attached")
+	scanner := compileScanner(t, builder)
 	test.NotNil(t, scanner)
 	test.EqOp(t, 3, len(scanner.TargetKinds()))
 
@@ -53,6 +62,13 @@ func TestAttachValidation(t *testing.T) {
 	spec := testTargetSensorSpec("test", nil, selector.Target{Path: "pkg", Kind: "test"})
 	test.NoError(t, builder.Attach(spec))
 	test.Error(t, builder.Attach(spec))
+
+	for _, namespace := range []string{attego.Namespace, attehcl.Namespace} {
+		t.Run(namespace, func(t *testing.T) {
+			allowed := testTargetSensorSpec(namespace, nil, selector.Target{})
+			test.NoError(t, NewBuilder().Attach(allowed))
+		})
+	}
 }
 
 func TestTargetCapabilityValidation(t *testing.T) {
@@ -84,7 +100,7 @@ func TestTargetCapabilityValidation(t *testing.T) {
 		Namespace: "graph-only",
 		DecodeID:  func(id graph.EntityID) (graph.Entity, error) { return graph.Entity{ID: id}, nil },
 	}))
-	scanner := builder.Compile()
+	scanner := compileScanner(t, builder)
 	targets, err := scanner.Targets(t.Context(), nil)
 	test.NoError(t, err)
 	test.EqOp(t, 0, len(targets))
@@ -102,7 +118,7 @@ func TestScannerTargetDispatchAndSnapshot(t *testing.T) {
 	spec := testTargetSensorSpec("custom", []graphtarget.ID{id}, firstSelector)
 	builder := NewBuilder()
 	must.NoError(t, builder.Attach(spec))
-	first := builder.Compile()
+	first := compileScanner(t, builder)
 
 	secondID := graphtarget.ID{ID: "custom:two", Namespace: "custom"}
 	spec.Targets = func(context.Context, *attegit.Repo) ([]graphtarget.ID, error) {
@@ -112,7 +128,7 @@ func TestScannerTargetDispatchAndSnapshot(t *testing.T) {
 		return selector.Target{Path: "second", Kind: "task"}
 	}
 	must.NoError(t, builder.Attach(testTargetSensorSpec("later", nil, selector.Target{})))
-	second := builder.Compile()
+	second := compileScanner(t, builder)
 
 	value, ok := first.TargetSelector(id)
 	test.True(t, ok, test.Sprintf("attached target Sensor should provide its selector"))
@@ -142,7 +158,7 @@ func TestScannersKeepSameNamespaceSelectorsIndependent(t *testing.T) {
 	compile := func(path string) Scanner {
 		builder := NewBuilder()
 		must.NoError(t, builder.Attach(testTargetSensorSpec("custom", []graphtarget.ID{id}, selector.Target{Path: path, Kind: "task"})))
-		return builder.Compile()
+		return compileScanner(t, builder)
 	}
 	first := compile("one")
 	second := compile("two")
@@ -174,7 +190,7 @@ func TestResolveTarget(t *testing.T) {
 			return graphtarget.Execution{Args: []string{"true"}}, nil
 		},
 	}))
-	scanner := builder.Compile()
+	scanner := compileScanner(t, builder)
 
 	resolved, err := scanner.ResolveTarget(t.Context(), nil, "one#test.unit", "")
 	test.NoError(t, err)
@@ -216,7 +232,7 @@ func TestResolveTarget(t *testing.T) {
 			return graphtarget.Execution{Args: []string{"true"}}, nil
 		},
 	}))
-	_, err = tiedBuilder.Compile().ResolveTarget(t.Context(), nil, "test", "")
+	_, err = compileScanner(t, tiedBuilder).ResolveTarget(t.Context(), nil, "test", "")
 	var tiedAmbiguous *selector.AmbiguousError
 	test.True(t, errors.As(err, &tiedAmbiguous), test.Sprintf("equal selectors should remain ambiguous"))
 	test.SliceEqOp(t, []selector.AmbiguousCandidate{
@@ -240,7 +256,7 @@ func TestResolveTargetErrorsAndCancellation(t *testing.T) {
 			return graphtarget.Execution{Args: []string{"true"}}, nil
 		},
 	}))
-	scanner := builder.Compile()
+	scanner := compileScanner(t, builder)
 	_, err := scanner.ResolveTarget(t.Context(), nil, "test", "")
 	test.ErrorIs(t, err, discoveryErr)
 	var wrappedNoMatch *selector.NoMatchError
@@ -271,7 +287,7 @@ func TestResolveTargetErrorsAndCancellation(t *testing.T) {
 			return graphtarget.Execution{Args: []string{"true"}}, nil
 		},
 	}))
-	_, err = builder.Compile().ResolveTarget(ctx, nil, "test", "")
+	_, err = compileScanner(t, builder).ResolveTarget(ctx, nil, "test", "")
 	test.ErrorIs(t, err, context.Canceled)
 }
 
@@ -288,7 +304,7 @@ func TestResolveTargetRejectsDiscoveredTargetWithoutSelector(t *testing.T) {
 			return graphtarget.Execution{Args: []string{"true"}}, nil
 		},
 	}))
-	_, err := builder.Compile().ResolveTarget(t.Context(), nil, "test", "")
+	_, err := compileScanner(t, builder).ResolveTarget(t.Context(), nil, "test", "")
 	test.ErrorContains(t, err, "has no selector capability")
 	test.ErrorContains(t, err, string(id.ID))
 }
@@ -298,7 +314,7 @@ func TestAttachSensor(t *testing.T) {
 	test.NoError(t, builder.AttachSensor(methodSensor{}))
 	test.Error(t, builder.AttachSensor(methodSensor{}))
 
-	scanner := builder.Compile()
+	scanner := compileScanner(t, builder)
 	functions, err := scanner.HCLFunctions(t.Context(), nil, "")
 	test.NoError(t, err)
 	test.NotNil(t, functions["method"])
@@ -315,12 +331,44 @@ func TestAttachSensor(t *testing.T) {
 func TestAttachSensorRequiresCompleteTargetCapability(t *testing.T) {
 	builder := NewBuilder()
 	must.NoError(t, builder.AttachSensor(partialMethodSensor{}))
-	scanner := builder.Compile()
+	scanner := compileScanner(t, builder)
 	targets, err := scanner.Targets(t.Context(), nil)
 	test.NoError(t, err)
 	test.EqOp(t, 0, len(targets))
 	_, ok := scanner.TargetSelector(graphtarget.ID{Namespace: "partial"})
 	test.False(t, ok, test.Sprintf("partial method capabilities must not be adapted as target discovery"))
+}
+
+func TestCompileScannerAwareSensorSnapshotsScanner(t *testing.T) {
+	builder := NewBuilder()
+	must.NoError(t, builder.AttachSensor(&snapshotScannerSensor{}))
+	first, err := builder.Compile()
+	must.NoError(t, err)
+
+	must.NoError(t, AttachHCLTargetBlock(builder, "later", attehcl.TargetKindSpec{
+		Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
+			return struct{}{}, nil
+		},
+	}))
+	second, err := builder.Compile()
+	must.NoError(t, err)
+
+	firstEntity, err := first.DecodeID("snapshot:value")
+	test.NoError(t, err)
+	test.EqOp(t, graph.EntityKind("before"), firstEntity.Kind)
+	secondEntity, err := second.DecodeID("snapshot:value")
+	test.NoError(t, err)
+	test.EqOp(t, graph.EntityKind("after"), secondEntity.Kind)
+}
+
+func TestCompilePropagatesScannerAttachmentError(t *testing.T) {
+	builder := NewBuilder()
+	must.NoError(t, builder.AttachSensor(rejectingScannerSensor{}))
+
+	scanner, err := builder.Compile()
+	test.Nil(t, scanner)
+	test.ErrorContains(t, err, "attach scanner to sensor")
+	test.ErrorContains(t, err, "scanner rejected")
 }
 
 func TestAttachTarget(t *testing.T) {
@@ -331,7 +379,7 @@ func TestAttachTarget(t *testing.T) {
 	test.NoError(t, AttachHCLTargetBlock(builder, "custom", spec))
 	test.Error(t, AttachHCLTargetBlock(builder, "custom", spec))
 
-	attached := builder.Compile().TargetKinds()
+	attached := compileScanner(t, builder).TargetKinds()
 	test.EqOp(t, 1, len(attached))
 	attachedSpec, ok := attached["custom"]
 	test.True(t, ok, test.Sprintf("custom target kind should be attached: %#v", attached))
@@ -348,11 +396,11 @@ func TestCompileSnapshotsAttachments(t *testing.T) {
 	builder := NewBuilder()
 	decoder := func(*hcl.BodyContent, *hcl.EvalContext) (any, error) { return struct{}{}, nil }
 	must.NoError(t, AttachHCLTargetBlock(builder, "first", attehcl.TargetKindSpec{Decoder: decoder}))
-	compiled := builder.Compile()
+	compiled := compileScanner(t, builder)
 	must.NoError(t, AttachHCLTargetBlock(builder, "second", attehcl.TargetKindSpec{Decoder: decoder}))
 
 	test.EqOp(t, 1, len(compiled.TargetKinds()))
-	test.EqOp(t, 2, len(builder.Compile().TargetKinds()))
+	test.EqOp(t, 2, len(compileScanner(t, builder).TargetKinds()))
 }
 
 func TestAttachTargetValidation(t *testing.T) {
@@ -366,7 +414,7 @@ func TestAttachTargetValidation(t *testing.T) {
 func TestDecodeID(t *testing.T) {
 	builder, err := NewDefaultBuilder()
 	test.NoError(t, err)
-	scanner := builder.Compile()
+	scanner := compileScanner(t, builder)
 
 	cases := []struct {
 		name string
@@ -397,7 +445,7 @@ func TestDecodeIDErrors(t *testing.T) {
 			return graph.Entity{}, fmt.Errorf("bad entity")
 		},
 	}))
-	scanner := builder.Compile()
+	scanner := compileScanner(t, builder)
 	decode := func(id graph.EntityID) error {
 		_, err := scanner.DecodeID(id)
 		return err
@@ -450,4 +498,38 @@ func (methodSensor) HCLTargetBlocks() map[attehcl.Kind]attehcl.TargetKindSpec {
 	return map[attehcl.Kind]attehcl.TargetKindSpec{
 		"method": {Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) { return struct{}{}, nil }},
 	}
+}
+
+type rejectingScannerSensor struct{}
+
+func (rejectingScannerSensor) Namespace() string { return "scanner-aware" }
+
+func (rejectingScannerSensor) DecodeID(id graph.EntityID) (graph.Entity, error) {
+	return graph.Entity{ID: id}, nil
+}
+
+func (rejectingScannerSensor) AttachScanner(any) (any, error) {
+	return nil, errors.New("scanner rejected")
+}
+
+type snapshotScannerSensor struct {
+	scanner Scanner
+}
+
+func (*snapshotScannerSensor) Namespace() string { return "snapshot" }
+
+func (snapshotScannerSensor) AttachScanner(scanner any) (any, error) {
+	capabilities, ok := scanner.(Scanner)
+	if !ok {
+		return nil, fmt.Errorf("received %T, not detector.Scanner", scanner)
+	}
+	return &snapshotScannerSensor{scanner: capabilities}, nil
+}
+
+func (s snapshotScannerSensor) DecodeID(id graph.EntityID) (graph.Entity, error) {
+	kind := graph.EntityKind("before")
+	if _, ok := s.scanner.TargetKinds()["later"]; ok {
+		kind = "after"
+	}
+	return graph.Entity{ID: id, Kind: kind}, nil
 }

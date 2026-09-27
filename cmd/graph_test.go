@@ -271,7 +271,7 @@ func TestPrintGraphIncludesCustomHCLTargets(t *testing.T) {
 		},
 	}))
 
-	detector := builder.Compile()
+	detector := compileTestDetector(t, builder)
 	got := renderTestGraphWithDetector(t, repo, detector)
 	test.StrContains(t, got, "deploy attehcl:deploy:atte.hcl:release")
 }

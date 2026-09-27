@@ -34,7 +34,7 @@ test "child2" {
 	})
 	builder, err := detector.NewDefaultBuilder()
 	must.NoError(t, err)
-	detector := builder.Compile()
+	detector := compileTestDetector(t, builder)
 	config, err := attehcl.ConfigFor(t.Context(), repo, "child", detector)
 	test.NoError(t, err)
 	targets := attehcl.SortedTargets(config.Targets)

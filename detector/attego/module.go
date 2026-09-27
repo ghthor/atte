@@ -98,7 +98,19 @@ func DecodeEntityID(id graph.EntityID) (string, reference.Tree, string, error) {
 }
 
 // Detector adapts the Go Sensor to the shared detector capabilities.
-type Detector struct{}
+type Detector struct {
+	scanner any
+}
+
+// NewDetector creates a Go Sensor that can receive a compiled Scanner.
+func NewDetector() *Detector {
+	return &Detector{}
+}
+
+// AttachScanner returns a Go Sensor bound to the compiled Scanner.
+func (Detector) AttachScanner(scanner any) (any, error) {
+	return &Detector{scanner: scanner}, nil
+}
 
 func (Detector) Namespace() string { return Namespace }
 

@@ -41,7 +41,9 @@ deploy "release" {
 	builder, err := detector.NewDefaultBuilder()
 	must.NoError(t, err)
 	must.NoError(t, attachDeployBlock(builder))
-	return acceptanceRepository{repo: repo, dir: git.Dir(), detector: builder.Compile()}
+	scanner, err := builder.Compile()
+	must.NoError(t, err)
+	return acceptanceRepository{repo: repo, dir: git.Dir(), detector: scanner}
 }
 
 func executeAcceptanceCommand(t *testing.T, repository acceptanceRepository, args ...string) (stdout, stderr string, err error) {

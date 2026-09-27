@@ -115,7 +115,10 @@ func execute() error {
 	if err := attachDeployBlock(builtIns); err != nil {
 		return fmt.Errorf("register deploy target: %w", err)
 	}
-	scanner := builtIns.Compile()
+	scanner, err := builtIns.Compile()
+	if err != nil {
+		return fmt.Errorf("compile detector Scanner: %w", err)
+	}
 	return cmd.ExecuteWithOptions(ctx, os.Args[1:], cmd.ExecuteOptions{
 		Repository:     repository,
 		RepositoryRoot: directory,

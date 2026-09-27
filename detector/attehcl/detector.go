@@ -17,9 +17,19 @@ type Detector struct {
 	scanner Capabilities
 }
 
-// NewDetector creates an HCL Sensor backed by the supplied Scanner.
-func NewDetector(scanner Capabilities) Detector {
-	return Detector{scanner: scanner}
+// NewDetector creates an HCL Sensor that can receive a compiled Scanner.
+func NewDetector() *Detector {
+	return &Detector{}
+}
+
+// AttachScanner validates the compiled Scanner capabilities and returns a
+// Sensor bound to them.
+func (Detector) AttachScanner(scanner any) (any, error) {
+	capabilities, ok := scanner.(Capabilities)
+	if !ok {
+		return nil, fmt.Errorf("scanner %T does not provide HCL capabilities", scanner)
+	}
+	return &Detector{scanner: capabilities}, nil
 }
 
 // HCLTargetBlocks provides the HCL target-kind specifications contributed by

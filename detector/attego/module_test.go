@@ -73,6 +73,18 @@ var _ = must.NoError
 	return git.Dir()
 }
 
+func TestAttachScannerRetainsArbitraryScanner(t *testing.T) {
+	detector := NewDetector()
+	scanner := &struct{ value string }{value: "scanner"}
+	bound, err := detector.AttachScanner(scanner)
+	must.NoError(t, err)
+
+	configured := bound.(*Detector)
+	test.True(t, configured != detector, test.Sprintf("AttachScanner should return a new Sensor instance"))
+	test.True(t, configured.scanner == scanner, test.Sprintf("configured Sensor should retain the arbitrary Scanner"))
+	test.Nil(t, detector.scanner)
+}
+
 func TestHCLFunctionsResolvePackages(t *testing.T) {
 	repoPath := newBasicFixture(t)
 	repo, err := attegit.Open(repoPath, "HEAD")

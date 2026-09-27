@@ -117,7 +117,7 @@ func TestExecuteWithOptionsUsesInjectedDetectorWithoutRepositoryOverride(t *test
 			return struct{}{}, nil
 		},
 	}))
-	detector := builder.Compile()
+	detector := compileTestDetector(t, builder)
 	t.Chdir(repository.root)
 
 	var out bytes.Buffer
@@ -229,7 +229,7 @@ test "unit" {
 	})
 	builder, err := detector.NewDefaultBuilder()
 	must.NoError(t, err)
-	scanner := builder.Compile()
+	scanner := compileTestDetector(t, builder)
 	targets, err := scanner.Targets(t.Context(), repository.repo)
 	must.NoError(t, err)
 	test.EqOp(t, 2, len(targets))
@@ -261,7 +261,7 @@ func TestCustomTargetSensorRunsAndRendersThroughScanner(t *testing.T) {
 	builder, err := detector.NewDefaultBuilder()
 	must.NoError(t, err)
 	must.NoError(t, builder.AttachSensor(customExecutableSensor{}))
-	scanner := builder.Compile()
+	scanner := compileTestDetector(t, builder)
 
 	var dryRun bytes.Buffer
 	var stderr bytes.Buffer
