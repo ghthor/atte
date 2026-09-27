@@ -170,7 +170,7 @@ Methods on a real compiled Scanner should not require callers to handle a nil Sc
 - `reference/selector/selector.go` — shared selector values, parser, path operations, aliases, and generic matching.
 - The historical process-global selector mapping and its tests were removed by this refactor.
 - `detector/interfaces.go` — Sensor capability interfaces.
-- `detector/registry.go` — SensorSpec, Builder adaptation, compiled Scanner dispatch, target resolution, and execution.
+- `detector/scanner.go` — SensorSpec, Builder adaptation, compiled Scanner dispatch, target resolution, and execution.
 - `detector/attehcl/detector.go` — built-in HCL target presentation and execution.
 - `detector/attego/module.go` — built-in Go target presentation and execution.
 - `cmd/run.go` — run-specific matching policy and Scanner-backed target handling.
