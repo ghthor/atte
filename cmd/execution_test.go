@@ -9,7 +9,7 @@ import (
 	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attegittest"
-	"github.com/ghthor/atte/detector/attehcl"
+	"github.com/ghthor/atte/detector/attehcltarget"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphset"
 	"github.com/ghthor/atte/detector/graphtarget"
@@ -112,7 +112,7 @@ func TestExecuteWithOptionsUsesInjectedDetectorWithoutRepositoryOverride(t *test
 	})
 	builder, err := detector.NewDefaultBuilder()
 	must.NoError(t, err)
-	must.NoError(t, detector.AttachHCLTargetBlock(builder, "custom", attehcl.TargetKindSpec{
+	must.NoError(t, detector.AttachHCLTargetBlock(builder, "custom", attehcltarget.KindSpec{
 		Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
 			return struct{}{}, nil
 		},

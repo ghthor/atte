@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/ghthor/atte/detector/attegit"
-	"github.com/ghthor/atte/detector/attehcl"
+	"github.com/ghthor/atte/detector/attehcltarget"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphset"
 	"github.com/ghthor/atte/detector/graphtarget"
@@ -61,5 +61,5 @@ type SensorProvidingHCLFunctions interface {
 // attachment.
 type SensorProvidingHCLTargetBlocks interface {
 	Sensor
-	HCLTargetBlocks() map[attehcl.Kind]attehcl.TargetKindSpec
+	HCLTargetBlocks() map[attehcltarget.Kind]attehcltarget.KindSpec
 }

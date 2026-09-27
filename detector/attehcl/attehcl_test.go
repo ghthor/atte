@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ghthor/atte/detector/attehcltarget"
+
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attegittest"
 	"github.com/ghthor/atte/detector/attego"
@@ -23,7 +25,7 @@ import (
 	"github.com/zclconf/go-cty/cty/function"
 )
 
-func attachTestTarget[K ~string](kind K, spec TargetKindSpec) error {
+func attachTestTarget[K ~string](kind K, spec attehcltarget.KindSpec) error {
 	name := string(kind)
 	if name == "" {
 		return fmt.Errorf("target kind is empty")
@@ -34,7 +36,7 @@ func attachTestTarget[K ~string](kind K, spec TargetKindSpec) error {
 	if spec.Decoder == nil {
 		return fmt.Errorf("target kind %q has no decoder", kind)
 	}
-	key := Kind(kind)
+	key := attehcltarget.Kind(kind)
 	if _, exists := defaultTargetKinds[key]; exists {
 		return fmt.Errorf("target kind %q is already attached", kind)
 	}
@@ -51,7 +53,10 @@ type testCapabilities struct {
 	decodeID  func(graph.EntityID) (graph.Entity, error)
 }
 
-func (p testCapabilities) TargetKinds() map[Kind]TargetKindSpec { return defaultTargetKinds }
+func (p testCapabilities) TargetKinds() map[attehcltarget.Kind]attehcltarget.KindSpec {
+	return defaultTargetKinds
+}
+
 func (p testCapabilities) HCLFunctions(ctx context.Context, repo *attegit.Repo, file reference.Blob) (map[string]function.Function, error) {
 	if p.functions == nil {
 		return nil, nil
@@ -74,7 +79,7 @@ func testTargets(
 	ctx context.Context,
 	repo *attegit.Repo,
 	functions func(context.Context, *attegit.Repo, reference.Blob) (map[string]function.Function, error),
-) (map[Kind][]Target, error) {
+) (map[attehcltarget.Kind][]attehcltarget.Target, error) {
 	return Targets(ctx, repo, testCapabilities{functions: functions})
 }
 
@@ -452,7 +457,7 @@ func TestTargetCapabilitiesSupportsCustomKindAndWrapperForm(t *testing.T) {
 		Command string
 	}
 	schema := hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "command", Required: true}}}
-	must.NoError(t, attachTestTarget("package_test", TargetKindSpec{
+	must.NoError(t, attachTestTarget("package_test", attehcltarget.KindSpec{
 		Schema: &schema,
 		Decoder: func(content *hcl.BodyContent, ctx *hcl.EvalContext) (any, error) {
 			value, diagnostics := content.Attributes["command"].Expr.Value(ctx)
@@ -480,8 +485,8 @@ func TestTargetCapabilitiesSupportsCustomKindAndWrapperForm(t *testing.T) {
 }
 
 func TestTargetKindCapabilitiesAreIndependent(t *testing.T) {
-	kind := Kind("non_runnable_capability_test")
-	must.NoError(t, attachTestTarget(kind, TargetKindSpec{
+	kind := attehcltarget.Kind("non_runnable_capability_test")
+	must.NoError(t, attachTestTarget(kind, attehcltarget.KindSpec{
 		Schema: &hcl.BodySchema{},
 		Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
 			return struct{ Value string }{Value: "decoded"}, nil
@@ -502,11 +507,11 @@ func TestTargetKindCapabilitiesAreIndependent(t *testing.T) {
 }
 
 func TestTargetCapabilitiesSnapshotsCapabilities(t *testing.T) {
-	kind := Kind("registry_snapshot_test")
+	kind := attehcltarget.Kind("registry_snapshot_test")
 	repo := newHCLFixture(t, map[string]string{"atte.hcl": "registry_snapshot_test {}"})
 	evaluator, err := newEvaluator(t.Context(), repo, nil)
 	must.NoError(t, err)
-	must.NoError(t, attachTestTarget(kind, TargetKindSpec{
+	must.NoError(t, attachTestTarget(kind, attehcltarget.KindSpec{
 		Schema: &hcl.BodySchema{},
 		Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
 			return struct{}{}, nil
@@ -522,15 +527,15 @@ func TestTargetCapabilitiesAttachmentValidation(t *testing.T) {
 	decoder := func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
 		return struct{}{}, nil
 	}
-	test.Error(t, attachTestTarget("test", TargetKindSpec{Decoder: decoder}))
-	test.Error(t, attachTestTarget("bad name", TargetKindSpec{Decoder: decoder}))
-	test.Error(t, attachTestTarget("valid_attachment", TargetKindSpec{}))
+	test.Error(t, attachTestTarget("test", attehcltarget.KindSpec{Decoder: decoder}))
+	test.Error(t, attachTestTarget("bad name", attehcltarget.KindSpec{Decoder: decoder}))
+	test.Error(t, attachTestTarget("valid_attachment", attehcltarget.KindSpec{}))
 }
 
 func TestTargetCapabilitiesCopiesSchema(t *testing.T) {
 	schema := hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "command", Required: true}}}
 	kind := "schema_copy_test"
-	must.NoError(t, attachTestTarget(kind, TargetKindSpec{
+	must.NoError(t, attachTestTarget(kind, attehcltarget.KindSpec{
 		Schema: &schema,
 		Decoder: func(content *hcl.BodyContent, _ *hcl.EvalContext) (any, error) {
 			return content.Attributes["command"].Name, nil

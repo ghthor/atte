@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/ghthor/atte/detector/attehcltarget"
+
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/reference"
@@ -15,44 +17,6 @@ import (
 	"github.com/zclconf/go-cty/cty"
 	"github.com/zclconf/go-cty/cty/function"
 )
-
-// Kind identifies a attached target kind and its target namespace.
-type Kind string
-
-// TargetDecoder decodes a schema-validated target body into a kind-owned value.
-type TargetDecoder func(*hcl.BodyContent, *hcl.EvalContext) (any, error)
-
-// TargetGraphProjection projects a target into graph entities and relationships.
-// The attachToTree argument requests the common file/tree containment relations.
-type TargetGraphProjection func(context.Context, *attegit.Repo, Target, TargetGraphContext, bool) (TargetGraph, error)
-
-// TargetExecutionProjection constructs the command used to run a target. Args
-// contains the executable and its arguments; Dir is the process working directory.
-type TargetExecutionProjection func(Target, string) (TargetCommand, error)
-
-// TargetConfigProjection adds decoded target data to config show output. The
-// returned keys must not overlap the standard target identity fields.
-type TargetConfigProjection func(Target) (map[string]any, error)
-
-// TargetScriptProjection resolves a decoded target's script into a repository
-// path or inline command.
-type TargetScriptProjection func(*attegit.Repo, reference.Blob, any) (reference.Blob, string, error)
-
-// TargetKindSpec describes the independent capabilities of a attached kind.
-// Decoder is required; the other projections are optional.
-type TargetKindSpec struct {
-	Schema    *hcl.BodySchema
-	Decoder   TargetDecoder
-	Graph     TargetGraphProjection
-	Execution TargetExecutionProjection
-	Config    TargetConfigProjection
-	Script    TargetScriptProjection
-}
-
-// TargetCapabilities exposes target-kind capabilities to HCL evaluation.
-type TargetCapabilities interface {
-	TargetKinds() map[Kind]TargetKindSpec
-}
 
 // FunctionCapabilities provides repository- and file-aware HCL functions to
 // HCL evaluation.
@@ -68,34 +32,15 @@ type EntityCapabilities interface {
 // Capabilities provides the capabilities HCL evaluation needs from the
 // compiled Scanner without importing the detector package.
 type Capabilities interface {
-	TargetCapabilities
+	attehcltarget.KindCapabilities
 	FunctionCapabilities
 	EntityCapabilities
 }
 
-// TargetGraphContext provides common dependency resolution to a graph projector.
-type TargetGraphContext struct {
-	ResolveTarget   func(hcl.Traversal) (graph.Entity, error)
-	ResolveTargetAt func(reference.Blob, hcl.Traversal) (graph.Entity, error)
-	EntityKind      func(graph.EntityID) (graph.EntityKind, error)
-}
-
-// TargetGraph is the graph projection of one target.
-type TargetGraph struct {
-	Entities      []graph.Entity
-	Relationships []graph.Relationship
-}
-
-// TargetCommand is the executable representation of one target.
-type TargetCommand struct {
-	Dir  string
-	Args []string
-}
-
 const (
-	KindTest    Kind = "test"
-	KindCodegen Kind = "codegen"
-	KindLint    Kind = "lint"
+	KindTest    attehcltarget.Kind = "test"
+	KindCodegen attehcltarget.Kind = "codegen"
+	KindLint    attehcltarget.Kind = "lint"
 )
 
 var testSchema = hcl.BodySchema{
@@ -107,8 +52,8 @@ var testSchema = hcl.BodySchema{
 }
 
 // BuiltInTargetKinds returns the target kinds provided by atte itself.
-func BuiltInTargetKinds() map[Kind]TargetKindSpec {
-	return map[Kind]TargetKindSpec{
+func BuiltInTargetKinds() map[attehcltarget.Kind]attehcltarget.KindSpec {
+	return map[attehcltarget.Kind]attehcltarget.KindSpec{
 		KindTest: {
 			Decoder:   decodeScriptTarget,
 			Graph:     graphScriptTarget,
@@ -138,7 +83,7 @@ type decodedTarget struct {
 	Deps   []dependency
 }
 
-func validateDecoderResult(kind Kind, decoded any) error {
+func validateDecoderResult(kind attehcltarget.Kind, decoded any) error {
 	if decoded == nil {
 		return fmt.Errorf("target kind %q decoder returned nil", kind)
 	}
@@ -153,12 +98,12 @@ const targetTraversalValuePrefix = "attehcl-target:"
 
 var defaultTargetKinds = BuiltInTargetKinds()
 
-func targetKinds(scanner TargetCapabilities) map[Kind]TargetKindSpec {
+func targetKinds(scanner attehcltarget.KindCapabilities) map[attehcltarget.Kind]attehcltarget.KindSpec {
 	provided := defaultTargetKinds
 	if scanner != nil {
 		provided = scanner.TargetKinds()
 	}
-	result := make(map[Kind]TargetKindSpec, len(provided))
+	result := make(map[attehcltarget.Kind]attehcltarget.KindSpec, len(provided))
 	for kind, spec := range provided {
 		schema := testSchema
 		if spec.Schema != nil {
@@ -177,13 +122,13 @@ func copyBodySchema(schema hcl.BodySchema) hcl.BodySchema {
 	}
 }
 
-func targetTraversalValue(kind Kind, name string) string {
+func targetTraversalValue(kind attehcltarget.Kind, name string) string {
 	return targetTraversalValuePrefix + string(kind) + "." + name
 }
 
 const targetReferenceValuePrefix = "attehcl-target-ref:"
 
-func targetReferenceValue(file reference.Blob, kind Kind, name string) string {
+func targetReferenceValue(file reference.Blob, kind attehcltarget.Kind, name string) string {
 	return targetReferenceValuePrefix + file.String() + "#" + string(kind) + "." + name
 }
 
@@ -206,12 +151,12 @@ func targetReferenceFromValue(value string) (targetReference, bool) {
 	}
 	return targetReference{
 		file: file,
-		kind: Kind(kind),
+		kind: attehcltarget.Kind(kind),
 		name: name,
 	}, true
 }
 
-func targetTraversal(kind Kind, name string) hcl.Traversal {
+func targetTraversal(kind attehcltarget.Kind, name string) hcl.Traversal {
 	return hcl.Traversal{
 		hcl.TraverseRoot{Name: string(kind)},
 		hcl.TraverseAttr{Name: name},
