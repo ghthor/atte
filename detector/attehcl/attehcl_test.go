@@ -826,7 +826,7 @@ func TestDeclaredTargetsDoesNotEvaluateBodies(t *testing.T) {
 		return nil, nil
 	}
 
-	declarations, err := DeclaredTargets(t.Context(), repo, testCapabilities{})
+	declarations, err := DeclaredTargets(t.Context(), repo, testCapabilities{functions: provider})
 	must.NoError(t, err)
 	test.Len(t, 2, declarations)
 	test.EqOp(t, "atte.hcl", declarations[0].Path)
@@ -839,9 +839,6 @@ func TestDeclaredTargetsDoesNotEvaluateBodies(t *testing.T) {
 	test.EqOp(t, "0", declarations[1].Name)
 	test.EqOp(t, 0, declarations[1].Index)
 
-	detectorTargets, err := NewDetector(testCapabilities{functions: provider}).Targets(t.Context(), repo)
-	must.NoError(t, err)
-	test.Len(t, 2, detectorTargets)
 	test.EqOp(t, 0, calls)
 }
 

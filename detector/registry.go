@@ -13,6 +13,7 @@ import (
 	"github.com/ghthor/atte/detector/graphset"
 	"github.com/ghthor/atte/detector/graphtarget"
 	"github.com/ghthor/atte/reference"
+	"github.com/ghthor/atte/reference/selector"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/zclconf/go-cty/cty/function"
@@ -20,10 +21,12 @@ import (
 
 // SensorSpec describes the capabilities supplied by one detector Sensor.
 type SensorSpec struct {
-	Namespace string
-	Graph     func(context.Context, *attegit.Repo, ...graphset.Option) (*graph.Graph, error)
-	Targets   func(context.Context, *attegit.Repo) ([]graphtarget.ID, error)
-	DecodeID  func(graph.EntityID) (graph.Entity, error)
+	Namespace      string
+	Graph          func(context.Context, *attegit.Repo, ...graphset.Option) (*graph.Graph, error)
+	Targets        func(context.Context, *attegit.Repo) ([]graphtarget.ID, error)
+	TargetSelector func(graphtarget.ID) selector.Target
+	ExecuteTarget  func(context.Context, *attegit.Repo, string, graphtarget.ID) (graphtarget.Execution, error)
+	DecodeID       func(graph.EntityID) (graph.Entity, error)
 }
 
 // HCLFunctionFactory constructs a function for one repository and HCL file.
@@ -32,9 +35,24 @@ type HCLFunctionFactory = func(context.Context, *attegit.Repo, reference.Blob) (
 // Scanner executes the compiled detector Sensors and scans repositories for
 // targets and relationships.
 type Scanner interface {
-	// Targets discovers declared and implicit targets across all attached
-	// Sensors for repo.
+	// Targets discovers executable targets across all attached Sensors for repo.
 	Targets(context.Context, *attegit.Repo) ([]graphtarget.ID, error)
+
+	// TargetSelector returns the Sensor-owned selector presentation for target.
+	TargetSelector(graphtarget.ID) (selector.Target, bool)
+
+	// TargetString renders target's canonical selector when its Sensor supports
+	// target presentation.
+	TargetString(graphtarget.ID) (string, bool)
+
+	// TargetMatches reports whether input selects target from relative.
+	TargetMatches(graphtarget.ID, string, string) bool
+
+	// ResolveTarget discovers and resolves one unique target in this Scanner.
+	ResolveTarget(context.Context, *attegit.Repo, string, string) (graphtarget.ID, error)
+
+	// ExecuteTarget returns the command for a discovered target.
+	ExecuteTarget(context.Context, *attegit.Repo, string, graphtarget.ID) (graphtarget.Execution, error)
 
 	// Graph combines the graphs produced by all attached Sensors for repo.
 	// Each option is passed to every Sensor that contributes a graph.
@@ -192,7 +210,18 @@ func (b *Builder) validateSensor(sensor SensorSpec) error {
 	if sensor.Namespace == attehcl.Namespace {
 		return fmt.Errorf("sensor namespace %q is reserved", sensor.Namespace)
 	}
-	if sensor.Graph == nil && sensor.Targets == nil && sensor.DecodeID == nil {
+	targetCapability := sensor.Targets != nil || sensor.TargetSelector != nil || sensor.ExecuteTarget != nil
+	if targetCapability {
+		switch {
+		case sensor.Targets == nil:
+			return fmt.Errorf("sensor %q target capability is missing Targets", sensor.Namespace)
+		case sensor.TargetSelector == nil:
+			return fmt.Errorf("sensor %q target capability is missing TargetSelector", sensor.Namespace)
+		case sensor.ExecuteTarget == nil:
+			return fmt.Errorf("sensor %q target capability is missing ExecuteTarget", sensor.Namespace)
+		}
+	}
+	if sensor.Graph == nil && !targetCapability && sensor.DecodeID == nil {
 		return fmt.Errorf("sensor %q has no capabilities", sensor.Namespace)
 	}
 	if _, exists := b.sensors[sensor.Namespace]; exists {
@@ -286,6 +315,8 @@ func adaptSensor(value Sensor) SensorSpec {
 	}
 	if sensor, ok := value.(TargetSensor); ok {
 		adapted.Targets = sensor.Targets
+		adapted.TargetSelector = sensor.TargetSelector
+		adapted.ExecuteTarget = sensor.ExecuteTarget
 	}
 	if sensor, ok := value.(EntityDecodingSensor); ok {
 		adapted.DecodeID = sensor.DecodeID
@@ -362,9 +393,9 @@ func (s *compiledScanner) Graph(ctx context.Context, repo *attegit.Repo, options
 	return result, nil
 }
 
-// Targets returns all compiled Sensor targets in namespace order.
+// Targets returns all compiled executable targets in namespace order.
 func (s *compiledScanner) Targets(ctx context.Context, repo *attegit.Repo) ([]graphtarget.ID, error) {
-	var targets []graphtarget.ID
+	targets := make([]graphtarget.ID, 0)
 	for _, sensor := range s.sensors {
 		if sensor.Targets == nil {
 			continue
@@ -376,6 +407,105 @@ func (s *compiledScanner) Targets(ctx context.Context, repo *attegit.Repo) ([]gr
 		targets = append(targets, found...)
 	}
 	return targets, nil
+}
+
+// TargetSelector dispatches to the Sensor that owns target's namespace.
+func (s *compiledScanner) TargetSelector(target graphtarget.ID) (selector.Target, bool) {
+	sensor, ok := s.sensorsByName[string(target.Namespace)]
+	if !ok || sensor.TargetSelector == nil {
+		return selector.Target{}, false
+	}
+	return sensor.TargetSelector(target), true
+}
+
+// TargetString renders target's canonical selector using its attached Sensor.
+func (s *compiledScanner) TargetString(target graphtarget.ID) (string, bool) {
+	ts, ok := s.TargetSelector(target)
+	if !ok {
+		return "", false
+	}
+	return ts.String(), true
+}
+
+// TargetMatches reports whether input selects target from relative.
+func (s *compiledScanner) TargetMatches(target graphtarget.ID, input, relative string) bool {
+	ts, ok := s.TargetSelector(target)
+	return ok && ts.Matches(input, relative)
+}
+
+// ResolveTarget discovers and resolves one unique target using this Scanner's
+// attached Sensors for both discovery and selector matching.
+func (s *compiledScanner) ResolveTarget(ctx context.Context, repo *attegit.Repo, input, relative string) (graphtarget.ID, error) {
+	if err := ctx.Err(); err != nil {
+		return graphtarget.ID{}, err
+	}
+	targets, err := s.Targets(ctx, repo)
+	if err != nil {
+		return graphtarget.ID{}, fmt.Errorf("resolve target %q: discover targets: %w", input, err)
+	}
+	type match struct {
+		target   graphtarget.ID
+		selector string
+	}
+	matches := make([]match, 0)
+	for _, target := range targets {
+		if err := ctx.Err(); err != nil {
+			return graphtarget.ID{}, err
+		}
+		ts, ok := s.TargetSelector(target)
+		if !ok {
+			return graphtarget.ID{}, fmt.Errorf("resolve target %q: target %q in namespace %q has no selector capability", input, target.ID, target.Namespace)
+		}
+		if s.TargetMatches(target, input, relative) {
+			matches = append(matches, match{target: target, selector: ts.String()})
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return graphtarget.ID{}, err
+	}
+	sort.Slice(matches, func(i, j int) bool {
+		if matches[i].selector != matches[j].selector {
+			return matches[i].selector < matches[j].selector
+		}
+		return matches[i].target.ID < matches[j].target.ID
+	})
+	switch len(matches) {
+	case 0:
+		return graphtarget.ID{}, &selector.NoMatchError{Input: input}
+	case 1:
+		return matches[0].target, nil
+	default:
+		candidates := make([]selector.AmbiguousCandidate, 0, len(matches))
+		for _, candidate := range matches {
+			candidates = append(candidates, selector.AmbiguousCandidate{
+				TargetID: string(candidate.target.ID),
+				Selector: candidate.selector,
+			})
+		}
+		return graphtarget.ID{}, &selector.AmbiguousError{Input: input, Candidates: candidates}
+	}
+}
+
+// ExecuteTarget dispatches command construction to the Sensor that owns target.
+func (s *compiledScanner) ExecuteTarget(ctx context.Context, repo *attegit.Repo, root string, target graphtarget.ID) (graphtarget.Execution, error) {
+	if err := ctx.Err(); err != nil {
+		return graphtarget.Execution{}, err
+	}
+	sensor, ok := s.sensorsByName[string(target.Namespace)]
+	if !ok {
+		return graphtarget.Execution{}, fmt.Errorf("no Sensor attached for target namespace %q", target.Namespace)
+	}
+	if sensor.ExecuteTarget == nil {
+		return graphtarget.Execution{}, fmt.Errorf("Sensor %q cannot execute targets", target.Namespace)
+	}
+	execution, err := sensor.ExecuteTarget(ctx, repo, root, target)
+	if err != nil {
+		return graphtarget.Execution{}, fmt.Errorf("construct command for target %q: %w", target.ID, err)
+	}
+	if len(execution.Args) == 0 {
+		return graphtarget.Execution{}, fmt.Errorf("construct command for target %q: command has no arguments", target.ID)
+	}
+	return execution, nil
 }
 
 // DecodeID resolves an entity ID using the Sensor attached for its namespace.

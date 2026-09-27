@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 
@@ -9,6 +10,11 @@ import (
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attegittest"
 	"github.com/ghthor/atte/detector/attehcl"
+	"github.com/ghthor/atte/detector/graph"
+	"github.com/ghthor/atte/detector/graphset"
+	"github.com/ghthor/atte/detector/graphtarget"
+	"github.com/ghthor/atte/reference"
+	"github.com/ghthor/atte/reference/selector"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
@@ -209,3 +215,131 @@ func TestExecuteWithOptionsSupportsConcurrentInvocations(t *testing.T) {
 		test.Sprintf("concurrent invocations should use independent repositories: %q and %q", firstResult.stdout, secondResult.stdout),
 	)
 }
+
+func TestBuiltInTargetsUseScannerSelectorAndExecutionCapabilities(t *testing.T) {
+	repository := newExecutionRepository(t, map[string]string{
+		"atte.hcl": strings.TrimLeft(`
+test "unit" {
+  script = "echo hcl"
+}
+`, "\n"),
+		"go.mod":              "module example.com/project\n\ngo 1.23\n",
+		"sample/main.go":      "package sample\n",
+		"sample/main_test.go": "package sample\nimport \"testing\"\nfunc TestSample(t *testing.T) {}\n",
+	})
+	builder, err := detector.NewDefaultBuilder()
+	must.NoError(t, err)
+	scanner := builder.Compile()
+	targets, err := scanner.Targets(t.Context(), repository.repo)
+	must.NoError(t, err)
+	test.EqOp(t, 2, len(targets))
+
+	selectors := make(map[string]struct{}, len(targets))
+	for _, target := range targets {
+		canonical, ok := scanner.TargetString(target)
+		test.True(t, ok, test.Sprintf("built-in target should have a canonical selector: %q", target.ID))
+		selectors[canonical] = struct{}{}
+		execution, err := scanner.ExecuteTarget(t.Context(), repository.repo, repository.root, target)
+		test.NoError(t, err)
+		test.True(t, len(execution.Args) > 0, test.Sprintf("discovered target should have execution arguments: %q", target.ID))
+		switch string(target.Namespace) {
+		case "attehcl":
+			test.EqOp(t, "//atte.hcl#test.unit", canonical)
+			test.True(t, scanner.TargetMatches(target, "unit", ""), test.Sprintf("HCL display name should remain a selector alias"))
+		case "attego":
+			test.EqOp(t, "//sample#go_test", canonical)
+			test.True(t, scanner.TargetMatches(target, "go_test", ""), test.Sprintf("Go test alias should remain supported"))
+		default:
+			test.True(t, false, test.Sprintf("unexpected target namespace %q", target.Namespace))
+		}
+	}
+	test.EqOp(t, 2, len(selectors))
+}
+
+func TestCustomTargetSensorRunsAndRendersThroughScanner(t *testing.T) {
+	repository := newExecutionRepository(t, map[string]string{"go.mod": "module example.com/project\n\ngo 1.23\n"})
+	builder, err := detector.NewDefaultBuilder()
+	must.NoError(t, err)
+	must.NoError(t, builder.AttachSensor(customExecutableSensor{}))
+	scanner := builder.Compile()
+
+	var dryRun bytes.Buffer
+	var stderr bytes.Buffer
+	err = ExecuteWithOptions(t.Context(), []string{"run", "--dry-run", "deploy.release"}, ExecuteOptions{
+		Repository:     repository.repo,
+		RepositoryRoot: repository.root,
+		Detector:       scanner,
+		Out:            &dryRun,
+		Err:            &stderr,
+	})
+	test.NoError(t, err)
+	test.EqOp(t, "", stderr.String())
+	test.StrContains(t, dryRun.String(), "//custom#deploy.release")
+	test.StrContains(t, dryRun.String(), "echo custom-executed")
+
+	var output bytes.Buffer
+	err = ExecuteWithOptions(t.Context(), []string{"run", "deploy.release"}, ExecuteOptions{
+		Repository:     repository.repo,
+		RepositoryRoot: repository.root,
+		Detector:       scanner,
+		Out:            &output,
+		Err:            &stderr,
+	})
+	test.NoError(t, err)
+	test.EqOp(t, "custom-executed\n", output.String())
+
+	var graphOutput bytes.Buffer
+	err = ExecuteWithOptions(t.Context(), []string{"graph", "--run-targets"}, ExecuteOptions{
+		Repository:     repository.repo,
+		RepositoryRoot: repository.root,
+		Detector:       scanner,
+		Out:            &graphOutput,
+		Err:            &stderr,
+	})
+	test.NoError(t, err)
+	test.StrContains(t, graphOutput.String(), "//custom#deploy.release")
+}
+
+type customExecutableSensor struct{}
+
+func (customExecutableSensor) Namespace() string { return "custom" }
+
+func (customExecutableSensor) target() graphtarget.ID {
+	return graphtarget.ID{
+		ID:        "custom:deploy:release",
+		Namespace: "custom",
+		Kind:      "custom:deploy",
+		Path:      "custom",
+		Name:      "release",
+		Aliases:   []string{"deploy.release", "release"},
+	}
+}
+
+func (sensor customExecutableSensor) Targets(context.Context, *attegit.Repo) ([]graphtarget.ID, error) {
+	return []graphtarget.ID{sensor.target()}, nil
+}
+
+func (customExecutableSensor) TargetSelector(target graphtarget.ID) selector.Target {
+	return selector.Target{Path: target.Path, Kind: "deploy", Name: target.Name, Aliases: target.Aliases}
+}
+
+func (customExecutableSensor) ExecuteTarget(_ context.Context, _ *attegit.Repo, root string, _ graphtarget.ID) (graphtarget.Execution, error) {
+	return graphtarget.Execution{Dir: root, Args: []string{"echo", "custom-executed"}}, nil
+}
+
+func (sensor customExecutableSensor) Graph(context.Context, *attegit.Repo, ...graphset.Option) (*graph.Graph, error) {
+	root := attegit.EntityID(reference.Root)
+	target := sensor.target()
+	return graph.New(
+		[]graph.Entity{
+			{ID: root, Kind: attegit.TreeKind},
+			{ID: target.ID, Kind: graph.EntityKind(target.Kind)},
+		},
+		[]graph.Relationship{{From: root, To: target.ID, Kind: attegit.ContainsRelation}},
+	)
+}
+
+var (
+	_ detector.TargetSensor = customExecutableSensor{}
+	_ detector.GraphSensor  = customExecutableSensor{}
+)

@@ -12,6 +12,7 @@ import (
 	"go/parser"
 	"go/token"
 	"path"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -110,20 +111,17 @@ func (Detector) DecodeID(id graph.EntityID) (graph.Entity, error) {
 	return graph.Entity{ID: id, Kind: graph.EntityKind(kind)}, nil
 }
 
-func init() {
-	if err := selector.Register(Namespace, matchSelector, renderSelector); err != nil {
-		panic(err)
-	}
-}
-
-func matchSelector(target graphtarget.ID, identifier string) bool {
-	return selector.Target{Kind: "go_test", Aliases: target.Aliases}.Matches("#"+identifier, "")
-}
-
-func renderSelector(target graphtarget.ID) string {
+func (Detector) TargetSelector(target graphtarget.ID) selector.Target {
 	result := Selector(Target{PackageDir: reference.Tree(target.Path)})
 	result.Aliases = target.Aliases
-	return result.String()
+	return result
+}
+
+func (Detector) ExecuteTarget(_ context.Context, _ *attegit.Repo, root string, target graphtarget.ID) (graphtarget.Execution, error) {
+	return graphtarget.Execution{
+		Dir:  filepath.Join(root, filepath.FromSlash(target.Path)),
+		Args: []string{"go", "test", "-v"},
+	}, nil
 }
 
 func (Detector) Graph(ctx context.Context, repo *attegit.Repo, options ...graphset.Option) (*graph.Graph, error) {

@@ -2,7 +2,7 @@ package attehcl
 
 import (
 	"context"
-	"strings"
+	"fmt"
 
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/graph"
@@ -39,19 +39,14 @@ func (d Detector) DecodeID(id graph.EntityID) (graph.Entity, error) {
 	return graph.Entity{ID: id, Kind: graph.EntityKind(kind)}, nil
 }
 
-func init() {
-	if err := selector.Register(Namespace, matchSelector, renderSelector); err != nil {
-		panic(err)
-	}
-}
-
-func matchSelector(target graphtarget.ID, identifier string) bool {
-	kind := strings.TrimPrefix(target.Kind, Namespace+":")
-	return selector.Target{Kind: kind, Name: target.Name, Index: target.Index, Aliases: target.Aliases}.Matches("#"+identifier, "")
-}
-
-func renderSelector(target graphtarget.ID) string {
-	return Selector(Target{Kind: target.Kind, File: reference.Blob(target.Path), Name: target.Name, Index: target.Index, Aliases: target.Aliases}).String()
+func (Detector) TargetSelector(target graphtarget.ID) selector.Target {
+	return Selector(Target{
+		Kind:    target.Kind,
+		File:    reference.Blob(target.Path),
+		Name:    target.Name,
+		Index:   target.Index,
+		Aliases: target.Aliases,
+	})
 }
 
 func (d Detector) Graph(ctx context.Context, repo *attegit.Repo, options ...graphset.Option) (*graph.Graph, error) {
@@ -59,5 +54,44 @@ func (d Detector) Graph(ctx context.Context, repo *attegit.Repo, options ...grap
 }
 
 func (d Detector) Targets(ctx context.Context, repo *attegit.Repo) ([]graphtarget.ID, error) {
-	return DeclaredTargets(ctx, repo, d.scanner)
+	grouped, err := Targets(ctx, repo, d.scanner)
+	if err != nil {
+		return nil, err
+	}
+	nativeTargets := SortedTargets(grouped)
+	result := make([]graphtarget.ID, 0, len(nativeTargets))
+	for _, target := range nativeTargets {
+		if !target.Runnable() {
+			continue
+		}
+		result = append(result, graphtarget.ID{
+			ID:        target.ID,
+			Namespace: graphtarget.Namespace(Namespace),
+			Kind:      target.Kind,
+			Path:      target.File.String(),
+			Name:      target.DisplayName(),
+			Label:     target.Label,
+			Index:     target.Index,
+			Aliases:   target.Aliases,
+		})
+	}
+	return result, nil
+}
+
+func (d Detector) ExecuteTarget(ctx context.Context, repo *attegit.Repo, root string, target graphtarget.ID) (graphtarget.Execution, error) {
+	grouped, err := Targets(ctx, repo, d.scanner)
+	if err != nil {
+		return graphtarget.Execution{}, err
+	}
+	for _, native := range SortedTargets(grouped) {
+		if native.ID != target.ID {
+			continue
+		}
+		command, err := native.Execution(root)
+		if err != nil {
+			return graphtarget.Execution{}, err
+		}
+		return graphtarget.Execution{Dir: command.Dir, Args: command.Args}, nil
+	}
+	return graphtarget.Execution{}, fmt.Errorf("HCL target %q was not discovered", target.ID)
 }

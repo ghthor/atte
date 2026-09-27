@@ -334,10 +334,10 @@ func main() { fmt.Println(must.NoError) }
 	test.StrNotContains(t, with, "external import fmt")
 }
 
-func TestIsGraphChildKind(t *testing.T) {
+func TestIsGraphChild(t *testing.T) {
 	childKind := func(kind string, want bool) {
 		t.Helper()
-		test.EqOp(t, want, isGraphChildKind(kind))
+		test.EqOp(t, want, isGraphChild(kind))
 	}
 
 	childKind(attego.PackageKind, true)
@@ -349,6 +349,38 @@ func TestIsGraphChildKind(t *testing.T) {
 	childKind(attegit.TreeKind, false)
 	childKind(attegit.BlobKind, false)
 	childKind("unknown", false)
+}
+
+func TestIsRunTarget(t *testing.T) {
+	tests := []struct {
+		name              string
+		includeRunTargets bool
+		targetSelector    string
+		want              bool
+	}{
+		{
+			name:              "included discovered target",
+			includeRunTargets: true,
+			targetSelector:    "//custom#deploy.release",
+			want:              true,
+		},
+		{
+			name:              "run targets disabled",
+			includeRunTargets: false,
+			targetSelector:    "//custom#deploy.release",
+			want:              false,
+		},
+		{
+			name:              "missing selector",
+			includeRunTargets: true,
+			want:              false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			test.EqOp(t, tt.want, isRunTarget(tt.includeRunTargets, tt.targetSelector))
+		})
+	}
 }
 
 func repoWithFiles(t *testing.T, files map[string]string) *attegit.Repo {

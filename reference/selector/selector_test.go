@@ -12,7 +12,10 @@ func TestResolutionErrors(t *testing.T) {
 	var nilNoMatch *NoMatchError
 	test.EqOp(t, "selector matched no targets", nilNoMatch.Error())
 
-	ambiguous := &AmbiguousError{Input: "test", Candidates: []string{"//one#test", "//two#test"}}
+	ambiguous := &AmbiguousError{
+		Input:      "test",
+		Candidates: []AmbiguousCandidate{{TargetID: "one:test", Selector: "//one#test"}, {TargetID: "two:test", Selector: "//two#test"}},
+	}
 	test.EqOp(t, `selector "test" is ambiguous`, ambiguous.Error())
 	var nilAmbiguous *AmbiguousError
 	test.EqOp(t, "selector is ambiguous", nilAmbiguous.Error())
@@ -33,13 +36,13 @@ func TestParseKeepsIdentifierOpaque(t *testing.T) {
 }
 
 func TestResolveRelativePath(t *testing.T) {
-	got, err := Resolve("../atte.hcl#test.go", "detector/attego")
+	got, err := ResolveRelative("../atte.hcl#test.go", "detector/attego")
 	test.NoError(t, err)
 	test.EqOp(t, "detector/atte.hcl", got.Path)
 }
 
 func TestResolveRejectsRepositoryEscape(t *testing.T) {
-	_, err := Resolve("../../../atte.hcl#test.go", "detector/attego")
+	_, err := ResolveRelative("../../../atte.hcl#test.go", "detector/attego")
 	test.ErrorContains(t, err, "escapes repository root")
 }
 

@@ -2,6 +2,15 @@
 
 Owner: Will Owens <ghthor@gmail.com>
 
+> **Current implementation note (2026-09):** The process-global `reference/selector.Mapping`
+> described in this historical record has been removed. Selector presentation,
+> matching, resolution, and executable command construction are capabilities of
+> the compiled `detector.Scanner` and its attached `TargetSensor`s. The shared
+> selector package now owns only selector values and pure syntax/path helpers;
+> see `reference/selector/refactor.md` for the implementation contract. The
+> earlier mapping-specific design below records the original decision, not the
+> current API.
+
 ## Overview
 
 ### Problem Statement

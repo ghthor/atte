@@ -4,17 +4,15 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"unicode"
 
 	"github.com/ghthor/atte/cmd/runcomp"
+	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
-	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/attehcl"
-	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphtarget"
 	"github.com/ghthor/atte/reference/selector"
 	fzf "github.com/junegunn/fzf/src"
@@ -27,27 +25,33 @@ type runOptions struct {
 }
 
 type runTarget struct {
-	selector string
-	kind     string
-	path     string
-	name     string
-	index    int
-	aliases  []string
-	label    string
-	dir      string
-	argv     []string
+	id           graphtarget.ID
+	selector     string
+	presentation selector.Target
+	label        string
+	dir          string
+	argv         []string
+}
+
+type loadedRunTargets struct {
+	root     string
+	cwd      string
+	relative string
+	scanner  detector.Scanner
+	targets  []runTarget
 }
 
 func newRunCommand() *cobra.Command {
 	options := &runOptions{}
 	runCmd := &cobra.Command{
 		Use:               "run [selector]",
-		Short:             "Run test, codegen, and lint targets from the repository",
+		Short:             "Run targets discovered in the repository",
 		Args:              cobra.MaximumNArgs(1),
 		ValidArgsFunction: runCmdValidArgs,
 		Long: strings.TrimLeftFunc(`
-The run command executes scripts declared in atte.hcl test, codegen, and lint
-blocks, or runs go test -v for a repository Go package.
+The run command executes runnable targets discovered by attached Sensors. The
+built-in Sensors provide scripts declared in atte.hcl and go test -v for Go
+packages.
 
 Targets may be selected with a short alias, a path-qualified selector, or a
 repository-root-qualified selector:
@@ -84,31 +88,45 @@ atte completion --help for shell completion installation instructions.
 	return runCmd
 }
 
-func loadRunTargets(ctx context.Context) (root, cwd, relative string, targets []runTarget, err error) {
-	cwd, err = commandWorkingDirectory(ctx)
+func loadRunTargets(ctx context.Context) (loadedRunTargets, error) {
+	cwd, err := commandWorkingDirectory(ctx)
 	if err != nil {
-		err = fmt.Errorf("get working directory: %w", err)
-		return
+		return loadedRunTargets{}, fmt.Errorf("get working directory: %w", err)
 	}
-	root, relative, err = repositoryContext(ctx, cwd)
+	root, relative, err := repositoryContext(ctx, cwd)
 	if err != nil {
-		return
+		return loadedRunTargets{}, err
 	}
 	repo, err := openRepository(ctx, root, "HEAD", attegit.WithWorkingTree())
 	if err != nil {
-		err = fmt.Errorf("open repository: %w", err)
-		return
+		return loadedRunTargets{}, fmt.Errorf("open repository: %w", err)
 	}
-	targets, err = runTargets(ctx, repo, root, cwd, relative)
-	return
+	scanner, err := scannerForContext(ctx)
+	if err != nil {
+		return loadedRunTargets{}, err
+	}
+	targets, err := runTargets(ctx, repo, root, cwd, relative, scanner)
+	if err != nil {
+		return loadedRunTargets{}, err
+	}
+	return loadedRunTargets{
+		root:     root,
+		cwd:      cwd,
+		relative: relative,
+		scanner:  scanner,
+		targets:  targets,
+	}, nil
 }
 
 func runCommand(cmd *cobra.Command, args []string, options runOptions) error {
 	ctx := cmd.Context()
-	_, _, relative, targets, err := loadRunTargets(ctx)
+	loaded, err := loadRunTargets(ctx)
 	if err != nil {
 		return err
 	}
+	relative := loaded.relative
+	scanner := loaded.scanner
+	targets := loaded.targets
 	if options.list {
 		for _, target := range targets {
 			if _, err := fmt.Fprintln(cmd.OutOrStdout(), target.selector); err != nil {
@@ -121,12 +139,12 @@ func runCommand(cmd *cobra.Command, args []string, options runOptions) error {
 	if len(args) == 1 {
 		input = args[0]
 	} else {
-		input, err = selectRunTarget(cmd, targets)
+		input, err = selectRunTarget(targets)
 		if err != nil {
 			return err
 		}
 	}
-	target, err := resolveRunTargetAt(ctx, input, targets, relative)
+	target, err := resolveRunTargetAt(ctx, scanner, input, targets, relative)
 	if err != nil {
 		return err
 	}
@@ -164,12 +182,12 @@ func runCmdValidArgs(cmd *cobra.Command, args []string, toComplete string) ([]st
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 
-	root, cwd, _, targets, err := loadRunTargets(cmd.Context())
+	loaded, err := loadRunTargets(cmd.Context())
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveError
 	}
 
-	return runCmdValidArgsFromTargets(args, toComplete, root, cwd, targets)
+	return runCmdValidArgsFromTargets(args, toComplete, loaded.root, loaded.cwd, loaded.targets)
 }
 
 func runCmdValidArgsFromTargets(args []string, toComplete, root, cwd string, targets []runTarget) ([]string, cobra.ShellCompDirective) {
@@ -188,74 +206,45 @@ func runCmdValidArgsFromTargets(args []string, toComplete, root, cwd string, tar
 	return matches, cobra.ShellCompDirectiveNoFileComp
 }
 
-func runTargets(ctx context.Context, repo *attegit.Repo, root, cwd, relative string) ([]runTarget, error) {
-	builtIns, err := scannerForContext(ctx)
+func runTargets(ctx context.Context, repo *attegit.Repo, root, cwd, relative string, scanner detector.Scanner) ([]runTarget, error) {
+	discovered, err := scanner.Targets(ctx, repo)
 	if err != nil {
 		return nil, err
 	}
-	registeredTargets, err := builtIns.Targets(ctx, repo)
-	if err != nil {
-		return nil, err
-	}
-	hclTargets, err := attehcl.Targets(ctx, repo, builtIns)
-	if err != nil {
-		return nil, err
-	}
-	hclByID := make(map[graph.EntityID]attehcl.Target, len(hclTargets))
-	for _, target := range attehcl.SortedTargets(hclTargets) {
-		hclByID[target.ID] = target
-	}
-	targets := make([]runTarget, 0, len(registeredTargets))
-	for _, target := range registeredTargets {
-		canonical, ok := selector.String(target)
+	targets := make([]runTarget, 0, len(discovered))
+	for _, id := range discovered {
+		presentation, ok := scanner.TargetSelector(id)
 		if !ok {
-			continue
+			return nil, fmt.Errorf("target %q in namespace %q has no selector capability", id.ID, id.Namespace)
 		}
-		switch target.Namespace {
-		case attehcl.Namespace:
-			native, ok := hclByID[target.ID]
-			if !ok || !native.Runnable() {
-				continue
-			}
-			command, err := native.Execution(root)
-			if err != nil {
-				return nil, err
-			}
-			targets = append(targets, runTarget{
-				selector: canonical,
-				kind:     native.Kind,
-				path:     native.File.String(),
-				name:     native.DisplayName(),
-				index:    native.Index,
-				aliases:  native.Aliases,
-				label:    native.Label,
-				dir:      command.Dir,
-				argv:     command.Args,
-			})
-		case attego.Namespace:
-			dir := filepath.Join(root, filepath.FromSlash(target.Path))
-			if target.Path == relative {
-				// Keep the caller's working-directory path for the convenience target
-				// while preserving the repository-wide list.
-				dir = cwd
-			}
-			targets = append(targets, runTarget{
-				selector: canonical,
-				kind:     target.Kind,
-				path:     target.Path,
-				name:     target.Name,
-				index:    target.Index,
-				aliases:  target.Aliases,
-				dir:      dir,
-				argv:     []string{"go", "test", "-v"},
-			})
+		canonical, ok := scanner.TargetString(id)
+		if !ok {
+			return nil, fmt.Errorf("target %q in namespace %q has no canonical selector", id.ID, id.Namespace)
 		}
+		execution, err := scanner.ExecuteTarget(ctx, repo, root, id)
+		if err != nil {
+			return nil, err
+		}
+		dir := execution.Dir
+		if selector.ContainingDir(presentation.Path) == relative {
+			// Preserve the caller's working-directory path for the local target
+			// while retaining repository-wide target discovery.
+			dir = cwd
+		}
+		targets = append(targets, runTarget{
+			id:           id,
+			selector:     canonical,
+			presentation: presentation,
+			label:        id.Label,
+			dir:          dir,
+			argv:         execution.Args,
+		})
 	}
 	sort.Slice(targets, func(i, j int) bool { return targets[i].selector < targets[j].selector })
 	return targets, nil
 }
 
-func selectRunTarget(cmd *cobra.Command, targets []runTarget) (string, error) {
+func selectRunTarget(targets []runTarget) (string, error) {
 	if len(targets) == 0 {
 		return "", fmt.Errorf("no runnable targets found")
 	}
@@ -293,21 +282,28 @@ func selectRunTarget(cmd *cobra.Command, targets []runTarget) (string, error) {
 	}
 }
 
-func resolveRunTargetAt(ctx context.Context, input string, targets []runTarget, relative string) (runTarget, error) {
+func resolveRunTargetAt(ctx context.Context, scanner detector.Scanner, input string, targets []runTarget, relative string) (runTarget, error) {
 	if err := ctx.Err(); err != nil {
 		return runTarget{}, err
 	}
+	exact := make([]runTarget, 0)
 	for _, target := range targets {
 		if target.selector == input {
-			return target, nil
+			exact = append(exact, target)
 		}
+	}
+	if len(exact) == 1 {
+		return exact[0], nil
+	}
+	if len(exact) > 1 {
+		return runTarget{}, ambiguousRunTargetError(input, exact)
 	}
 	candidates := make([]runTarget, 0)
 	for _, target := range targets {
 		if err := ctx.Err(); err != nil {
 			return runTarget{}, err
 		}
-		if matchesRunTargetAt(input, target, relative) {
+		if matchesRunTargetAt(scanner, input, target, relative) {
 			candidates = append(candidates, target)
 		}
 	}
@@ -383,37 +379,32 @@ func noRunTargetError(input string) error {
 }
 
 func ambiguousRunTargetError(input string, candidates []runTarget) error {
-	ids := make([]string, len(candidates))
-	for i := range candidates {
-		ids[i] = candidates[i].selector
+	ordered := append([]runTarget(nil), candidates...)
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].selector != ordered[j].selector {
+			return ordered[i].selector < ordered[j].selector
+		}
+		return ordered[i].id.ID < ordered[j].id.ID
+	})
+	structured := make([]selector.AmbiguousCandidate, 0, len(ordered))
+	commands := make([]string, 0, len(ordered))
+	for _, candidate := range ordered {
+		structured = append(structured, selector.AmbiguousCandidate{
+			TargetID: string(candidate.id.ID),
+			Selector: candidate.selector,
+		})
+		commands = append(commands, "atte run "+candidate.selector)
 	}
-	sort.Strings(ids)
-	commands := make([]string, len(ids))
-	for i, id := range ids {
-		commands[i] = "atte run " + id
-	}
-	return fmt.Errorf("%w; possible commands:\n%s", &selector.AmbiguousError{Input: input, Candidates: ids}, strings.Join(commands, "\n"))
+	return fmt.Errorf("%w; possible commands:\n%s", &selector.AmbiguousError{Input: input, Candidates: structured}, strings.Join(commands, "\n"))
 }
 
 func runTargetPaths(target runTarget) (string, string) {
-	parsed, err := selector.Parse(target.selector)
-	if err != nil {
-		return "", ""
-	}
-	return parsed.Path, parsed.Tree().String()
+	path := target.presentation.Path
+	return path, selector.ContainingDir(path)
 }
 
-func matchesRunTargetAt(input string, target runTarget, relative string) bool {
-	canonicalPath, _ := runTargetPaths(target)
-	namespace, _, _ := strings.Cut(target.kind, ":")
-	return selector.Matches(graphtarget.ID{
-		Namespace: graphtarget.Namespace(namespace),
-		Kind:      target.kind,
-		Path:      canonicalPath,
-		Name:      target.name,
-		Index:     target.index,
-		Aliases:   target.aliases,
-	}, input, relative)
+func matchesRunTargetAt(scanner detector.Scanner, input string, target runTarget, relative string) bool {
+	return scanner.TargetMatches(target.id, input, relative)
 }
 
 func matchesRunTargetLabel(input string, target runTarget) bool {

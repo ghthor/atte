@@ -6,24 +6,61 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ghthor/atte/detector/attego"
-	"github.com/ghthor/atte/detector/attehcl"
+	"github.com/ghthor/atte/detector"
+	"github.com/ghthor/atte/detector/attegit"
+	"github.com/ghthor/atte/detector/graph"
+	"github.com/ghthor/atte/detector/graphtarget"
 	"github.com/ghthor/atte/reference/selector"
 	"github.com/shoenig/test"
+	"github.com/shoenig/test/must"
 	"github.com/spf13/cobra"
 )
 
-func TestMatchesRunTarget(t *testing.T) {
-	target := runTarget{
-		selector: "//atte.hcl#test.go",
-		kind:     attehcl.TestKind,
-		path:     "atte.hcl",
-		name:     "go",
-		index:    0,
+func runTestTarget(presentation selector.Target, label string) runTarget {
+	canonical := presentation.String()
+	id := graphtarget.ID{
+		ID:        graph.EntityID(canonical),
+		Namespace: "fixture",
+		Kind:      presentation.Kind,
+		Path:      presentation.Path,
+		Name:      presentation.Name,
+		Label:     label,
+		Index:     presentation.Index,
+		Aliases:   presentation.Aliases,
 	}
-	match := func(selector string, want bool) {
+	return runTarget{id: id, selector: canonical, presentation: presentation, label: label}
+}
+
+func runTestScanner(t *testing.T, targets []runTarget) detector.Scanner {
+	t.Helper()
+	ids := make([]graphtarget.ID, 0, len(targets))
+	presentations := make(map[graph.EntityID]selector.Target, len(targets))
+	for _, target := range targets {
+		ids = append(ids, target.id)
+		presentations[target.id.ID] = target.presentation
+	}
+	builder := detector.NewBuilder()
+	must.NoError(t, builder.Attach(detector.SensorSpec{
+		Namespace: "fixture",
+		Targets: func(context.Context, *attegit.Repo) ([]graphtarget.ID, error) {
+			return ids, nil
+		},
+		TargetSelector: func(target graphtarget.ID) selector.Target {
+			return presentations[target.ID]
+		},
+		ExecuteTarget: func(context.Context, *attegit.Repo, string, graphtarget.ID) (graphtarget.Execution, error) {
+			return graphtarget.Execution{Args: []string{"true"}}, nil
+		},
+	}))
+	return builder.Compile()
+}
+
+func TestMatchesRunTarget(t *testing.T) {
+	target := runTestTarget(selector.HCL("atte.hcl", "test", "go", 0), "")
+	scanner := runTestScanner(t, []runTarget{target})
+	match := func(input string, want bool) {
 		t.Helper()
-		test.EqOp(t, want, matchesRunTargetAt(selector, target, ""))
+		test.EqOp(t, want, matchesRunTargetAt(scanner, input, target, ""))
 	}
 
 	match("//atte.hcl#test.go", true)
@@ -40,21 +77,21 @@ func TestMatchesRunTarget(t *testing.T) {
 }
 
 func TestMatchesRunTargetAt(t *testing.T) {
-	target := runTarget{
-		selector: "//detector/atte.hcl#test.go",
-		kind:     attehcl.TestKind,
-		path:     "detector/atte.hcl",
-		name:     "go",
-		index:    0,
-	}
-	match := func(selector, relative string, want bool) {
+	hclTarget := runTestTarget(selector.HCL("detector/atte.hcl", "test", "go", 0), "")
+	goTarget := runTestTarget(selector.GoTest("detector/attego"), "")
+	targets := []runTarget{hclTarget, goTarget}
+	scanner := runTestScanner(t, targets)
+	match := func(input, relative string, want bool) {
 		t.Helper()
-		test.EqOp(t, want, matchesRunTargetAt(selector, target, relative))
+		test.EqOp(t, want, matchesRunTargetAt(scanner, input, hclTarget, relative))
 	}
 
 	match("atte.hcl#test.go", "detector", true)
-	goTarget := runTarget{selector: "//detector/attego#go_test", kind: attego.PackageTestKind, path: "detector/attego", name: "go_test"}
-	test.True(t, matchesRunTargetAt("attego#go_test", goTarget, "detector"), test.Sprintf("relative package selector should match from the current directory"))
+	test.True(
+		t,
+		matchesRunTargetAt(scanner, "attego#go_test", goTarget, "detector"),
+		test.Sprintf("relative package selector should match from the current directory"),
+	)
 	match("../atte.hcl#test.go", "detector", false)
 	match("..#test.go", "cmd", false)
 	match("detector/atte.hcl#test.go", "", true)
@@ -64,7 +101,7 @@ func TestMatchesRunTargetAt(t *testing.T) {
 }
 
 func TestRunTargetPaths(t *testing.T) {
-	target := runTarget{selector: "//detector/atte.hcl#test.go"}
+	target := runTestTarget(selector.HCL("detector/atte.hcl", "test", "go", 0), "")
 	canonicalPath, canonicalDir := runTargetPaths(target)
 	test.EqOp(t, "detector/atte.hcl", canonicalPath)
 	test.EqOp(t, "detector", canonicalDir)
@@ -72,10 +109,10 @@ func TestRunTargetPaths(t *testing.T) {
 
 func TestRunCmdValidArgs(t *testing.T) {
 	targets := []runTarget{
-		{selector: "//atte.hcl#test.go", kind: attehcl.TestKind, path: "atte.hcl", name: "go", index: 0},
-		{selector: "//detector/atte.hcl#test.py", kind: attehcl.TestKind, path: "detector/atte.hcl", name: "py", index: 0},
-		{selector: "//detector/attego#go_test", kind: attego.PackageTestKind, path: "detector/attego", name: "go_test"},
-		{selector: "//reference#go_test", kind: attego.PackageTestKind, path: "reference", name: "go_test"},
+		runTestTarget(selector.HCL("atte.hcl", "test", "go", 0), ""),
+		runTestTarget(selector.HCL("detector/atte.hcl", "test", "py", 0), ""),
+		runTestTarget(selector.GoTest("detector/attego"), ""),
+		runTestTarget(selector.GoTest("reference"), ""),
 	}
 	repoRoot := filepath.FromSlash("/repo")
 	complete := func(relative, prefix string, want []string) {
@@ -105,38 +142,43 @@ func TestRunCmdValidArgs(t *testing.T) {
 
 func TestResolveRunTargetTypedErrors(t *testing.T) {
 	targets := []runTarget{
-		{selector: "//one/atte.hcl#test.go", kind: attehcl.TestKind, path: "one/atte.hcl", name: "go", index: 0},
-		{selector: "//two/atte.hcl#test.go", kind: attehcl.TestKind, path: "two/atte.hcl", name: "go", index: 0},
+		runTestTarget(selector.HCL("one/atte.hcl", "test", "go", 0), ""),
+		runTestTarget(selector.HCL("two/atte.hcl", "test", "go", 0), ""),
 	}
+	scanner := runTestScanner(t, targets)
 
-	_, err := resolveRunTargetAt(t.Context(), "missing", targets, "")
+	_, err := resolveRunTargetAt(t.Context(), scanner, "missing", targets, "")
 	var noMatch *selector.NoMatchError
 	test.True(t, errors.As(err, &noMatch), test.Sprintf("missing targets should return a selector no-match error"))
 	test.EqOp(t, "missing", noMatch.Input)
 
-	_, err = resolveRunTargetAt(t.Context(), "test", targets, "")
+	_, err = resolveRunTargetAt(t.Context(), scanner, "test", targets, "")
 	var ambiguous *selector.AmbiguousError
 	test.True(t, errors.As(err, &ambiguous), test.Sprintf("ambiguous targets should return a selector ambiguity error"))
-	test.SliceEqOp(t, []string{"//one/atte.hcl#test.go", "//two/atte.hcl#test.go"}, ambiguous.Candidates)
+	test.SliceEqOp(t, []selector.AmbiguousCandidate{
+		{TargetID: "//one/atte.hcl#test.go", Selector: "//one/atte.hcl#test.go"},
+		{TargetID: "//two/atte.hcl#test.go", Selector: "//two/atte.hcl#test.go"},
+	}, ambiguous.Candidates)
 }
 
 func TestResolveRunTargetCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	_, err := resolveRunTargetAt(ctx, "missing", nil, "")
+	_, err := resolveRunTargetAt(ctx, runTestScanner(t, nil), "missing", nil, "")
 	test.EqOp(t, context.Canceled, err)
 }
 
 func TestResolveRunTarget(t *testing.T) {
 	targets := []runTarget{
-		{selector: "//atte.hcl#test.go", kind: attehcl.TestKind, path: "atte.hcl", name: "go", index: 0},
-		{selector: "//atte.hcl#test.py", kind: attehcl.TestKind, path: "atte.hcl", name: "py", index: 1},
-		{selector: "//atte.hcl#test.2", kind: attehcl.TestKind, path: "atte.hcl", name: "2", index: 2},
+		runTestTarget(selector.HCL("atte.hcl", "test", "go", 0), ""),
+		runTestTarget(selector.HCL("atte.hcl", "test", "py", 1), ""),
+		runTestTarget(selector.HCL("atte.hcl", "test", "2", 2), ""),
 	}
-	resolve := func(selector, relative string, targetList []runTarget, want string) {
+	resolve := func(input, relative string, targetList []runTarget, want string) {
 		t.Helper()
-		resolved, err := resolveRunTargetAt(t.Context(), selector, targetList, relative)
+		scanner := runTestScanner(t, targetList)
+		resolved, err := resolveRunTargetAt(t.Context(), scanner, input, targetList, relative)
 		test.NoError(t, err)
 		test.EqOp(t, want, resolved.selector)
 	}
@@ -147,83 +189,95 @@ func TestResolveRunTarget(t *testing.T) {
 	resolve("test.1", "", targets, "//atte.hcl#test.py")
 
 	relativeTargets := []runTarget{
-		{selector: "//#test", kind: attehcl.TestKind, path: "atte.hcl", name: "", index: 0},
-		{selector: "//detector/atte.hcl#test.go", kind: attehcl.TestKind, path: "detector/atte.hcl", name: "go", index: 0},
+		runTestTarget(selector.HCL("atte.hcl", "test", "", 0), ""),
+		runTestTarget(selector.HCL("detector/atte.hcl", "test", "go", 0), ""),
 	}
-	resolve("..#test", "detector", relativeTargets, "//#test")
+	resolve("..#test", "detector", relativeTargets, "//atte.hcl#test")
 	resolve("../atte.hcl#test.go", "detector/attego", relativeTargets, "//detector/atte.hcl#test.go")
 
-	rootLabeledTargets := []runTarget{{selector: "//atte.hcl#test.go", kind: attehcl.TestKind, path: "atte.hcl", name: "go", index: 0}}
+	rootLabeledTargets := []runTarget{runTestTarget(selector.HCL("atte.hcl", "test", "go", 0), "nightly")}
 	resolve("..#test", "cmd", rootLabeledTargets, "//atte.hcl#test.go")
 	resolve("..#test.go", "cmd", rootLabeledTargets, "//atte.hcl#test.go")
 
-	goTargets := []runTarget{{selector: "//detector/attego#go_test", kind: attego.PackageTestKind, path: "detector/attego", name: "go_test"}}
+	goTargets := []runTarget{runTestTarget(selector.GoTest("detector/attego"), "")}
 	resolve("../detector/attego#go_test", "cmd", goTargets, "//detector/attego#go_test")
 
 	t.Run("local alias", func(t *testing.T) {
 		localTargets := []runTarget{
-			{selector: "//cmd#go_test", kind: attego.PackageTestKind, path: "cmd", name: "go_test"},
-			{selector: "//reference#go_test", kind: attego.PackageTestKind, path: "reference", name: "go_test"},
-			{selector: "//reference/selector#go_test", kind: attego.PackageTestKind, path: "reference/selector", name: "go_test"},
+			runTestTarget(selector.GoTest("cmd"), ""),
+			runTestTarget(selector.GoTest("reference"), ""),
+			runTestTarget(selector.GoTest("reference/selector"), ""),
 		}
-		resolved, err := resolveRunTargetAt(t.Context(), "go_test", localTargets, "reference")
+		scanner := runTestScanner(t, localTargets)
+		resolved, err := resolveRunTargetAt(t.Context(), scanner, "go_test", localTargets, "reference")
 		test.NoError(t, err)
 		test.EqOp(t, "//reference#go_test", resolved.selector)
 	})
 
 	t.Run("local descendant fallback", func(t *testing.T) {
 		localTargets := []runTarget{
-			{selector: "//outside#go_test", kind: attego.PackageTestKind, path: "outside", name: "go_test"},
-			{selector: "//reference/selector#go_test", kind: attego.PackageTestKind, path: "reference/selector", name: "go_test"},
+			runTestTarget(selector.GoTest("outside"), ""),
+			runTestTarget(selector.GoTest("reference/selector"), ""),
 		}
-		resolved, err := resolveRunTargetAt(t.Context(), "go_test", localTargets, "reference")
+		scanner := runTestScanner(t, localTargets)
+		resolved, err := resolveRunTargetAt(t.Context(), scanner, "go_test", localTargets, "reference")
 		test.NoError(t, err)
 		test.EqOp(t, "//reference/selector#go_test", resolved.selector)
 	})
+
 	t.Run("HCL label fallback", func(t *testing.T) {
-		labelTarget := runTarget{
-			selector: "//atte.hcl#test.go",
-			kind:     attehcl.TestKind,
-			path:     "atte.hcl",
-			name:     "go",
-			label:    "nightly",
-		}
-		resolved, err := resolveRunTargetAt(t.Context(), "nightly", []runTarget{labelTarget}, "")
+		labelTarget := runTestTarget(selector.HCL("atte.hcl", "test", "go", 0), "nightly")
+		targets := []runTarget{labelTarget}
+		scanner := runTestScanner(t, targets)
+		resolved, err := resolveRunTargetAt(t.Context(), scanner, "nightly", targets, "")
 		test.NoError(t, err)
 		test.EqOp(t, labelTarget.selector, resolved.selector)
 
-		_, err = resolveRunTargetAt(t.Context(), "atte.hcl#nightly", []runTarget{labelTarget}, "")
+		_, err = resolveRunTargetAt(t.Context(), scanner, "atte.hcl#nightly", targets, "")
 		test.ErrorContains(t, err, "not found")
 	})
+
 	t.Run("selector match precedes label fallback", func(t *testing.T) {
-		labelTarget := runTarget{
-			selector: "//atte.hcl#test.go",
-			kind:     attehcl.TestKind,
-			path:     "atte.hcl",
-			name:     "go",
-			label:    "nightly",
-		}
-		selectorTarget := runTarget{
-			selector: "//reference/selector#go_test",
-			kind:     attego.PackageTestKind,
-			path:     "reference/selector",
-			name:     "go_test",
-			aliases:  []string{"nightly"},
-		}
-		resolved, err := resolveRunTargetAt(t.Context(), "nightly", []runTarget{labelTarget, selectorTarget}, "")
+		labelTarget := runTestTarget(selector.HCL("atte.hcl", "test", "go", 0), "nightly")
+		selectorTargetPresentation := selector.GoTest("reference/selector")
+		selectorTargetPresentation.Aliases = []string{"nightly"}
+		selectorTarget := runTestTarget(selectorTargetPresentation, "")
+		targets := []runTarget{labelTarget, selectorTarget}
+		scanner := runTestScanner(t, targets)
+		resolved, err := resolveRunTargetAt(t.Context(), scanner, "nightly", targets, "")
 		test.NoError(t, err)
 		test.EqOp(t, selectorTarget.selector, resolved.selector)
 	})
+
+	t.Run("duplicate canonical selector", func(t *testing.T) {
+		first := runTestTarget(selector.GoTest("same"), "")
+		second := runTestTarget(selector.GoTest("same"), "")
+		first.id.ID = "fixture:first"
+		second.id.ID = "fixture:second"
+		duplicates := []runTarget{second, first}
+		scanner := runTestScanner(t, duplicates)
+		_, err := resolveRunTargetAt(t.Context(), scanner, first.selector, duplicates, "")
+		var ambiguous *selector.AmbiguousError
+		test.True(t, errors.As(err, &ambiguous), test.Sprintf("duplicate canonical selectors should not choose an arbitrary target"))
+		test.SliceEqOp(t, []selector.AmbiguousCandidate{
+			{TargetID: "fixture:first", Selector: first.selector},
+			{TargetID: "fixture:second", Selector: first.selector},
+		}, ambiguous.Candidates)
+	})
+
 	t.Run("ambiguity", func(t *testing.T) {
-		_, err := resolveRunTargetAt(t.Context(), "test", targets, "")
+		scanner := runTestScanner(t, targets)
+		_, err := resolveRunTargetAt(t.Context(), scanner, "test", targets, "")
 		test.Error(t, err)
 		test.EqOp(t, "selector \"test\" is ambiguous; possible commands:\n"+
 			"atte run //atte.hcl#test.2\n"+
 			"atte run //atte.hcl#test.go\n"+
 			"atte run //atte.hcl#test.py", err.Error())
 	})
+
 	t.Run("missing target", func(t *testing.T) {
-		_, err := resolveRunTargetAt(t.Context(), "missing", targets, "")
+		scanner := runTestScanner(t, targets)
+		_, err := resolveRunTargetAt(t.Context(), scanner, "missing", targets, "")
 		test.Error(t, err)
 		test.StrContains(t, err.Error(), "not found")
 	})

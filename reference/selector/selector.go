@@ -1,4 +1,5 @@
-// Package selector defines selectors for runnable repository targets.
+// Package selector defines shared selector values and pure syntax/path helpers
+// for Sensors.
 package selector
 
 import (
@@ -31,10 +32,16 @@ func (e *NoMatchError) Error() string {
 	return fmt.Sprintf("selector %q matched no targets", e.Input)
 }
 
+// AmbiguousCandidate identifies one target matched by an ambiguous selector.
+type AmbiguousCandidate struct {
+	TargetID string // Detector-neutral target identity.
+	Selector string // Canonical user-facing selector.
+}
+
 // AmbiguousError reports that a selector matched more than one target.
 type AmbiguousError struct {
 	Input      string
-	Candidates []string
+	Candidates []AmbiguousCandidate
 }
 
 func (e *AmbiguousError) Error() string {
@@ -92,9 +99,9 @@ func (s Selector) HCL() bool {
 	return filepath.Base(s.Path) == HclFilename
 }
 
-// Resolve resolves a selector path against a repository-relative directory.
+// ResolveRelative resolves a selector path against a repository-relative directory.
 // A // path is rooted at the repository; other paths are relative to relative.
-func Resolve(raw, relative string) (Selector, error) {
+func ResolveRelative(raw, relative string) (Selector, error) {
 	pathPart, identifier, err := split(raw)
 	if err != nil {
 		return Selector{}, err

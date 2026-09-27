@@ -20,7 +20,6 @@ import (
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphset"
 	"github.com/ghthor/atte/reference"
-	"github.com/ghthor/atte/reference/selector"
 	"github.com/spf13/cobra"
 	"github.com/xlab/treeprint"
 )
@@ -154,7 +153,7 @@ func graphRunTargetSelectors(ctx context.Context, repo *attegit.Repo) (map[graph
 		return nil, err
 	}
 	for _, target := range targets {
-		value, ok := selector.String(target)
+		value, ok := detector.TargetString(target)
 		if ok {
 			selectors[target.ID] = value
 		}
@@ -201,7 +200,7 @@ func isHCLTargetKind(kind string) bool {
 	return strings.HasPrefix(kind, attehcl.Namespace+":")
 }
 
-func isGraphChildKind(kind string) bool {
+func isGraphChild(kind string) bool {
 	if isHCLTargetKind(kind) {
 		return true
 	}
@@ -219,6 +218,11 @@ func graphHCLTargetLabel(id graph.EntityID, detector detector.Scanner) (string, 
 		return "", fmt.Errorf("decode HCL entity %q: %w", id, err)
 	}
 	return strings.TrimPrefix(kind, attehcl.Namespace+":") + " " + string(id), nil
+}
+
+// isRunTarget reports whether a discovered target belongs in run-target graph output.
+func isRunTarget(includeRunTargets bool, targetSelector string) bool {
+	return includeRunTargets && targetSelector != ""
 }
 
 func addGraphChildren(
@@ -251,7 +255,8 @@ func addGraphChildren(
 			switch {
 			case relation.To == parentID:
 				child = id
-			case id == parentID && isGraphChildKind(string(g.Entities[relation.To].Kind)):
+			case id == parentID && (isGraphChild(string(g.Entities[relation.To].Kind)) ||
+				isRunTarget(options.IncludeRunTargets, selectors[relation.To])):
 				child = relation.To
 			default:
 				continue
@@ -265,6 +270,12 @@ func addGraphChildren(
 	slices.Sort(children)
 	for _, id := range children {
 		entity := g.Entities[id]
+		if options.IncludeRunTargets && !isHCLTargetKind(string(entity.Kind)) && entity.Kind != attego.PackageTestKind {
+			if value, ok := selectors[id]; ok {
+				parent.AddBranch(value)
+				continue
+			}
+		}
 		if isHCLTargetKind(string(entity.Kind)) {
 			label, err := graphHCLTargetLabel(id, detector)
 			if err != nil {

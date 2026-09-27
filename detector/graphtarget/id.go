@@ -11,7 +11,7 @@ type Namespace string
 // It preserves the graph entity ID and detector namespace alongside the
 // detector-specific kind and repository path. This representation is intended
 // for graph and Scanner operations; it is not the user-facing selector format.
-// Convert it to a selector.Target when constructing CLI identifiers.
+// Use the owning Scanner's TargetSelector capability to obtain its presentation.
 //
 // TODO: Consider moving ID into the graph package because it directly
 // translates to the string format used as a graph node.
@@ -21,6 +21,15 @@ type ID struct {
 	Kind      string
 	Path      string
 	Name      string
+	Label     string // Optional detector-owned label for command-layer fallback.
 	Index     int
 	Aliases   []string
+}
+
+// Execution is the executable command produced for a discovered target.
+// Args contains the executable followed by its arguments; Dir is the process
+// working directory and may be empty to inherit the caller's directory.
+type Execution struct {
+	Dir  string
+	Args []string
 }

@@ -44,7 +44,7 @@ A Sensor Capability is an optional operation supplied by one Sensor.
 Sensor capability interfaces use the Sensor suffix so their capability is explicit:
 
 * GraphSensor provides graph construction.
-* TargetSensor provides target discovery.
+* TargetSensor provides target discovery, selector presentation, and execution as one capability.
 * EntityDecodingSensor provides entity-ID decoding.
 
 The capability interfaces are:
@@ -58,6 +58,8 @@ type GraphSensor interface {
 type TargetSensor interface {
     Sensor
     Targets(context.Context, *attegit.Repo) ([]graphtarget.ID, error)
+    TargetSelector(graphtarget.ID) selector.Target
+    ExecuteTarget(context.Context, *attegit.Repo, string, graphtarget.ID) (graphtarget.Execution, error)
 }
 
 type EntityDecodingSensor interface {
@@ -66,7 +68,7 @@ type EntityDecodingSensor interface {
 }
 ```
 
-Capabilities are optional. A Sensor may provide graph construction, target discovery, entity decoding, or any combination of them.
+Capabilities are optional. A Sensor may provide graph construction, target discovery, entity decoding, or any combination of them. Target discovery, selector presentation, and executable command construction are coupled: method-based Sensors are adapted as target-capable only when they implement the complete TargetSensor interface, and SensorSpec must provide all three functions or none.
 
 Sensors may also expose HCL capabilities during attachment:
 
@@ -84,10 +86,12 @@ SensorSpec is useful when attaching function-based capabilities directly rather 
 
 ```go
 type SensorSpec struct {
-    Namespace string
-    Graph     func(context.Context, *attegit.Repo, ...graphset.Option) (*graph.Graph, error)
-    Targets   func(context.Context, *attegit.Repo) ([]graphtarget.ID, error)
-    DecodeID  func(graph.EntityID) (graph.Entity, error)
+    Namespace      string
+    Graph          func(context.Context, *attegit.Repo, ...graphset.Option) (*graph.Graph, error)
+    Targets        func(context.Context, *attegit.Repo) ([]graphtarget.ID, error)
+    TargetSelector func(graphtarget.ID) selector.Target
+    ExecuteTarget  func(context.Context, *attegit.Repo, string, graphtarget.ID) (graphtarget.Execution, error)
+    DecodeID       func(graph.EntityID) (graph.Entity, error)
 }
 ```
 
@@ -149,6 +153,11 @@ A Scanner coordinates compiled Sensors and exposes the operations used by comman
 ```go
 type Scanner interface {
     Targets(context.Context, *attegit.Repo) ([]graphtarget.ID, error)
+    TargetSelector(graphtarget.ID) (selector.Target, bool)
+    TargetString(graphtarget.ID) (string, bool)
+    TargetMatches(graphtarget.ID, string, string) bool
+    ResolveTarget(context.Context, *attegit.Repo, string, string) (graphtarget.ID, error)
+    ExecuteTarget(context.Context, *attegit.Repo, string, graphtarget.ID) (graphtarget.Execution, error)
     Graph(context.Context, *attegit.Repo, ...graphset.Option) (*graph.Graph, error)
     TargetKinds() map[attehcl.Kind]attehcl.TargetKindSpec
     DecodeID(graph.EntityID) (graph.Entity, error)
@@ -162,8 +171,12 @@ A Scanner:
 * is safe for concurrent runtime use
 * is isolated from later Builder mutations
 * dispatches graph and target operations across Sensors
+* renders, matches, and resolves targets using only the target Sensors in its compiled snapshot
+* constructs execution commands through the Sensor that discovered each target
 * dispatches entity-ID decoding by namespace
 * supplies the capabilities required by HCL evaluation
+
+Scanner-aware target operations belong to detector. The selector package retains only shared selector values and pure syntax/path helpers; it does not discover repository targets or maintain process-global Sensor mappings.
 
 Scanner is the compiled runtime object because it actively scans repositories and builds detection results. It is not merely a map of sensors.
 
