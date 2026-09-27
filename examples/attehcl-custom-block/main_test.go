@@ -12,6 +12,7 @@ import (
 	"github.com/ghthor/atte/detector/attegittest"
 	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/detector/graphset"
+	"github.com/ghthor/atte/detector/scanner"
 	"github.com/ghthor/atte/reference"
 	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
@@ -38,7 +39,7 @@ deploy "release" {
 
 	repo, err := attegit.Open(git.Dir(), "HEAD", attegit.WithWorkingTree())
 	must.NoError(t, err)
-	builder, err := detector.NewDefaultBuilder()
+	builder, err := scanner.NewDefault()
 	must.NoError(t, err)
 	must.NoError(t, attachDeployBlock(builder))
 	scanner, err := builder.Compile()

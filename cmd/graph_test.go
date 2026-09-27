@@ -16,6 +16,7 @@ import (
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/detector/attehcltarget"
+	"github.com/ghthor/atte/detector/scanner"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
@@ -255,7 +256,7 @@ func TestPrintGraphIncludesCustomHCLTargets(t *testing.T) {
 	repo := repoWithFiles(t, map[string]string{
 		"atte.hcl": "deploy \"release\" {}",
 	})
-	builder, err := detector.NewDefaultBuilder()
+	builder, err := scanner.NewDefault()
 	must.NoError(t, err)
 	must.NoError(t, detector.AttachHCLTargetBlock(builder, "deploy", attehcltarget.KindSpec{
 		Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {

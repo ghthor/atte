@@ -7,8 +7,6 @@ import (
 	"testing"
 
 	"github.com/ghthor/atte/detector/attegit"
-	"github.com/ghthor/atte/detector/attego"
-	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/detector/attehcltarget"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphtarget"
@@ -38,22 +36,6 @@ func compileScanner(t *testing.T, builder *Builder) Scanner {
 	return scanner
 }
 
-func TestNewDefaultBuilder(t *testing.T) {
-	builder, err := NewDefaultBuilder()
-	test.NoError(t, err)
-	test.ErrorContains(t, builder.AttachSensor(attego.NewDetector()), "already attached")
-	scanner := compileScanner(t, builder)
-	test.NotNil(t, scanner)
-	test.EqOp(t, 3, len(scanner.TargetKinds()))
-
-	functions, err := scanner.HCLFunctions(t.Context(), nil, "")
-	test.NoError(t, err)
-	test.NotNil(t, functions)
-	test.NotNil(t, functions["path"])
-	test.NotNil(t, functions["gopkg"])
-	test.NotNil(t, functions["gopkg_test"])
-}
-
 func TestAttachValidation(t *testing.T) {
 	var nilBuilder *Builder
 	test.Error(t, nilBuilder.Attach(SensorSpec{}))
@@ -64,7 +46,7 @@ func TestAttachValidation(t *testing.T) {
 	test.NoError(t, builder.Attach(spec))
 	test.Error(t, builder.Attach(spec))
 
-	for _, namespace := range []string{attego.Namespace, attehcl.Namespace} {
+	for _, namespace := range []string{"attego", "attehcl"} {
 		t.Run(namespace, func(t *testing.T) {
 			allowed := testTargetSensorSpec(namespace, nil, selector.Target{})
 			test.NoError(t, NewBuilder().Attach(allowed))
@@ -412,30 +394,6 @@ func TestAttachTargetValidation(t *testing.T) {
 	test.Error(t, AttachHCLTargetBlock(builder, "missing_decoder", attehcltarget.KindSpec{}))
 }
 
-func TestDecodeID(t *testing.T) {
-	builder, err := NewDefaultBuilder()
-	test.NoError(t, err)
-	scanner := compileScanner(t, builder)
-
-	cases := []struct {
-		name string
-		id   graph.EntityID
-		kind graph.EntityKind
-	}{
-		{name: "git", id: "attegit:some/path", kind: "attegit"},
-		{name: "go", id: "attego:package:go.mod:cA", kind: "attego:package"},
-		{name: "hcl", id: "attehcl:test:atte.hcl:0", kind: "attehcl:test"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			entity, err := scanner.DecodeID(tc.id)
-			test.NoError(t, err)
-			test.EqOp(t, tc.id, entity.ID)
-			test.EqOp(t, tc.kind, entity.Kind)
-		})
-	}
-}
-
 func TestDecodeIDErrors(t *testing.T) {
 	builder := NewBuilder()
 	spec := testTargetSensorSpec("targets", nil, selector.Target{Path: "pkg", Kind: "test"})
@@ -509,7 +467,7 @@ func (rejectingScannerSensor) DecodeID(id graph.EntityID) (graph.Entity, error) 
 	return graph.Entity{ID: id}, nil
 }
 
-func (rejectingScannerSensor) AttachScanner(any) (any, error) {
+func (rejectingScannerSensor) AttachScanner(Scanner) (Sensor, error) {
 	return nil, errors.New("scanner rejected")
 }
 
@@ -519,12 +477,8 @@ type snapshotScannerSensor struct {
 
 func (*snapshotScannerSensor) Namespace() string { return "snapshot" }
 
-func (snapshotScannerSensor) AttachScanner(scanner any) (any, error) {
-	capabilities, ok := scanner.(Scanner)
-	if !ok {
-		return nil, fmt.Errorf("received %T, not detector.Scanner", scanner)
-	}
-	return &snapshotScannerSensor{scanner: capabilities}, nil
+func (snapshotScannerSensor) AttachScanner(scanner Scanner) (Sensor, error) {
+	return &snapshotScannerSensor{scanner: scanner}, nil
 }
 
 func (s snapshotScannerSensor) DecodeID(id graph.EntityID) (graph.Entity, error) {

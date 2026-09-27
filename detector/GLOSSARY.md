@@ -80,9 +80,9 @@ capabilities to the Builder together with the Sensor.
 
 A Sensor that needs runtime capabilities from other attached Sensors may
 implement `SensorWithScanner`. During compilation, the Builder injects the
-compiled Scanner through `AttachScanner(any)`. The Sensor validates the subset
-it needs without importing the detector package; compilation returns an error
-if injection fails.
+compiled Scanner through `AttachScanner(Scanner) (Sensor, error)`. The Sensor
+validates the subset it needs and returns a Scanner-bound instance; compilation
+returns an error if injection fails.
 
 ## SensorSpec
 
@@ -118,7 +118,7 @@ A Builder:
 The intended setup flow is:
 
 ```go
-builder, err := detector.NewDefaultBuilder()
+builder, err := scanner.NewDefault()
 if err != nil {
     return err
 }
@@ -149,7 +149,7 @@ SensorProvidingHCLTargetBlocks implementations and attaches their HCL capabiliti
 
 ## Default Builder
 
-NewDefaultBuilder creates a Builder containing Atte's built-in Sensors, target kinds, and HCL functions.
+`scanner.NewDefault` creates a Builder containing Atte's built-in Sensors, target kinds, and HCL functions.
 
 The default Builder includes the built-in attegit, attego, and attehcl Sensors. The attego and HCL Sensors are wired during compilation to receive the immutable Scanner rather than retaining the mutable Builder.
 
@@ -304,10 +304,10 @@ Scanner-aware Sensor code should use scanner as the local name for the
 capability value supplied to `AttachScanner`:
 
 ```go
-func (Detector) AttachScanner(value any) (any, error) {
-    scanner, ok := value.(Capabilities)
+func (Detector) AttachScanner(scanner detector.Scanner) (detector.Sensor, error) {
+    capabilities, ok := scanner.(Capabilities)
     // ...
-    return &Detector{scanner: scanner}, nil
+    return &Detector{scanner: capabilities}, nil
 }
 ```
 

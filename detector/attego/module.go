@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphset"
@@ -99,7 +100,7 @@ func DecodeEntityID(id graph.EntityID) (string, reference.Tree, string, error) {
 
 // Detector adapts the Go Sensor to the shared detector capabilities.
 type Detector struct {
-	scanner any
+	scanner detector.Scanner
 }
 
 // NewDetector creates a Go Sensor that can receive a compiled Scanner.
@@ -108,7 +109,7 @@ func NewDetector() *Detector {
 }
 
 // AttachScanner returns a Go Sensor bound to the compiled Scanner.
-func (Detector) AttachScanner(scanner any) (any, error) {
+func (Detector) AttachScanner(scanner detector.Scanner) (detector.Sensor, error) {
 	return &Detector{scanner: scanner}, nil
 }
 

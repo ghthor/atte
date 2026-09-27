@@ -134,13 +134,9 @@ func (b *Builder) Compile() (Scanner, error) {
 		if !ok {
 			return nil, fmt.Errorf("sensor %q does not support scanner attachment", namespace)
 		}
-		bound, err := scannerSensor.AttachScanner(result)
+		boundSensor, err := scannerSensor.AttachScanner(result)
 		if err != nil {
 			return nil, fmt.Errorf("attach scanner to sensor %q: %w", namespace, err)
-		}
-		boundSensor, ok := bound.(Sensor)
-		if !ok {
-			return nil, fmt.Errorf("scanner-aware sensor %q returned %T, which is not a Sensor", namespace, bound)
 		}
 		if boundSensor.Namespace() != namespace {
 			return nil, fmt.Errorf("scanner-aware sensor %q returned Sensor with namespace %q", namespace, boundSensor.Namespace())

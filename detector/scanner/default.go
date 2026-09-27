@@ -1,15 +1,16 @@
-package detector
+package scanner
 
 import (
+	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/attehcl"
 )
 
-// NewDefaultBuilder returns a Builder containing Atte's built-in Sensors,
+// NewDefault returns a Builder containing Atte's built-in Sensors,
 // target kinds, and HCL functions.
-func NewDefaultBuilder() (*Builder, error) {
-	builder := NewBuilder()
+func NewDefault() (*detector.Builder, error) {
+	builder := detector.NewBuilder()
 
 	if err := builder.AttachSensor(attegit.Detector{}); err != nil {
 		return nil, err

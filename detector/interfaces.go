@@ -43,11 +43,11 @@ type EntityDecodingSensor interface {
 }
 
 // SensorWithScanner opts a Sensor into receiving the compiled Scanner during
-// Builder.Compile. AttachScanner returns a newly bound Sensor as any so an
-// implementation can validate its local Scanner capabilities without importing
-// this package. Returning a new value keeps compiled Scanner snapshots isolated.
+// Builder.Compile. Implementations may validate the Scanner against a local
+// capability interface and return a new bound Sensor to keep compiled snapshots
+// isolated.
 type SensorWithScanner interface {
-	AttachScanner(any) (any, error)
+	AttachScanner(Scanner) (Sensor, error)
 }
 
 // SensorProvidingHCLFunctions supplies repository- and file-aware HCL

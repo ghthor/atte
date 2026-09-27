@@ -13,6 +13,7 @@ import (
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphset"
 	"github.com/ghthor/atte/detector/graphtarget"
+	"github.com/ghthor/atte/detector/scanner"
 	"github.com/ghthor/atte/reference"
 	"github.com/ghthor/atte/reference/selector"
 	"github.com/hashicorp/hcl/v2"
@@ -110,7 +111,7 @@ func TestExecuteWithOptionsUsesInjectedDetectorWithoutRepositoryOverride(t *test
 	repository := newExecutionRepository(t, map[string]string{
 		"atte.hcl": `custom "unit" {}`,
 	})
-	builder, err := detector.NewDefaultBuilder()
+	builder, err := scanner.NewDefault()
 	must.NoError(t, err)
 	must.NoError(t, detector.AttachHCLTargetBlock(builder, "custom", attehcltarget.KindSpec{
 		Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
@@ -227,7 +228,7 @@ test "unit" {
 		"sample/main.go":      "package sample\n",
 		"sample/main_test.go": "package sample\nimport \"testing\"\nfunc TestSample(t *testing.T) {}\n",
 	})
-	builder, err := detector.NewDefaultBuilder()
+	builder, err := scanner.NewDefault()
 	must.NoError(t, err)
 	scanner := compileTestDetector(t, builder)
 	targets, err := scanner.Targets(t.Context(), repository.repo)
@@ -258,7 +259,7 @@ test "unit" {
 
 func TestCustomTargetSensorRunsAndRendersThroughScanner(t *testing.T) {
 	repository := newExecutionRepository(t, map[string]string{"go.mod": "module example.com/project\n\ngo 1.23\n"})
-	builder, err := detector.NewDefaultBuilder()
+	builder, err := scanner.NewDefault()
 	must.NoError(t, err)
 	must.NoError(t, builder.AttachSensor(customExecutableSensor{}))
 	scanner := compileTestDetector(t, builder)

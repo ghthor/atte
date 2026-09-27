@@ -7,8 +7,8 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attehcl"
+	"github.com/ghthor/atte/detector/scanner"
 	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
 )
@@ -32,7 +32,7 @@ test "child2" {
 `,
 		"child/child.sh": "#!/bin/sh\n",
 	})
-	builder, err := detector.NewDefaultBuilder()
+	builder, err := scanner.NewDefault()
 	must.NoError(t, err)
 	detector := compileTestDetector(t, builder)
 	config, err := attehcl.ConfigFor(t.Context(), repo, "child", detector)

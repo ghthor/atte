@@ -13,8 +13,8 @@ dependency resolution is a later graph-assembly concern.
 
 ## Attaching target kinds
 
-Use `detector.NewDefaultBuilder` when an application wants the standard Sensors, target
-kinds, and HCL functions. Attach custom HCL target blocks on the setup builder
+Use `scanner.NewDefault` from the `detector/scanner` package when an application
+wants the standard Sensors, target kinds, and HCL functions. Attach custom HCL target blocks on the setup builder
 with `detector.AttachHCLTargetBlock`. The attachment requires a decoder and can
 optionally provide graph, execution, configuration, and script projections.
 Those optional projections determine which capabilities are available for the
@@ -22,7 +22,7 @@ custom target. The shared `Kind`, `KindSpec`, `Target`, and projection types are
 provided by `detector/attehcltarget`.
 
 ```go
-builder, err := detector.NewDefaultBuilder()
+builder, err := scanner.NewDefault()
 if err != nil {
 	return err
 }
@@ -46,7 +46,7 @@ if err != nil {
 
 `deploySchema` and the projection functions in this example are application
 code. See `examples/attehcl-custom-block` for a complete custom target. The
-builder returned by `detector.NewDefaultBuilder` contains the built-in target kinds,
+builder returned by `scanner.NewDefault` contains the built-in target kinds,
 Sensors, and HCL functions. During compilation, the HCL Sensor receives the
 immutable Scanner through its `SensorWithScanner` capability, so all subsequent
 HCL evaluation uses one consistent capability set. Target kind names must be
@@ -63,8 +63,8 @@ graph, err := attehcl.Graph(ctx, repo, scanner)
 
 `attehcl.NewDetector()` creates an unattached Sensor. Usually `Builder.AttachSensor`
 and `Builder.Compile` perform scanner injection. For manual adaptation,
-`AttachScanner(scanner)` returns the bound Sensor as `any`; check the error and
-assert the result to `*attehcl.Detector`. `Builder.Compile` does this validation
+`AttachScanner(detector.Scanner)` returns the bound Sensor as `detector.Sensor`;
+`Builder.Compile` performs this binding and validates the HCL capability subset
 for attached Sensors.
 For CLI execution, provide the scanner through `cmd.ExecuteOptions.Detector`;
 repository discovery remains unchanged when only the Scanner is injected:
@@ -107,7 +107,7 @@ as `atte::source_file()`. The factory can use the repository and context to
 construct functions backed by repository state or to return contextual errors.
 
 Built-in functions such as `path`, `gopkg`, and `gopkg_test` are already
-attached by `detector.NewDefaultBuilder`. Custom function names must not conflict with
+attached by `scanner.NewDefault`. Custom function names must not conflict with
 the built-in HCL functions or another attached function, and a function name
 can only be attached once in a builder.
 

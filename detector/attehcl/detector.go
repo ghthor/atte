@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attehcltarget"
 	"github.com/ghthor/atte/detector/graph"
@@ -25,7 +26,7 @@ func NewDetector() *Detector {
 
 // AttachScanner validates the compiled Scanner capabilities and returns a
 // Sensor bound to them.
-func (Detector) AttachScanner(scanner any) (any, error) {
+func (Detector) AttachScanner(scanner detector.Scanner) (detector.Sensor, error) {
 	capabilities, ok := scanner.(Capabilities)
 	if !ok {
 		return nil, fmt.Errorf("scanner %T does not provide HCL capabilities", scanner)

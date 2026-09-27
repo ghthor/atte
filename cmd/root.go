@@ -9,6 +9,7 @@ import (
 
 	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
+	"github.com/ghthor/atte/detector/scanner"
 	"github.com/spf13/cobra"
 )
 
@@ -110,7 +111,7 @@ func scannerForContext(ctx context.Context) (detector.Scanner, error) {
 	if execution, ok := executionFromContext(ctx); ok && execution.scanner != nil {
 		return execution.scanner, nil
 	}
-	builder, err := detector.NewDefaultBuilder()
+	builder, err := scanner.NewDefault()
 	if err != nil {
 		return nil, err
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/ghthor/atte/detector/attegitmock"
 	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/detector/attehcltarget"
+	"github.com/ghthor/atte/detector/scanner"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/zclconf/go-cty/cty"
 )
@@ -109,7 +110,7 @@ func execute() error {
 	}
 	defer cleanup()
 
-	builtIns, err := detector.NewDefaultBuilder()
+	builtIns, err := scanner.NewDefault()
 	if err != nil {
 		return fmt.Errorf("create built-in Scanner: %w", err)
 	}

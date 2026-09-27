@@ -3,6 +3,7 @@ package attego
 import (
 	"testing"
 
+	detectorpkg "github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attegittest"
 	"github.com/ghthor/atte/detector/graph"
@@ -73,16 +74,19 @@ var _ = must.NoError
 	return git.Dir()
 }
 
-func TestAttachScannerRetainsArbitraryScanner(t *testing.T) {
-	detector := NewDetector()
-	scanner := &struct{ value string }{value: "scanner"}
-	bound, err := detector.AttachScanner(scanner)
+func TestAttachScannerRetainsCompiledScanner(t *testing.T) {
+	builder := detectorpkg.NewBuilder()
+	scanner, err := builder.Compile()
+	must.NoError(t, err)
+
+	sensor := NewDetector()
+	bound, err := sensor.AttachScanner(scanner)
 	must.NoError(t, err)
 
 	configured := bound.(*Detector)
-	test.True(t, configured != detector, test.Sprintf("AttachScanner should return a new Sensor instance"))
-	test.True(t, configured.scanner == scanner, test.Sprintf("configured Sensor should retain the arbitrary Scanner"))
-	test.Nil(t, detector.scanner)
+	test.True(t, configured != sensor, test.Sprintf("AttachScanner should return a new Sensor instance"))
+	test.True(t, configured.scanner == scanner, test.Sprintf("configured Sensor should retain the compiled Scanner"))
+	test.Nil(t, sensor.scanner)
 }
 
 func TestHCLFunctionsResolvePackages(t *testing.T) {
