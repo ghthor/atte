@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ghthor/atte/detector/attehcltarget"
+	"github.com/ghthor/atte/detector/attehcl/hclblock"
 
 	"github.com/ghthor/atte/reference"
 	"github.com/hashicorp/go-cty-funcs/cidr"
@@ -58,7 +58,7 @@ func targetFileFromPath(file reference.Blob, raw string) (reference.Blob, error)
 	return reference.ResolveBlobFromTree(file.Tree(), reference.SomePath(path+Filename))
 }
 
-func parseTargetName(raw string) (attehcltarget.Kind, string, error) {
+func parseTargetName(raw string) (hclblock.TargetKind, string, error) {
 	kind, name, ok := strings.Cut(raw, ".")
 	if !ok || strings.Contains(name, ".") || !hclsyntax.ValidIdentifier(kind) || !hclsyntax.ValidIdentifier(name) {
 		return "", "", fmt.Errorf("target reference %q must be a kind.name identifier", raw)
@@ -66,7 +66,7 @@ func parseTargetName(raw string) (attehcltarget.Kind, string, error) {
 	if isNumericName(name) {
 		return "", "", fmt.Errorf("target reference %q must use a named target", raw)
 	}
-	return attehcltarget.Kind(kind), name, nil
+	return hclblock.TargetKind(kind), name, nil
 }
 
 // baseHCLFunctions returns the common HCL functions used by HashiCorp

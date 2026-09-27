@@ -168,7 +168,7 @@ type Scanner interface {
     ResolveTarget(context.Context, *attegit.Repo, string, string) (graphtarget.ID, error)
     ExecuteTarget(context.Context, *attegit.Repo, string, graphtarget.ID) (graphtarget.Execution, error)
     Graph(context.Context, *attegit.Repo, ...graphset.Option) (*graph.Graph, error)
-    TargetKinds() map[attehcltarget.Kind]attehcltarget.KindSpec
+    TargetKinds() map[hclblock.TargetKind]hclblock.TargetKindSpec
     DecodeID(graph.EntityID) (graph.Entity, error)
     HCLFunctions(context.Context, *attegit.Repo, reference.Blob) (map[string]function.Function, error)
 }
@@ -211,7 +211,7 @@ Capabilities describes what evaluation can use, not one attached Sensor:
 
 ```go
 type Capabilities interface {
-    attehcltarget.KindCapabilities
+    hclblock.TargetKindCapabilities
     FunctionCapabilities
     EntityCapabilities
 }
@@ -219,13 +219,13 @@ type Capabilities interface {
 
 The HCL Sensor accepts Capabilities rather than depending on the root detector package. This structural boundary prevents an import cycle when detector constructs the built-in HCL Sensor.
 
-## attehcltarget.KindCapabilities
+## hclblock.TargetKindCapabilities
 
-KindCapabilities provides attached HCL target-kind specifications to the HCL evaluator. The shared target API types live in the `detector/attehcltarget` package, which is independent of the HCL evaluator and root detector packages.
+TargetKindCapabilities provides attached HCL target-kind specifications to the HCL evaluator. The shared target API types live in the `detector/attehcl/hclblock` package, which is independent of the HCL evaluator and root detector packages.
 
 ```go
-type KindCapabilities interface {
-    TargetKinds() map[attehcltarget.Kind]attehcltarget.KindSpec
+type TargetKindCapabilities interface {
+    TargetKinds() map[hclblock.TargetKind]hclblock.TargetKindSpec
 }
 ```
 
@@ -255,11 +255,11 @@ type EntityCapabilities interface {
 
 Entity decoding is dispatched by the namespace encoded in the entity ID. This lets custom Sensors contribute entity kinds without a process-wide decoder registry.
 
-## attehcltarget.KindSpec
+## hclblock.TargetKindSpec
 
-`attehcltarget.KindSpec` describes the capabilities of one attached HCL target kind. It contains the required decoder and optional graph, execution, configuration, and script projections.
+`hclblock.TargetKindSpec` describes the capabilities of one attached HCL target kind. It contains the required decoder and optional graph, execution, configuration, and script projections.
 
-The target-kind API types and their dependencies belong to `detector/attehcltarget`. The evaluator and root detector package depend on this shared package instead of importing each other.
+The target-kind API types and their dependencies belong to `detector/attehcl/hclblock`. The evaluator and root detector package depend on this shared package instead of importing each other.
 
 ## Namespace
 

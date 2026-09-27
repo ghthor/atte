@@ -6,7 +6,7 @@ import (
 
 	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
-	"github.com/ghthor/atte/detector/attehcltarget"
+	"github.com/ghthor/atte/detector/attehcl/hclblock"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphset"
 	"github.com/ghthor/atte/detector/graphtarget"
@@ -36,7 +36,7 @@ func (Detector) AttachScanner(scanner detector.Scanner) (detector.Sensor, error)
 
 // HCLTargetBlocks provides the HCL target-kind specifications contributed by
 // the Sensor during attachment.
-func (Detector) HCLTargetBlocks() map[attehcltarget.Kind]attehcltarget.KindSpec {
+func (Detector) HCLTargetBlocks() map[hclblock.TargetKind]hclblock.TargetKindSpec {
 	return BuiltInTargetKinds()
 }
 
@@ -52,7 +52,7 @@ func (d Detector) DecodeID(id graph.EntityID) (graph.Entity, error) {
 }
 
 func (Detector) TargetSelector(target graphtarget.ID) selector.Target {
-	return Selector(attehcltarget.Target{
+	return Selector(hclblock.Target{
 		Kind:    target.Kind,
 		File:    reference.Blob(target.Path),
 		Name:    target.Name,

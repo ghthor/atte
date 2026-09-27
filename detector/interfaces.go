@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/ghthor/atte/detector/attegit"
-	"github.com/ghthor/atte/detector/attehcltarget"
+	"github.com/ghthor/atte/detector/attehcl/hclblock"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphset"
 	"github.com/ghthor/atte/detector/graphtarget"
@@ -62,7 +62,7 @@ type SensorProvidingHCLFunctions interface {
 // attachment.
 type SensorProvidingHCLTargetBlocks interface {
 	Sensor
-	HCLTargetBlocks() map[attehcltarget.Kind]attehcltarget.KindSpec
+	HCLTargetBlocks() map[hclblock.TargetKind]hclblock.TargetKindSpec
 }
 
 // ConfigBlock describes an HCL configuration block schema and its decoder.

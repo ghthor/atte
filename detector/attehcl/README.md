@@ -18,8 +18,8 @@ wants the standard Sensors, target kinds, and HCL functions. Attach custom HCL t
 with `detector.AttachHCLTargetBlock`. The attachment requires a decoder and can
 optionally provide graph, execution, configuration, and script projections.
 Those optional projections determine which capabilities are available for the
-custom target. The shared `Kind`, `KindSpec`, `Target`, and projection types are
-provided by `detector/attehcltarget`.
+custom target. Shared types such as `TargetKind`, `TargetKindSpec`, `Target`,
+`TargetGraph`, and `TargetCommand` are provided by `detector/attehcl/hclblock`.
 
 ```go
 builder, err := scanner.NewDefault()
@@ -27,7 +27,7 @@ if err != nil {
 	return err
 }
 
-err = detector.AttachHCLTargetBlock(builder, "deploy", attehcltarget.KindSpec{
+err = detector.AttachHCLTargetBlock(builder, "deploy", hclblock.TargetKindSpec{
 	Schema:    &deploySchema,
 	Decoder:   decodeDeploy,
 	Graph:     graphDeploy,

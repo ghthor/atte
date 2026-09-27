@@ -8,7 +8,7 @@ import (
 	"sort"
 
 	"github.com/ghthor/atte/detector/attegit"
-	"github.com/ghthor/atte/detector/attehcltarget"
+	"github.com/ghthor/atte/detector/attehcl/hclblock"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphset"
 	"github.com/ghthor/atte/detector/graphtarget"
@@ -61,7 +61,7 @@ type Scanner interface {
 	// TargetKinds returns the attached HCL target-kind specifications.
 	// The returned map and any schemas it contains are independent copies that
 	// callers may modify without changing the Scanner.
-	TargetKinds() map[attehcltarget.Kind]attehcltarget.KindSpec
+	TargetKinds() map[hclblock.TargetKind]hclblock.TargetKindSpec
 
 	// ConfigBlocks returns the attached HCL configuration blocks. The returned
 	// map and schemas are independent copies that callers may modify without
@@ -86,7 +86,7 @@ type Builder struct {
 	sensors        map[string]SensorSpec
 	scannerSensors map[string]Sensor
 	functions      map[string]HCLFunctionFactory
-	targetKinds    map[attehcltarget.Kind]attehcltarget.KindSpec
+	targetKinds    map[hclblock.TargetKind]hclblock.TargetKindSpec
 	configBlocks   map[string]ConfigBlock
 }
 
@@ -94,13 +94,13 @@ type compiledScanner struct {
 	sensors       []SensorSpec
 	sensorsByName map[string]SensorSpec
 	functions     map[string]HCLFunctionFactory
-	targetKinds   map[attehcltarget.Kind]attehcltarget.KindSpec
+	targetKinds   map[hclblock.TargetKind]hclblock.TargetKindSpec
 	configBlocks  map[string]ConfigBlock
 }
 
 var (
-	_ Scanner                        = (*compiledScanner)(nil)
-	_ attehcltarget.KindCapabilities = (*compiledScanner)(nil)
+	_ Scanner                         = (*compiledScanner)(nil)
+	_ hclblock.TargetKindCapabilities = (*compiledScanner)(nil)
 )
 
 // NewBuilder returns an empty detector Builder.
@@ -109,7 +109,7 @@ func NewBuilder() *Builder {
 		sensors:        make(map[string]SensorSpec),
 		scannerSensors: make(map[string]Sensor),
 		functions:      make(map[string]HCLFunctionFactory),
-		targetKinds:    make(map[attehcltarget.Kind]attehcltarget.KindSpec),
+		targetKinds:    make(map[hclblock.TargetKind]hclblock.TargetKindSpec),
 		configBlocks:   make(map[string]ConfigBlock),
 	}
 }
@@ -167,11 +167,11 @@ func (b *Builder) Compile() (Scanner, error) {
 // This is a function rather than a method because Go does not yet support
 // generic methods on non-generic types. Once the minimum Go version reaches
 // Go 1.27 and generic methods are available, this can become a Builder method.
-func AttachHCLTargetBlock[K ~string](b *Builder, kind K, spec attehcltarget.KindSpec) error {
+func AttachHCLTargetBlock[K ~string](b *Builder, kind K, spec hclblock.TargetKindSpec) error {
 	if b == nil {
 		return fmt.Errorf("builder is nil")
 	}
-	key := attehcltarget.Kind(kind)
+	key := hclblock.TargetKind(kind)
 	normalized, err := b.normalizeHCLTargetBlock(key, spec)
 	if err != nil {
 		return err
@@ -195,7 +195,7 @@ func AttachHCLConfigBlock(b *Builder, name string, block ConfigBlock) error {
 	return nil
 }
 
-func (b *Builder) normalizeHCLTargetBlock(kind attehcltarget.Kind, spec attehcltarget.KindSpec) (attehcltarget.KindSpec, error) {
+func (b *Builder) normalizeHCLTargetBlock(kind hclblock.TargetKind, spec hclblock.TargetKindSpec) (hclblock.TargetKindSpec, error) {
 	name := string(kind)
 	if name == "" {
 		return spec, fmt.Errorf("target kind is empty")
@@ -237,8 +237,8 @@ func (b *Builder) normalizeHCLConfigBlock(name string, block ConfigBlock) (Confi
 	return block, nil
 }
 
-func cloneTargetKinds(source map[attehcltarget.Kind]attehcltarget.KindSpec) map[attehcltarget.Kind]attehcltarget.KindSpec {
-	result := make(map[attehcltarget.Kind]attehcltarget.KindSpec, len(source))
+func cloneTargetKinds(source map[hclblock.TargetKind]hclblock.TargetKindSpec) map[hclblock.TargetKind]hclblock.TargetKindSpec {
+	result := make(map[hclblock.TargetKind]hclblock.TargetKindSpec, len(source))
 	for kind, spec := range source {
 		if spec.Schema != nil {
 			schema := copyBodySchema(*spec.Schema)
@@ -336,12 +336,12 @@ func (b *Builder) AttachSensor(value Sensor) error {
 	return nil
 }
 
-func sensorCapabilities(value Sensor) (map[string]HCLFunctionFactory, map[attehcltarget.Kind]attehcltarget.KindSpec, map[string]ConfigBlock) {
+func sensorCapabilities(value Sensor) (map[string]HCLFunctionFactory, map[hclblock.TargetKind]hclblock.TargetKindSpec, map[string]ConfigBlock) {
 	functions := make(map[string]HCLFunctionFactory)
 	if provider, ok := value.(SensorProvidingHCLFunctions); ok {
 		maps.Copy(functions, provider.HCLFunctions())
 	}
-	targetBlocks := make(map[attehcltarget.Kind]attehcltarget.KindSpec)
+	targetBlocks := make(map[hclblock.TargetKind]hclblock.TargetKindSpec)
 	if provider, ok := value.(SensorProvidingHCLTargetBlocks); ok {
 		maps.Copy(targetBlocks, provider.HCLTargetBlocks())
 	}
@@ -354,7 +354,7 @@ func sensorCapabilities(value Sensor) (map[string]HCLFunctionFactory, map[attehc
 
 func (b *Builder) validateHCLCapabilities(
 	functions map[string]HCLFunctionFactory,
-	targetBlocks map[attehcltarget.Kind]attehcltarget.KindSpec,
+	targetBlocks map[hclblock.TargetKind]hclblock.TargetKindSpec,
 	configBlocks map[string]ConfigBlock,
 ) error {
 	functionNames := make([]string, 0, len(functions))
@@ -368,7 +368,7 @@ func (b *Builder) validateHCLCapabilities(
 		}
 	}
 
-	blockKinds := make([]attehcltarget.Kind, 0, len(targetBlocks))
+	blockKinds := make([]hclblock.TargetKind, 0, len(targetBlocks))
 	for kind := range targetBlocks {
 		blockKinds = append(blockKinds, kind)
 	}
@@ -394,7 +394,7 @@ func (b *Builder) validateHCLCapabilities(
 
 func (b *Builder) attachHCLCapabilities(
 	functions map[string]HCLFunctionFactory,
-	targetBlocks map[attehcltarget.Kind]attehcltarget.KindSpec,
+	targetBlocks map[hclblock.TargetKind]hclblock.TargetKindSpec,
 	configBlocks map[string]ConfigBlock,
 ) {
 	maps.Copy(b.functions, functions)
@@ -451,7 +451,7 @@ func (b *Builder) validateHCLFunction(name string, factory HCLFunctionFactory) e
 }
 
 // TargetKinds returns a copy of the compiled target-kind capabilities.
-func (s *compiledScanner) TargetKinds() map[attehcltarget.Kind]attehcltarget.KindSpec {
+func (s *compiledScanner) TargetKinds() map[hclblock.TargetKind]hclblock.TargetKindSpec {
 	return cloneTargetKinds(s.targetKinds)
 }
 

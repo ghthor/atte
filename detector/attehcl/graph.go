@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ghthor/atte/detector/attehcltarget"
+	"github.com/ghthor/atte/detector/attehcl/hclblock"
 
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/graph"
@@ -17,29 +17,29 @@ import (
 func graphScriptTarget(
 	ctx context.Context,
 	repo *attegit.Repo,
-	target attehcltarget.Target,
-	graphContext attehcltarget.GraphContext,
+	target hclblock.Target,
+	graphContext hclblock.TargetGraphContext,
 	attachToTree bool,
-) (attehcltarget.Graph, error) {
+) (hclblock.TargetGraph, error) {
 	if err := ctx.Err(); err != nil {
-		return attehcltarget.Graph{}, err
+		return hclblock.TargetGraph{}, err
 	}
 	decoded, ok := target.Decoded.(decodedTarget)
 	if !ok {
-		return attehcltarget.Graph{}, fmt.Errorf("target %q has an invalid built-in decoded value", target.ID)
+		return hclblock.TargetGraph{}, fmt.Errorf("target %q has an invalid built-in decoded value", target.ID)
 	}
 	if decoded.Script == "" {
-		return attehcltarget.Graph{}, fmt.Errorf("target %q has no script", target.Name)
+		return hclblock.TargetGraph{}, fmt.Errorf("target %q has no script", target.Name)
 	}
 	result := target.GraphProjectionBase(attachToTree)
 	script, isPath := strings.CutPrefix(decoded.Script, DecodingPathPrefix)
 	if isPath && script != "" {
 		targetBlob, err := reference.ResolveBlobFromBlob(target.File, reference.SomePath(script))
 		if err != nil {
-			return attehcltarget.Graph{}, fmt.Errorf("%q: %w", target.File, err)
+			return hclblock.TargetGraph{}, fmt.Errorf("%q: %w", target.File, err)
 		}
 		if obj, ok := repo.Obj[targetBlob]; !ok || obj.Kind != attegit.Blob {
-			return attehcltarget.Graph{}, fmt.Errorf("%q: script %q not found", target.File, targetBlob)
+			return hclblock.TargetGraph{}, fmt.Errorf("%q: script %q not found", target.File, targetBlob)
 		}
 		result.Entities = append(result.Entities, graph.Entity{ID: attegit.EntityID(targetBlob), Kind: attegit.BlobKind})
 		result.Relationships = append(result.Relationships, graph.Relationship{From: target.ID, To: attegit.EntityID(targetBlob), Kind: ScriptRelation})
@@ -47,7 +47,7 @@ func graphScriptTarget(
 	for _, dependency := range decoded.Deps {
 		entity, relationship, err := projectDependency(ctx, repo, target, dependency, graphContext)
 		if err != nil {
-			return attehcltarget.Graph{}, err
+			return hclblock.TargetGraph{}, err
 		}
 		result.Entities = append(result.Entities, entity)
 		result.Relationships = append(result.Relationships, relationship)
@@ -59,9 +59,9 @@ func graphScriptTarget(
 func projectDependency(
 	ctx context.Context,
 	repo *attegit.Repo,
-	target attehcltarget.Target,
+	target hclblock.Target,
 	dependency dependency,
-	graphContext attehcltarget.GraphContext,
+	graphContext hclblock.TargetGraphContext,
 ) (graph.Entity, graph.Relationship, error) {
 	if err := ctx.Err(); err != nil {
 		return graph.Entity{}, graph.Relationship{}, err
@@ -180,7 +180,7 @@ func addEvaluatedTargetGraph(
 	if project == nil {
 		return nil, nil
 	}
-	graphContext := attehcltarget.GraphContext{
+	graphContext := hclblock.TargetGraphContext{
 		ResolveTarget: func(traversal hcl.Traversal) (graph.Entity, error) {
 			declaration, err := resolveTargetTraversal(native.File, traversal, declarations)
 			if err != nil {
@@ -217,7 +217,7 @@ func resolveTargetTraversal(file reference.Blob, traversal hcl.Traversal, declar
 	if !ok {
 		return targetDeclaration{}, fmt.Errorf("%q: target dependency must be a kind.name traversal", file)
 	}
-	kind := attehcltarget.Kind(traversal.RootName())
+	kind := hclblock.TargetKind(traversal.RootName())
 	declaration, ok := declarations.byReference[targetReference{file: file, kind: kind, name: attribute.Name}]
 	if !ok {
 		return targetDeclaration{}, fmt.Errorf("%q: target dependency %s.%s not found", file, kind, attribute.Name)

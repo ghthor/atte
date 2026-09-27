@@ -13,13 +13,13 @@ import (
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attegitmock"
 	"github.com/ghthor/atte/detector/attehcl"
-	"github.com/ghthor/atte/detector/attehcltarget"
+	"github.com/ghthor/atte/detector/attehcl/hclblock"
 	"github.com/ghthor/atte/detector/scanner"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/zclconf/go-cty/cty"
 )
 
-const KindDeploy attehcltarget.Kind = "deploy"
+const KindDeploy hclblock.TargetKind = "deploy"
 
 const mockAtteHCL = `
 
@@ -38,7 +38,7 @@ type deployTarget struct {
 }
 
 func attachDeployBlock(builder *detector.Builder) error {
-	return detector.AttachHCLTargetBlock(builder, KindDeploy, attehcltarget.KindSpec{
+	return detector.AttachHCLTargetBlock(builder, KindDeploy, hclblock.TargetKindSpec{
 		Schema:    &deploySchema,
 		Decoder:   decodeDeployTarget,
 		Graph:     graphDeployTarget,
@@ -62,20 +62,20 @@ func decodeDeployTarget(content *hcl.BodyContent, ctx *hcl.EvalContext) (any, er
 func graphDeployTarget(
 	ctx context.Context,
 	_ *attegit.Repo,
-	target attehcltarget.Target,
-	_ attehcltarget.GraphContext,
+	target hclblock.Target,
+	_ hclblock.TargetGraphContext,
 	attachToTree bool,
-) (attehcltarget.Graph, error) {
+) (hclblock.TargetGraph, error) {
 	if err := ctx.Err(); err != nil {
-		return attehcltarget.Graph{}, err
+		return hclblock.TargetGraph{}, err
 	}
 	if _, ok := target.Decoded.(deployTarget); !ok {
-		return attehcltarget.Graph{}, fmt.Errorf("target %q has an invalid deploy decoded value", target.ID)
+		return hclblock.TargetGraph{}, fmt.Errorf("target %q has an invalid deploy decoded value", target.ID)
 	}
-	return target.GraphProjectionBase(attachToTree), nil
+	return target.TargetGraphProjectionBase(attachToTree), nil
 }
 
-func configDeployTarget(target attehcltarget.Target) (map[string]any, error) {
+func configDeployTarget(target hclblock.Target) (map[string]any, error) {
 	decoded, ok := target.Decoded.(deployTarget)
 	if !ok {
 		return nil, fmt.Errorf("target %q has an invalid deploy decoded value", target.ID)
@@ -83,12 +83,12 @@ func configDeployTarget(target attehcltarget.Target) (map[string]any, error) {
 	return map[string]any{"env": decoded.Env}, nil
 }
 
-func executeDeployTarget(target attehcltarget.Target, root string) (attehcltarget.Command, error) {
+func executeDeployTarget(target hclblock.Target, root string) (hclblock.TargetCommand, error) {
 	decoded, ok := target.Decoded.(deployTarget)
 	if !ok {
-		return attehcltarget.Command{}, fmt.Errorf("target %q has an invalid deploy decoded value", target.ID)
+		return hclblock.TargetCommand{}, fmt.Errorf("target %q has an invalid deploy decoded value", target.ID)
 	}
-	return attehcltarget.Command{
+	return hclblock.TargetCommand{
 		Dir:  root,
 		Args: []string{"echo", fmt.Sprintf("deploy %s to %s", target.Name, decoded.Env)},
 	}, nil

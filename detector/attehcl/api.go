@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/ghthor/atte/detector/attehcltarget"
+	"github.com/ghthor/atte/detector/attehcl/hclblock"
 
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/graphtarget"
@@ -13,12 +13,12 @@ import (
 )
 
 type targetEvaluationCapabilities interface {
-	attehcltarget.KindCapabilities
+	hclblock.TargetKindCapabilities
 	FunctionCapabilities
 }
 
 // Targets evaluates all atte.hcl files independently and groups declarations by kind.
-func Targets(ctx context.Context, repo *attegit.Repo, scanner targetEvaluationCapabilities) (map[attehcltarget.Kind][]attehcltarget.Target, error) {
+func Targets(ctx context.Context, repo *attegit.Repo, scanner targetEvaluationCapabilities) (map[hclblock.TargetKind][]hclblock.Target, error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
@@ -47,13 +47,13 @@ func DeclaredTargets(ctx context.Context, repo *attegit.Repo, scanner targetEval
 }
 
 // SortedTargets returns the targets grouped by kind in deterministic source order.
-func SortedTargets(grouped map[attehcltarget.Kind][]attehcltarget.Target) []attehcltarget.Target {
-	kinds := make([]attehcltarget.Kind, 0, len(grouped))
+func SortedTargets(grouped map[hclblock.TargetKind][]hclblock.Target) []hclblock.Target {
+	kinds := make([]hclblock.TargetKind, 0, len(grouped))
 	for kind := range grouped {
 		kinds = append(kinds, kind)
 	}
 	slices.Sort(kinds)
-	targets := make([]attehcltarget.Target, 0)
+	targets := make([]hclblock.Target, 0)
 	for _, kind := range kinds {
 		targets = append(targets, grouped[kind]...)
 	}
@@ -64,7 +64,7 @@ func targetsWithCapabilities(
 	ctx context.Context,
 	repo *attegit.Repo,
 	scanner targetEvaluationCapabilities,
-) (map[attehcltarget.Kind][]attehcltarget.Target, error) {
+) (map[hclblock.TargetKind][]hclblock.Target, error) {
 	evaluator, err := newEvaluator(ctx, repo, scanner)
 	if err != nil {
 		return nil, err
@@ -78,7 +78,7 @@ func targetsWithCapabilities(
 
 // Config is the evaluated target configuration for a repository directory.
 type Config struct {
-	Targets map[attehcltarget.Kind][]attehcltarget.Target
+	Targets map[hclblock.TargetKind][]hclblock.Target
 }
 
 // ConfigFor evaluates the file-local target configuration for a repository-relative directory.

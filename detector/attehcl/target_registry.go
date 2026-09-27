@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/ghthor/atte/detector/attehcltarget"
+	"github.com/ghthor/atte/detector/attehcl/hclblock"
 
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/graph"
@@ -32,15 +32,15 @@ type EntityCapabilities interface {
 // Capabilities provides the capabilities HCL evaluation needs from the
 // compiled Scanner without importing the detector package.
 type Capabilities interface {
-	attehcltarget.KindCapabilities
+	hclblock.TargetKindCapabilities
 	FunctionCapabilities
 	EntityCapabilities
 }
 
 const (
-	KindTest    attehcltarget.Kind = "test"
-	KindCodegen attehcltarget.Kind = "codegen"
-	KindLint    attehcltarget.Kind = "lint"
+	KindTest    hclblock.TargetKind = "test"
+	KindCodegen hclblock.TargetKind = "codegen"
+	KindLint    hclblock.TargetKind = "lint"
 )
 
 var testSchema = hcl.BodySchema{
@@ -52,8 +52,8 @@ var testSchema = hcl.BodySchema{
 }
 
 // BuiltInTargetKinds returns the target kinds provided by atte itself.
-func BuiltInTargetKinds() map[attehcltarget.Kind]attehcltarget.KindSpec {
-	return map[attehcltarget.Kind]attehcltarget.KindSpec{
+func BuiltInTargetKinds() map[hclblock.TargetKind]hclblock.TargetKindSpec {
+	return map[hclblock.TargetKind]hclblock.TargetKindSpec{
 		KindTest: {
 			Decoder:   decodeScriptTarget,
 			Graph:     graphScriptTarget,
@@ -83,7 +83,7 @@ type decodedTarget struct {
 	Deps   []dependency
 }
 
-func validateDecoderResult(kind attehcltarget.Kind, decoded any) error {
+func validateDecoderResult(kind hclblock.TargetKind, decoded any) error {
 	if decoded == nil {
 		return fmt.Errorf("target kind %q decoder returned nil", kind)
 	}
@@ -98,12 +98,12 @@ const targetTraversalValuePrefix = "attehcl-target:"
 
 var defaultTargetKinds = BuiltInTargetKinds()
 
-func targetKinds(scanner attehcltarget.KindCapabilities) map[attehcltarget.Kind]attehcltarget.KindSpec {
+func targetKinds(scanner hclblock.TargetKindCapabilities) map[hclblock.TargetKind]hclblock.TargetKindSpec {
 	provided := defaultTargetKinds
 	if scanner != nil {
 		provided = scanner.TargetKinds()
 	}
-	result := make(map[attehcltarget.Kind]attehcltarget.KindSpec, len(provided))
+	result := make(map[hclblock.TargetKind]hclblock.TargetKindSpec, len(provided))
 	for kind, spec := range provided {
 		schema := testSchema
 		if spec.Schema != nil {
@@ -122,13 +122,13 @@ func copyBodySchema(schema hcl.BodySchema) hcl.BodySchema {
 	}
 }
 
-func targetTraversalValue(kind attehcltarget.Kind, name string) string {
+func targetTraversalValue(kind hclblock.TargetKind, name string) string {
 	return targetTraversalValuePrefix + string(kind) + "." + name
 }
 
 const targetReferenceValuePrefix = "attehcl-target-ref:"
 
-func targetReferenceValue(file reference.Blob, kind attehcltarget.Kind, name string) string {
+func targetReferenceValue(file reference.Blob, kind hclblock.TargetKind, name string) string {
 	return targetReferenceValuePrefix + file.String() + "#" + string(kind) + "." + name
 }
 
@@ -151,12 +151,12 @@ func targetReferenceFromValue(value string) (targetReference, bool) {
 	}
 	return targetReference{
 		file: file,
-		kind: attehcltarget.Kind(kind),
+		kind: hclblock.TargetKind(kind),
 		name: name,
 	}, true
 }
 
-func targetTraversal(kind attehcltarget.Kind, name string) hcl.Traversal {
+func targetTraversal(kind hclblock.TargetKind, name string) hcl.Traversal {
 	return hcl.Traversal{
 		hcl.TraverseRoot{Name: string(kind)},
 		hcl.TraverseAttr{Name: name},

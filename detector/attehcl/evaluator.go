@@ -7,7 +7,7 @@ import (
 	"maps"
 	"strings"
 
-	"github.com/ghthor/atte/detector/attehcltarget"
+	"github.com/ghthor/atte/detector/attehcl/hclblock"
 
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/graph"
@@ -25,13 +25,13 @@ type evaluator struct {
 	files        hclFiles
 	scanner      targetEvaluationCapabilities
 	functions    map[reference.Blob]map[string]function.Function
-	kindSpecs    map[attehcltarget.Kind]attehcltarget.KindSpec
+	kindSpecs    map[hclblock.TargetKind]hclblock.TargetKindSpec
 	declarations declarationIndex
 }
 
 type normalizedBlock struct {
 	block *hclsyntax.Block
-	kind  attehcltarget.Kind
+	kind  hclblock.TargetKind
 	name  string
 	index int
 }
@@ -40,7 +40,7 @@ type normalizedBlock struct {
 // without evaluating its body.
 type targetDeclaration struct {
 	ID     graph.EntityID
-	Kind   attehcltarget.Kind
+	Kind   hclblock.TargetKind
 	File   reference.Blob
 	Name   string
 	Index  int
@@ -48,13 +48,13 @@ type targetDeclaration struct {
 }
 
 type evaluatedTarget struct {
-	Kind    attehcltarget.Kind
+	Kind    hclblock.TargetKind
 	File    reference.Blob
 	Name    string
 	Label   string
 	Index   int
 	Decoded any
-	Spec    attehcltarget.KindSpec
+	Spec    hclblock.TargetKindSpec
 	Source  hcl.Range
 }
 
@@ -344,8 +344,8 @@ func (p targetsPhase) evaluatedTargets(file *hclFile) ([]evaluatedTarget, error)
 
 func (p declarationsPhase) normalizeBlocks(file *hclFile) ([]normalizedBlock, error) {
 	blocks := make([]normalizedBlock, 0, len(file.body.Blocks))
-	kindIndexes := make(map[attehcltarget.Kind]int, len(p.evaluator.kindSpecs))
-	named := make(map[attehcltarget.Kind]map[string]struct{}, len(p.evaluator.kindSpecs))
+	kindIndexes := make(map[hclblock.TargetKind]int, len(p.evaluator.kindSpecs))
+	named := make(map[hclblock.TargetKind]map[string]struct{}, len(p.evaluator.kindSpecs))
 	for _, block := range file.body.Blocks {
 		if err := p.evaluator.ctx.Err(); err != nil {
 			return nil, err
@@ -373,7 +373,7 @@ func (p declarationsPhase) normalizeBlocks(file *hclFile) ([]normalizedBlock, er
 	return blocks, nil
 }
 
-func (p declarationsPhase) normalizeBlock(block *hclsyntax.Block) (attehcltarget.Kind, string, *hclsyntax.Body, error) {
+func (p declarationsPhase) normalizeBlock(block *hclsyntax.Block) (hclblock.TargetKind, string, *hclsyntax.Body, error) {
 	kindName := block.Type
 	labelOffset := 0
 	if block.Type == "target" {
@@ -383,7 +383,7 @@ func (p declarationsPhase) normalizeBlock(block *hclsyntax.Block) (attehcltarget
 		kindName = block.Labels[0]
 		labelOffset = 1
 	}
-	kind := attehcltarget.Kind(kindName)
+	kind := hclblock.TargetKind(kindName)
 	if _, attached := p.evaluator.kindSpecs[kind]; !attached {
 		return "", "", nil, fmt.Errorf("unknown target kind %q", kindName)
 	}

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"maps"
 
-	"github.com/ghthor/atte/detector/attehcltarget"
+	"github.com/ghthor/atte/detector/attehcl/hclblock"
 
 	"github.com/hashicorp/hcl/v2"
 	"github.com/zclconf/go-cty/cty"
@@ -36,8 +36,8 @@ func evaluateDeclaration(expression hcl.Expression, context *hcl.EvalContext) (c
 
 // evaluateLocals resolves file-local declarations without evaluating another
 // atte.hcl file. Cross-file target references are resolved from declarations.
-func targetContextValues(blocks []normalizedBlock, kinds map[attehcltarget.Kind]attehcltarget.KindSpec) map[string]cty.Value {
-	attributes := make(map[attehcltarget.Kind]map[string]cty.Value, len(kinds))
+func targetContextValues(blocks []normalizedBlock, kinds map[hclblock.TargetKind]hclblock.TargetKindSpec) map[string]cty.Value {
+	attributes := make(map[hclblock.TargetKind]map[string]cty.Value, len(kinds))
 	for kind := range kinds {
 		attributes[kind] = make(map[string]cty.Value)
 	}

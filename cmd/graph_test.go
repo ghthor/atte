@@ -15,7 +15,7 @@ import (
 	"github.com/ghthor/atte/detector/attegittest"
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/attehcl"
-	"github.com/ghthor/atte/detector/attehcltarget"
+	"github.com/ghthor/atte/detector/attehcl/hclblock"
 	"github.com/ghthor/atte/detector/scanner"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/shoenig/test"
@@ -258,17 +258,17 @@ func TestPrintGraphIncludesCustomHCLTargets(t *testing.T) {
 	})
 	builder, err := scanner.NewDefault()
 	must.NoError(t, err)
-	must.NoError(t, detector.AttachHCLTargetBlock(builder, "deploy", attehcltarget.KindSpec{
+	must.NoError(t, detector.AttachHCLTargetBlock(builder, "deploy", hclblock.TargetKindSpec{
 		Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
 			return struct{}{}, nil
 		},
 		Graph: func(
 			_ context.Context,
 			_ *attegit.Repo,
-			target attehcltarget.Target,
-			_ attehcltarget.GraphContext,
+			target hclblock.Target,
+			_ hclblock.TargetGraphContext,
 			attachToTree bool,
-		) (attehcltarget.Graph, error) {
+		) (hclblock.TargetGraph, error) {
 			return target.GraphProjectionBase(attachToTree), nil
 		},
 	}))

@@ -1,4 +1,4 @@
-package attehcltarget
+package hclblock
 
 import (
 	"fmt"
@@ -12,31 +12,31 @@ import (
 	"github.com/hashicorp/hcl/v2"
 )
 
-// SourceFileRelation connects a target to the atte.hcl file that declares it.
-const SourceFileRelation graph.RelationKind = "source-file"
+// TargetSourceFileRelation connects a target to the atte.hcl file that declares it.
+const TargetSourceFileRelation graph.RelationKind = "source-file"
 
-// GraphContext provides common dependency resolution to a graph projector.
-type GraphContext struct {
+// TargetGraphContext provides common dependency resolution to a graph projector.
+type TargetGraphContext struct {
 	ResolveTarget   func(hcl.Traversal) (graph.Entity, error)
 	ResolveTargetAt func(reference.Blob, hcl.Traversal) (graph.Entity, error)
 	EntityKind      func(graph.EntityID) (graph.EntityKind, error)
 }
 
-// Graph is the graph projection of one target.
-type Graph struct {
+// TargetGraph is the graph projection of one target.
+type TargetGraph struct {
 	Entities      []graph.Entity
 	Relationships []graph.Relationship
 }
 
-// Command is the executable representation of one target.
-type Command struct {
+// TargetCommand is the executable representation of one target.
+type TargetCommand struct {
 	Dir  string
 	Args []string
 }
 
 // Target describes one target declared by an attached kind in an atte.hcl file.
 // Its fields carry the graph identity, source location, decoded value, and
-// optional script data. The optional projections are bound from the KindSpec.
+// optional script data. The optional projections are bound from TargetKindSpec.
 type Target struct {
 	ID      graph.EntityID
 	Kind    string
@@ -50,13 +50,13 @@ type Target struct {
 	Decoded any
 	Source  hcl.Range
 
-	graph     GraphProjection
-	execution ExecutionProjection
-	config    ConfigProjection
+	graph     TargetGraphProjection
+	execution TargetExecutionProjection
+	config    TargetConfigProjection
 }
 
-// Bind returns target with the optional projections from spec attached.
-func Bind(target Target, spec KindSpec) Target {
+// TargetBind returns target with the optional projections from spec attached.
+func TargetBind(target Target, spec TargetKindSpec) Target {
 	target.graph = spec.Graph
 	target.execution = spec.Execution
 	target.config = spec.Config
@@ -78,16 +78,16 @@ func (target Target) Runnable() bool {
 }
 
 // Execution constructs the executable representation of the target from a repository root.
-func (target Target) Execution(root string) (Command, error) {
+func (target Target) Execution(root string) (TargetCommand, error) {
 	if target.execution == nil {
-		return Command{}, fmt.Errorf("target %q has no execution projection", target.ID)
+		return TargetCommand{}, fmt.Errorf("target %q has no execution projection", target.ID)
 	}
 	command, err := target.execution(target, root)
 	if err != nil {
-		return Command{}, fmt.Errorf("construct command for target %q: %w", target.ID, err)
+		return TargetCommand{}, fmt.Errorf("construct command for target %q: %w", target.ID, err)
 	}
 	if len(command.Args) == 0 {
-		return Command{}, fmt.Errorf("construct command for target %q: command has no arguments", target.ID)
+		return TargetCommand{}, fmt.Errorf("construct command for target %q: command has no arguments", target.ID)
 	}
 	return command, nil
 }
@@ -104,14 +104,14 @@ func (target Target) Command(root string) (*exec.Cmd, error) {
 }
 
 // GraphProjection returns the optional graph projection supplied by the kind.
-func (target Target) GraphProjection() GraphProjection {
+func (target Target) GraphProjection() TargetGraphProjection {
 	return target.graph
 }
 
 // GraphProjectionBase returns the target entity and, when requested, the common
 // declaring-file and tree entities and relationships for a target.
-func (target Target) GraphProjectionBase(attachToTree bool) Graph {
-	result := Graph{Entities: []graph.Entity{{ID: target.ID, Kind: graph.EntityKind(target.Kind)}}}
+func (target Target) GraphProjectionBase(attachToTree bool) TargetGraph {
+	result := TargetGraph{Entities: []graph.Entity{{ID: target.ID, Kind: graph.EntityKind(target.Kind)}}}
 	if !attachToTree {
 		return result
 	}
@@ -122,7 +122,7 @@ func (target Target) GraphProjectionBase(attachToTree bool) Graph {
 		graph.Entity{ID: file, Kind: attegit.BlobKind},
 	)
 	result.Relationships = append(result.Relationships,
-		graph.Relationship{From: target.ID, To: file, Kind: SourceFileRelation},
+		graph.Relationship{From: target.ID, To: file, Kind: TargetSourceFileRelation},
 		graph.Relationship{From: tree, To: target.ID, Kind: attegit.ContainsRelation},
 	)
 	return result

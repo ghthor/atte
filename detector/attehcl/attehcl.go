@@ -2,7 +2,7 @@
 package attehcl
 
 import (
-	"github.com/ghthor/atte/detector/attehcltarget"
+	"github.com/ghthor/atte/detector/attehcl/hclblock"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/reference"
 	"github.com/hashicorp/hcl/v2"
@@ -15,7 +15,7 @@ const (
 	TestKind                              = Namespace + ":test"
 	CodegenKind                           = Namespace + ":codegen"
 	LintKind                              = Namespace + ":lint"
-	SourceFileRelation graph.RelationKind = attehcltarget.SourceFileRelation
+	SourceFileRelation graph.RelationKind = hclblock.TargetSourceFileRelation
 	ScriptRelation     graph.RelationKind = "script"
 	DependsOnRelation  graph.RelationKind = "depends-on"
 
@@ -40,7 +40,7 @@ type dependency struct {
 
 type targetReference struct {
 	file reference.Blob
-	kind attehcltarget.Kind
+	kind hclblock.TargetKind
 	name string
 }
 
