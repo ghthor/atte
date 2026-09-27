@@ -328,8 +328,8 @@ func TestAttachTarget(t *testing.T) {
 	decoder := func(*hcl.BodyContent, *hcl.EvalContext) (any, error) { return struct{}{}, nil }
 	schema := hcl.BodySchema{}
 	spec := attehcl.TargetKindSpec{Schema: &schema, Decoder: decoder}
-	test.NoError(t, AttachHCLBlock(builder, "custom", spec))
-	test.Error(t, AttachHCLBlock(builder, "custom", spec))
+	test.NoError(t, AttachHCLTargetBlock(builder, "custom", spec))
+	test.Error(t, AttachHCLTargetBlock(builder, "custom", spec))
 
 	attached := builder.Compile().TargetKinds()
 	test.EqOp(t, 1, len(attached))
@@ -347,9 +347,9 @@ func TestAttachHCLFunction(t *testing.T) {
 func TestCompileSnapshotsAttachments(t *testing.T) {
 	builder := NewBuilder()
 	decoder := func(*hcl.BodyContent, *hcl.EvalContext) (any, error) { return struct{}{}, nil }
-	must.NoError(t, AttachHCLBlock(builder, "first", attehcl.TargetKindSpec{Decoder: decoder}))
+	must.NoError(t, AttachHCLTargetBlock(builder, "first", attehcl.TargetKindSpec{Decoder: decoder}))
 	compiled := builder.Compile()
-	must.NoError(t, AttachHCLBlock(builder, "second", attehcl.TargetKindSpec{Decoder: decoder}))
+	must.NoError(t, AttachHCLTargetBlock(builder, "second", attehcl.TargetKindSpec{Decoder: decoder}))
 
 	test.EqOp(t, 1, len(compiled.TargetKinds()))
 	test.EqOp(t, 2, len(builder.Compile().TargetKinds()))
@@ -357,10 +357,10 @@ func TestCompileSnapshotsAttachments(t *testing.T) {
 
 func TestAttachTargetValidation(t *testing.T) {
 	decoder := func(*hcl.BodyContent, *hcl.EvalContext) (any, error) { return struct{}{}, nil }
-	test.Error(t, AttachHCLBlock(nil, "custom", attehcl.TargetKindSpec{Decoder: decoder}))
+	test.Error(t, AttachHCLTargetBlock(nil, "custom", attehcl.TargetKindSpec{Decoder: decoder}))
 	builder := NewBuilder()
-	test.Error(t, AttachHCLBlock(builder, "bad name", attehcl.TargetKindSpec{Decoder: decoder}))
-	test.Error(t, AttachHCLBlock(builder, "missing_decoder", attehcl.TargetKindSpec{}))
+	test.Error(t, AttachHCLTargetBlock(builder, "bad name", attehcl.TargetKindSpec{Decoder: decoder}))
+	test.Error(t, AttachHCLTargetBlock(builder, "missing_decoder", attehcl.TargetKindSpec{}))
 }
 
 func TestDecodeID(t *testing.T) {
@@ -446,7 +446,7 @@ func (methodSensor) HCLFunctions() map[string]HCLFunctionFactory {
 	return map[string]HCLFunctionFactory{"method": attegit.PathHCLFunction}
 }
 
-func (methodSensor) HCLBlocks() map[attehcl.Kind]attehcl.TargetKindSpec {
+func (methodSensor) HCLTargetBlocks() map[attehcl.Kind]attehcl.TargetKindSpec {
 	return map[attehcl.Kind]attehcl.TargetKindSpec{
 		"method": {Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) { return struct{}{}, nil }},
 	}

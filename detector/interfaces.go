@@ -49,9 +49,9 @@ type SensorProvidingHCLFunctions interface {
 	HCLFunctions() map[string]HCLFunctionFactory
 }
 
-// SensorProvidingHCLBlocks supplies HCL target-kind specifications during
+// SensorProvidingHCLTargetBlocks supplies HCL target-kind specifications during
 // attachment.
-type SensorProvidingHCLBlocks interface {
+type SensorProvidingHCLTargetBlocks interface {
 	Sensor
-	HCLBlocks() map[attehcl.Kind]attehcl.TargetKindSpec
+	HCLTargetBlocks() map[attehcl.Kind]attehcl.TargetKindSpec
 }

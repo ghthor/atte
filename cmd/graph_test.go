@@ -256,7 +256,7 @@ func TestPrintGraphIncludesCustomHCLTargets(t *testing.T) {
 	})
 	builder, err := detector.NewDefaultBuilder()
 	must.NoError(t, err)
-	must.NoError(t, detector.AttachHCLBlock(builder, "deploy", attehcl.TargetKindSpec{
+	must.NoError(t, detector.AttachHCLTargetBlock(builder, "deploy", attehcl.TargetKindSpec{
 		Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
 			return struct{}{}, nil
 		},

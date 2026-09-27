@@ -131,18 +131,18 @@ func (b *Builder) Compile() Scanner {
 	return result
 }
 
-// AttachHCLBlock adds a target kind to a detector Builder. A nil schema uses
+// AttachHCLTargetBlock adds a target kind to a detector Builder. A nil schema uses
 // the built-in script-target schema. Attachment rejects duplicate kinds.
 //
 // This is a function rather than a method because Go does not yet support
 // generic methods on non-generic types. Once the minimum Go version reaches
 // Go 1.27 and generic methods are available, this can become a Builder method.
-func AttachHCLBlock[K ~string](b *Builder, kind K, spec attehcl.TargetKindSpec) error {
+func AttachHCLTargetBlock[K ~string](b *Builder, kind K, spec attehcl.TargetKindSpec) error {
 	if b == nil {
 		return fmt.Errorf("builder is nil")
 	}
 	key := attehcl.Kind(kind)
-	normalized, err := b.normalizeHCLBlock(key, spec)
+	normalized, err := b.normalizeHCLTargetBlock(key, spec)
 	if err != nil {
 		return err
 	}
@@ -150,7 +150,7 @@ func AttachHCLBlock[K ~string](b *Builder, kind K, spec attehcl.TargetKindSpec) 
 	return nil
 }
 
-func (b *Builder) normalizeHCLBlock(kind attehcl.Kind, spec attehcl.TargetKindSpec) (attehcl.TargetKindSpec, error) {
+func (b *Builder) normalizeHCLTargetBlock(kind attehcl.Kind, spec attehcl.TargetKindSpec) (attehcl.TargetKindSpec, error) {
 	name := string(kind)
 	if name == "" {
 		return spec, fmt.Errorf("target kind is empty")
@@ -269,8 +269,8 @@ func sensorCapabilities(value Sensor) (map[string]HCLFunctionFactory, map[attehc
 		maps.Copy(functions, provider.HCLFunctions())
 	}
 	blocks := make(map[attehcl.Kind]attehcl.TargetKindSpec)
-	if provider, ok := value.(SensorProvidingHCLBlocks); ok {
-		maps.Copy(blocks, provider.HCLBlocks())
+	if provider, ok := value.(SensorProvidingHCLTargetBlocks); ok {
+		maps.Copy(blocks, provider.HCLTargetBlocks())
 	}
 	return functions, blocks
 }
@@ -293,7 +293,7 @@ func (b *Builder) validateHCLCapabilities(functions map[string]HCLFunctionFactor
 	}
 	slices.Sort(blockKinds)
 	for _, kind := range blockKinds {
-		if _, err := b.normalizeHCLBlock(kind, blocks[kind]); err != nil {
+		if _, err := b.normalizeHCLTargetBlock(kind, blocks[kind]); err != nil {
 			return err
 		}
 	}
@@ -303,7 +303,7 @@ func (b *Builder) validateHCLCapabilities(functions map[string]HCLFunctionFactor
 func (b *Builder) attachHCLCapabilities(functions map[string]HCLFunctionFactory, blocks map[attehcl.Kind]attehcl.TargetKindSpec) {
 	maps.Copy(b.functions, functions)
 	for kind, spec := range blocks {
-		normalized, _ := b.normalizeHCLBlock(kind, spec)
+		normalized, _ := b.normalizeHCLTargetBlock(kind, spec)
 		b.targetKinds[kind] = normalized
 	}
 }

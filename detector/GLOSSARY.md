@@ -73,7 +73,7 @@ Capabilities are optional. A Sensor may provide graph construction, target disco
 Sensors may also expose HCL capabilities during attachment:
 
 * SensorProvidingHCLFunctions supplies HCL function factories.
-* SensorProvidingHCLBlocks supplies HCL target-kind specifications.
+* SensorProvidingHCLTargetBlocks supplies HCL target-kind specifications.
 
 AttachSensor discovers these interfaces and attaches the supplied HCL
 capabilities to the Builder together with the Sensor.
@@ -117,7 +117,7 @@ if err != nil {
     return err
 }
 
-if err := detector.AttachHCLBlock(builder, "deploy", spec); err != nil {
+if err := detector.AttachHCLTargetBlock(builder, "deploy", spec); err != nil {
     return err
 }
 
@@ -132,11 +132,11 @@ Attach is the setup-time verb for adding capabilities to a Builder:
 
 * Attach adds a SensorSpec.
 * AttachSensor adapts and attaches a method-based Sensor.
-* AttachHCLBlock attaches a target-kind specification.
+* AttachHCLTargetBlock attaches a target-kind specification.
 * AttachHCLFunction attaches an HCL function factory.
 
 AttachSensor also discovers SensorProvidingHCLFunctions and
-SensorProvidingHCLBlocks implementations and attaches their HCL capabilities.
+SensorProvidingHCLTargetBlocks implementations and attaches their HCL capabilities.
 
 ## Default Builder
 

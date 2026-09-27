@@ -14,8 +14,8 @@ dependency resolution is a later graph-assembly concern.
 ## Attaching target kinds
 
 Use `detector.NewDefaultBuilder` when an application wants the standard Sensors, target
-kinds, and HCL functions. Attach custom HCL blocks on the setup builder
-with `detector.AttachHCLBlock`. The attachment requires a decoder and can
+kinds, and HCL functions. Attach custom HCL target blocks on the setup builder
+with `detector.AttachHCLTargetBlock`. The attachment requires a decoder and can
 optionally provide graph, execution, configuration, and script projections.
 Those optional projections determine which capabilities are available for the
 custom target.
@@ -26,7 +26,7 @@ if err != nil {
 	return err
 }
 
-err = detector.AttachHCLBlock(builder, "deploy", attehcl.TargetKindSpec{
+err = detector.AttachHCLTargetBlock(builder, "deploy", attehcl.TargetKindSpec{
 	Schema:    &deploySchema,
 	Decoder:   decodeDeploy,
 	Graph:     graphDeploy,

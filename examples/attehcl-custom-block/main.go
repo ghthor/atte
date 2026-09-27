@@ -36,7 +36,7 @@ type deployTarget struct {
 }
 
 func attachDeployBlock(builder *detector.Builder) error {
-	return detector.AttachHCLBlock(builder, KindDeploy, attehcl.TargetKindSpec{
+	return detector.AttachHCLTargetBlock(builder, KindDeploy, attehcl.TargetKindSpec{
 		Schema:    &deploySchema,
 		Decoder:   decodeDeployTarget,
 		Graph:     graphDeployTarget,

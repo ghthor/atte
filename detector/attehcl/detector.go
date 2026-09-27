@@ -22,9 +22,9 @@ func NewDetector(scanner Capabilities) Detector {
 	return Detector{scanner: scanner}
 }
 
-// HCLBlocks provides the target-kind specifications contributed by the HCL
-// Sensor during sensor attachment.
-func (Detector) HCLBlocks() map[Kind]TargetKindSpec {
+// HCLTargetBlocks provides the HCL target-kind specifications contributed by
+// the Sensor during attachment.
+func (Detector) HCLTargetBlocks() map[Kind]TargetKindSpec {
 	return BuiltInTargetKinds()
 }
 
