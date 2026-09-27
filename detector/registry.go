@@ -63,6 +63,11 @@ type Scanner interface {
 	// callers may modify without changing the Scanner.
 	TargetKinds() map[attehcltarget.Kind]attehcltarget.KindSpec
 
+	// ConfigBlocks returns the attached HCL configuration blocks. The returned
+	// map and schemas are independent copies that callers may modify without
+	// changing the Scanner.
+	ConfigBlocks() map[string]ConfigBlock
+
 	// DecodeID resolves id by dispatching it to the Sensor attached for its
 	// namespace.
 	DecodeID(graph.EntityID) (graph.Entity, error)
@@ -73,7 +78,8 @@ type Scanner interface {
 	HCLFunctions(context.Context, *attegit.Repo, reference.Blob) (map[string]function.Function, error)
 }
 
-// Builder collects Sensor, target-kind, and HCL function attachments.
+// Builder collects Sensor, target-kind, configuration-block, and HCL function
+// attachments.
 // Builders are setup-only values, are not safe for concurrent mutation, and
 // must be compiled before being passed to detector consumers.
 type Builder struct {
@@ -81,6 +87,7 @@ type Builder struct {
 	scannerSensors map[string]Sensor
 	functions      map[string]HCLFunctionFactory
 	targetKinds    map[attehcltarget.Kind]attehcltarget.KindSpec
+	configBlocks   map[string]ConfigBlock
 }
 
 type compiledScanner struct {
@@ -88,6 +95,7 @@ type compiledScanner struct {
 	sensorsByName map[string]SensorSpec
 	functions     map[string]HCLFunctionFactory
 	targetKinds   map[attehcltarget.Kind]attehcltarget.KindSpec
+	configBlocks  map[string]ConfigBlock
 }
 
 var (
@@ -102,6 +110,7 @@ func NewBuilder() *Builder {
 		scannerSensors: make(map[string]Sensor),
 		functions:      make(map[string]HCLFunctionFactory),
 		targetKinds:    make(map[attehcltarget.Kind]attehcltarget.KindSpec),
+		configBlocks:   make(map[string]ConfigBlock),
 	}
 }
 
@@ -117,6 +126,7 @@ func (b *Builder) Compile() (Scanner, error) {
 		sensorsByName: make(map[string]SensorSpec, sensorCount),
 		functions:     maps.Clone(b.functions),
 		targetKinds:   cloneTargetKinds(b.targetKinds),
+		configBlocks:  cloneConfigBlocks(b.configBlocks),
 		sensors:       make([]SensorSpec, 0, sensorCount),
 	}
 	for _, sensor := range b.sensors {
@@ -170,6 +180,21 @@ func AttachHCLTargetBlock[K ~string](b *Builder, kind K, spec attehcltarget.Kind
 	return nil
 }
 
+// AttachHCLConfigBlock adds a named configuration block to a detector Builder.
+// Names must be valid HCL identifiers, and blocks must provide a schema and
+// decoder. Duplicate names are rejected.
+func AttachHCLConfigBlock(b *Builder, name string, block ConfigBlock) error {
+	if b == nil {
+		return fmt.Errorf("builder is nil")
+	}
+	normalized, err := b.normalizeHCLConfigBlock(name, block)
+	if err != nil {
+		return err
+	}
+	b.configBlocks[name] = normalized
+	return nil
+}
+
 func (b *Builder) normalizeHCLTargetBlock(kind attehcltarget.Kind, spec attehcltarget.KindSpec) (attehcltarget.KindSpec, error) {
 	name := string(kind)
 	if name == "" {
@@ -191,6 +216,27 @@ func (b *Builder) normalizeHCLTargetBlock(kind attehcltarget.Kind, spec attehclt
 	return spec, nil
 }
 
+func (b *Builder) normalizeHCLConfigBlock(name string, block ConfigBlock) (ConfigBlock, error) {
+	if name == "" {
+		return block, fmt.Errorf("configuration block name is empty")
+	}
+	if !hclsyntax.ValidIdentifier(name) {
+		return block, fmt.Errorf("configuration block name %q is not a valid HCL identifier", name)
+	}
+	if block.Schema == nil {
+		return block, fmt.Errorf("configuration block %q has no schema", name)
+	}
+	if block.Decoder == nil {
+		return block, fmt.Errorf("configuration block %q has no decoder", name)
+	}
+	if _, exists := b.configBlocks[name]; exists {
+		return block, fmt.Errorf("configuration block %q is already attached", name)
+	}
+	schema := copyBodySchema(*block.Schema)
+	block.Schema = &schema
+	return block, nil
+}
+
 func cloneTargetKinds(source map[attehcltarget.Kind]attehcltarget.KindSpec) map[attehcltarget.Kind]attehcltarget.KindSpec {
 	result := make(map[attehcltarget.Kind]attehcltarget.KindSpec, len(source))
 	for kind, spec := range source {
@@ -199,6 +245,18 @@ func cloneTargetKinds(source map[attehcltarget.Kind]attehcltarget.KindSpec) map[
 			spec.Schema = &schema
 		}
 		result[kind] = spec
+	}
+	return result
+}
+
+func cloneConfigBlocks(source map[string]ConfigBlock) map[string]ConfigBlock {
+	result := make(map[string]ConfigBlock, len(source))
+	for name, block := range source {
+		if block.Schema != nil {
+			schema := copyBodySchema(*block.Schema)
+			block.Schema = &schema
+		}
+		result[name] = block
 	}
 	return result
 }
@@ -213,14 +271,14 @@ func copyBodySchema(schema hcl.BodySchema) hcl.BodySchema {
 // Attach adds a SensorSpec to a detector Builder. Namespaces must be unique
 // and non-empty.
 func (b *Builder) Attach(sensor SensorSpec) error {
-	if err := b.validateSensor(sensor); err != nil {
+	if err := b.validateSensor(sensor, false); err != nil {
 		return err
 	}
 	b.sensors[sensor.Namespace] = sensor
 	return nil
 }
 
-func (b *Builder) validateSensor(sensor SensorSpec) error {
+func (b *Builder) validateSensor(sensor SensorSpec, hasHCLCapabilities bool) error {
 	if b == nil {
 		return fmt.Errorf("builder is nil")
 	}
@@ -238,7 +296,7 @@ func (b *Builder) validateSensor(sensor SensorSpec) error {
 			return fmt.Errorf("sensor %q target capability is missing ExecuteTarget", sensor.Namespace)
 		}
 	}
-	if sensor.Graph == nil && !targetCapability && sensor.DecodeID == nil {
+	if sensor.Graph == nil && !targetCapability && sensor.DecodeID == nil && !hasHCLCapabilities {
 		return fmt.Errorf("sensor %q has no capabilities", sensor.Namespace)
 	}
 	if _, exists := b.sensors[sensor.Namespace]; exists {
@@ -261,11 +319,12 @@ func (b *Builder) AttachSensor(value Sensor) error {
 	}
 	sensor := adaptSensor(value)
 	_, scannerAware := value.(SensorWithScanner)
-	if err := b.validateSensor(sensor); err != nil {
+	functions, targetBlocks, configBlocks := sensorCapabilities(value)
+	hasHCLCapabilities := len(functions) > 0 || len(targetBlocks) > 0 || len(configBlocks) > 0
+	if err := b.validateSensor(sensor, hasHCLCapabilities); err != nil {
 		return err
 	}
-	functions, blocks := sensorCapabilities(value)
-	if err := b.validateHCLCapabilities(functions, blocks); err != nil {
+	if err := b.validateHCLCapabilities(functions, targetBlocks, configBlocks); err != nil {
 		return err
 	}
 	if scannerAware {
@@ -273,23 +332,31 @@ func (b *Builder) AttachSensor(value Sensor) error {
 	} else {
 		b.sensors[sensor.Namespace] = sensor
 	}
-	b.attachHCLCapabilities(functions, blocks)
+	b.attachHCLCapabilities(functions, targetBlocks, configBlocks)
 	return nil
 }
 
-func sensorCapabilities(value Sensor) (map[string]HCLFunctionFactory, map[attehcltarget.Kind]attehcltarget.KindSpec) {
+func sensorCapabilities(value Sensor) (map[string]HCLFunctionFactory, map[attehcltarget.Kind]attehcltarget.KindSpec, map[string]ConfigBlock) {
 	functions := make(map[string]HCLFunctionFactory)
 	if provider, ok := value.(SensorProvidingHCLFunctions); ok {
 		maps.Copy(functions, provider.HCLFunctions())
 	}
-	blocks := make(map[attehcltarget.Kind]attehcltarget.KindSpec)
+	targetBlocks := make(map[attehcltarget.Kind]attehcltarget.KindSpec)
 	if provider, ok := value.(SensorProvidingHCLTargetBlocks); ok {
-		maps.Copy(blocks, provider.HCLTargetBlocks())
+		maps.Copy(targetBlocks, provider.HCLTargetBlocks())
 	}
-	return functions, blocks
+	configBlocks := make(map[string]ConfigBlock)
+	if provider, ok := value.(SensorProvidingHCLConfigBlocks); ok {
+		maps.Copy(configBlocks, provider.HCLConfigBlocks())
+	}
+	return functions, targetBlocks, configBlocks
 }
 
-func (b *Builder) validateHCLCapabilities(functions map[string]HCLFunctionFactory, blocks map[attehcltarget.Kind]attehcltarget.KindSpec) error {
+func (b *Builder) validateHCLCapabilities(
+	functions map[string]HCLFunctionFactory,
+	targetBlocks map[attehcltarget.Kind]attehcltarget.KindSpec,
+	configBlocks map[string]ConfigBlock,
+) error {
 	functionNames := make([]string, 0, len(functions))
 	for name := range functions {
 		functionNames = append(functionNames, name)
@@ -301,24 +368,43 @@ func (b *Builder) validateHCLCapabilities(functions map[string]HCLFunctionFactor
 		}
 	}
 
-	blockKinds := make([]attehcltarget.Kind, 0, len(blocks))
-	for kind := range blocks {
+	blockKinds := make([]attehcltarget.Kind, 0, len(targetBlocks))
+	for kind := range targetBlocks {
 		blockKinds = append(blockKinds, kind)
 	}
 	slices.Sort(blockKinds)
 	for _, kind := range blockKinds {
-		if _, err := b.normalizeHCLTargetBlock(kind, blocks[kind]); err != nil {
+		if _, err := b.normalizeHCLTargetBlock(kind, targetBlocks[kind]); err != nil {
+			return err
+		}
+	}
+
+	configBlockNames := make([]string, 0, len(configBlocks))
+	for name := range configBlocks {
+		configBlockNames = append(configBlockNames, name)
+	}
+	sort.Strings(configBlockNames)
+	for _, name := range configBlockNames {
+		if _, err := b.normalizeHCLConfigBlock(name, configBlocks[name]); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (b *Builder) attachHCLCapabilities(functions map[string]HCLFunctionFactory, blocks map[attehcltarget.Kind]attehcltarget.KindSpec) {
+func (b *Builder) attachHCLCapabilities(
+	functions map[string]HCLFunctionFactory,
+	targetBlocks map[attehcltarget.Kind]attehcltarget.KindSpec,
+	configBlocks map[string]ConfigBlock,
+) {
 	maps.Copy(b.functions, functions)
-	for kind, spec := range blocks {
+	for kind, spec := range targetBlocks {
 		normalized, _ := b.normalizeHCLTargetBlock(kind, spec)
 		b.targetKinds[kind] = normalized
+	}
+	for name, block := range configBlocks {
+		normalized, _ := b.normalizeHCLConfigBlock(name, block)
+		b.configBlocks[name] = normalized
 	}
 }
 
@@ -367,6 +453,11 @@ func (b *Builder) validateHCLFunction(name string, factory HCLFunctionFactory) e
 // TargetKinds returns a copy of the compiled target-kind capabilities.
 func (s *compiledScanner) TargetKinds() map[attehcltarget.Kind]attehcltarget.KindSpec {
 	return cloneTargetKinds(s.targetKinds)
+}
+
+// ConfigBlocks returns a copy of the compiled configuration-block capabilities.
+func (s *compiledScanner) ConfigBlocks() map[string]ConfigBlock {
+	return cloneConfigBlocks(s.configBlocks)
 }
 
 // HCLFunctions returns fresh functions for the repository and file.
