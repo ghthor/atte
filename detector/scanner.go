@@ -66,7 +66,7 @@ type Scanner interface {
 	// ConfigBlocks returns the attached HCL configuration blocks. The returned
 	// map and schemas are independent copies that callers may modify without
 	// changing the Scanner.
-	ConfigBlocks() map[string]ConfigBlock
+	ConfigBlocks() map[string]hclblock.ConfigBlock
 
 	// DecodeID resolves id by dispatching it to the Sensor attached for its
 	// namespace.
@@ -87,7 +87,7 @@ type Builder struct {
 	scannerSensors map[string]Sensor
 	functions      map[string]HCLFunctionFactory
 	targetKinds    map[hclblock.TargetKind]hclblock.TargetKindSpec
-	configBlocks   map[string]ConfigBlock
+	configBlocks   map[string]hclblock.ConfigBlock
 }
 
 type compiledScanner struct {
@@ -95,7 +95,7 @@ type compiledScanner struct {
 	sensorsByName map[string]SensorSpec
 	functions     map[string]HCLFunctionFactory
 	targetKinds   map[hclblock.TargetKind]hclblock.TargetKindSpec
-	configBlocks  map[string]ConfigBlock
+	configBlocks  map[string]hclblock.ConfigBlock
 }
 
 var (
@@ -110,7 +110,7 @@ func NewBuilder() *Builder {
 		scannerSensors: make(map[string]Sensor),
 		functions:      make(map[string]HCLFunctionFactory),
 		targetKinds:    make(map[hclblock.TargetKind]hclblock.TargetKindSpec),
-		configBlocks:   make(map[string]ConfigBlock),
+		configBlocks:   make(map[string]hclblock.ConfigBlock),
 	}
 }
 
@@ -183,7 +183,7 @@ func AttachHCLTargetBlock[K ~string](b *Builder, kind K, spec hclblock.TargetKin
 // AttachHCLConfigBlock adds a named configuration block to a detector Builder.
 // Names must be valid HCL identifiers, and blocks must provide a schema and
 // decoder. Duplicate names are rejected.
-func AttachHCLConfigBlock(b *Builder, name string, block ConfigBlock) error {
+func AttachHCLConfigBlock(b *Builder, name string, block hclblock.ConfigBlock) error {
 	if b == nil {
 		return fmt.Errorf("builder is nil")
 	}
@@ -216,7 +216,7 @@ func (b *Builder) normalizeHCLTargetBlock(kind hclblock.TargetKind, spec hclbloc
 	return spec, nil
 }
 
-func (b *Builder) normalizeHCLConfigBlock(name string, block ConfigBlock) (ConfigBlock, error) {
+func (b *Builder) normalizeHCLConfigBlock(name string, block hclblock.ConfigBlock) (hclblock.ConfigBlock, error) {
 	if name == "" {
 		return block, fmt.Errorf("configuration block name is empty")
 	}
@@ -249,8 +249,8 @@ func cloneTargetKinds(source map[hclblock.TargetKind]hclblock.TargetKindSpec) ma
 	return result
 }
 
-func cloneConfigBlocks(source map[string]ConfigBlock) map[string]ConfigBlock {
-	result := make(map[string]ConfigBlock, len(source))
+func cloneConfigBlocks(source map[string]hclblock.ConfigBlock) map[string]hclblock.ConfigBlock {
+	result := make(map[string]hclblock.ConfigBlock, len(source))
 	for name, block := range source {
 		if block.Schema != nil {
 			schema := copyBodySchema(*block.Schema)
@@ -336,7 +336,7 @@ func (b *Builder) AttachSensor(value Sensor) error {
 	return nil
 }
 
-func sensorCapabilities(value Sensor) (map[string]HCLFunctionFactory, map[hclblock.TargetKind]hclblock.TargetKindSpec, map[string]ConfigBlock) {
+func sensorCapabilities(value Sensor) (map[string]HCLFunctionFactory, map[hclblock.TargetKind]hclblock.TargetKindSpec, map[string]hclblock.ConfigBlock) {
 	functions := make(map[string]HCLFunctionFactory)
 	if provider, ok := value.(SensorProvidingHCLFunctions); ok {
 		maps.Copy(functions, provider.HCLFunctions())
@@ -345,7 +345,7 @@ func sensorCapabilities(value Sensor) (map[string]HCLFunctionFactory, map[hclblo
 	if provider, ok := value.(SensorProvidingHCLTargetBlocks); ok {
 		maps.Copy(targetBlocks, provider.HCLTargetBlocks())
 	}
-	configBlocks := make(map[string]ConfigBlock)
+	configBlocks := make(map[string]hclblock.ConfigBlock)
 	if provider, ok := value.(SensorProvidingHCLConfigBlocks); ok {
 		maps.Copy(configBlocks, provider.HCLConfigBlocks())
 	}
@@ -355,7 +355,7 @@ func sensorCapabilities(value Sensor) (map[string]HCLFunctionFactory, map[hclblo
 func (b *Builder) validateHCLCapabilities(
 	functions map[string]HCLFunctionFactory,
 	targetBlocks map[hclblock.TargetKind]hclblock.TargetKindSpec,
-	configBlocks map[string]ConfigBlock,
+	configBlocks map[string]hclblock.ConfigBlock,
 ) error {
 	functionNames := make([]string, 0, len(functions))
 	for name := range functions {
@@ -395,7 +395,7 @@ func (b *Builder) validateHCLCapabilities(
 func (b *Builder) attachHCLCapabilities(
 	functions map[string]HCLFunctionFactory,
 	targetBlocks map[hclblock.TargetKind]hclblock.TargetKindSpec,
-	configBlocks map[string]ConfigBlock,
+	configBlocks map[string]hclblock.ConfigBlock,
 ) {
 	maps.Copy(b.functions, functions)
 	for kind, spec := range targetBlocks {
@@ -456,7 +456,7 @@ func (s *compiledScanner) TargetKinds() map[hclblock.TargetKind]hclblock.TargetK
 }
 
 // ConfigBlocks returns a copy of the compiled configuration-block capabilities.
-func (s *compiledScanner) ConfigBlocks() map[string]ConfigBlock {
+func (s *compiledScanner) ConfigBlocks() map[string]hclblock.ConfigBlock {
 	return cloneConfigBlocks(s.configBlocks)
 }
 

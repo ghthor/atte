@@ -1,5 +1,5 @@
-// Package hclblock contains the target-kind API shared by detector
-// registration and HCL evaluation.
+// Package hclblock defines the HCL block APIs shared by detector registration
+// and HCL evaluation.
 package hclblock
 
 import (

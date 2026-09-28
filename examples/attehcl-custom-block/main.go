@@ -72,7 +72,7 @@ func graphDeployTarget(
 	if _, ok := target.Decoded.(deployTarget); !ok {
 		return hclblock.TargetGraph{}, fmt.Errorf("target %q has an invalid deploy decoded value", target.ID)
 	}
-	return target.TargetGraphProjectionBase(attachToTree), nil
+	return target.GraphProjectionBase(attachToTree), nil
 }
 
 func configDeployTarget(target hclblock.Target) (map[string]any, error) {

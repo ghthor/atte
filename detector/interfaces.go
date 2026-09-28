@@ -9,7 +9,6 @@ import (
 	"github.com/ghthor/atte/detector/graphset"
 	"github.com/ghthor/atte/detector/graphtarget"
 	"github.com/ghthor/atte/reference/selector"
-	"github.com/hashicorp/hcl/v2"
 )
 
 // Sensor identifies one attached detector implementation.
@@ -65,17 +64,10 @@ type SensorProvidingHCLTargetBlocks interface {
 	HCLTargetBlocks() map[hclblock.TargetKind]hclblock.TargetKindSpec
 }
 
-// ConfigBlock describes an HCL configuration block schema and its decoder.
-type ConfigBlock struct {
-	// Schema describes the configuration block body.
-	Schema *hcl.BodySchema
-	// Decoder converts the schema-validated block body into a value.
-	Decoder func(*hcl.BodyContent, *hcl.EvalContext) (any, error)
-}
-
-// SensorProvidingHCLConfigBlocks allows a Sensor to provide named HCL configuration blocks
-// for decoding. The Scanner stores and exposes these blocks for future use.
+// SensorProvidingHCLConfigBlocks allows a Sensor to provide named HCL
+// configuration blocks for decoding. The Scanner stores and exposes these
+// blocks for future use.
 type SensorProvidingHCLConfigBlocks interface {
 	Sensor
-	HCLConfigBlocks() map[string]ConfigBlock
+	HCLConfigBlocks() map[string]hclblock.ConfigBlock
 }

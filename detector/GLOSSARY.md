@@ -144,8 +144,9 @@ Attach is the setup-time verb for adding capabilities to a Builder:
 * AttachHCLTargetBlock attaches a target-kind specification.
 * AttachHCLFunction attaches an HCL function factory.
 
-AttachSensor also discovers SensorProvidingHCLFunctions and
-SensorProvidingHCLTargetBlocks implementations and attaches their HCL capabilities.
+AttachSensor also discovers SensorProvidingHCLFunctions,
+SensorProvidingHCLTargetBlocks, and SensorProvidingHCLConfigBlocks implementations
+and attaches their HCL capabilities.
 
 ## Default Builder
 
@@ -169,6 +170,7 @@ type Scanner interface {
     ExecuteTarget(context.Context, *attegit.Repo, string, graphtarget.ID) (graphtarget.Execution, error)
     Graph(context.Context, *attegit.Repo, ...graphset.Option) (*graph.Graph, error)
     TargetKinds() map[hclblock.TargetKind]hclblock.TargetKindSpec
+    ConfigBlocks() map[string]hclblock.ConfigBlock
     DecodeID(graph.EntityID) (graph.Entity, error)
     HCLFunctions(context.Context, *attegit.Repo, reference.Blob) (map[string]function.Function, error)
 }
@@ -195,7 +197,7 @@ Compile transforms mutable Builder state into an immutable Scanner.
 
 Compilation:
 
-* copies regular Sensor attachments, target-kind specifications, schemas, and HCL function factories
+* copies regular Sensor attachments, target-kind and configuration-block specifications, schemas, and HCL function factories
 * injects the newly compiled Scanner into Sensors implementing SensorWithScanner
 * adapts those Sensors into the compiled runtime snapshot
 * returns an error if a Sensor rejects the Scanner
@@ -260,6 +262,10 @@ Entity decoding is dispatched by the namespace encoded in the entity ID. This le
 `hclblock.TargetKindSpec` describes the capabilities of one attached HCL target kind. It contains the required decoder and optional graph, execution, configuration, and script projections.
 
 The target-kind API types and their dependencies belong to `detector/attehcl/hclblock`. The evaluator and root detector package depend on this shared package instead of importing each other.
+
+## HCL configuration blocks
+
+`hclblock.ConfigBlock` contains the schema and decoder for a named HCL configuration block. A Sensor provides these through `SensorProvidingHCLConfigBlocks`; the Builder validates and attaches them, and the Scanner returns independent copies through `ConfigBlocks()`.
 
 ## Namespace
 
