@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"maps"
 	"os"
 	"os/exec"
 	"path"
@@ -23,7 +25,6 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/cache"
-	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/storage/filesystem"
 	"github.com/go-git/go-git/v5/storage/filesystem/dotgit"
 )
@@ -91,8 +92,10 @@ type Repo struct {
 
 	blobs map[reference.Blob][]byte
 
-	gitRepo  *git.Repository
-	gitRepos []*git.Repository
+	// gitDirs holds the repository's common Git directory followed by its
+	// object alternates. gitMu guards it because Show replaces stale entries.
+	gitDirs  []gitDir
+	gitMu    sync.Mutex
 	worktree billy.Filesystem
 	mu       sync.RWMutex
 }
@@ -110,17 +113,16 @@ func Open(repositoryPath, ref string, options ...OpenOption) (*Repo, error) {
 		option(&cfg)
 	}
 
-	gr, repos, err := openGitRepositories(repositoryPath)
+	dirs, err := openGitRepositories(repositoryPath)
 	if err != nil {
 		return nil, fmt.Errorf("open git repository: %w", err)
 	}
 	d := &Repo{
-		gitRepos: repos,
-		Obj:      make(map[reference.Path]Obj),
-		Tree:     make(map[reference.Tree][]Obj),
-		DirTree:  make(DirTree),
-		blobs:    make(map[reference.Blob][]byte),
-		gitRepo:  gr,
+		gitDirs: dirs,
+		Obj:     make(map[reference.Path]Obj),
+		Tree:    make(map[reference.Tree][]Obj),
+		DirTree: make(DirTree),
+		blobs:   make(map[reference.Blob][]byte),
 	}
 	if err := d.readTree(repositoryPath, ref); err != nil {
 		return nil, err
@@ -135,48 +137,135 @@ func Open(repositoryPath, ref string, options ...OpenOption) (*Repo, error) {
 	return d, nil
 }
 
-func openGitRepositories(repositoryPath string) (*git.Repository, []*git.Repository, error) {
-	root, err := git.PlainOpenWithOptions(repositoryPath, &git.PlainOpenOptions{
-		DetectDotGit:          false,
-		EnableDotGitCommonDir: false,
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-	repos := []*git.Repository{root}
-	dotgitPath := filepath.Join(repositoryPath, ".git")
-	isBare, err := isBareRepository(repositoryPath)
-	if err != nil {
-		return nil, nil, err
-	}
-	if isBare {
-		dotgitPath = repositoryPath
-	}
-	dot, err := dotgit.NewWithOptions(osfs.New(dotgitPath), dotgit.Options{
-		ExclusiveAccess: false,
-		KeepDescriptors: false,
-		AlternatesFS:    osfs.New("/"),
-	}).Alternates()
-	if err != nil && !os.IsNotExist(err) {
-		return nil, nil, err
-	}
-	for _, alternate := range dot {
-		repo, err := git.Open(filesystem.NewStorage(alternate.Fs(), cache.NewObjectLRUDefault()), nil)
-		if err != nil {
-			return nil, nil, err
-		}
-		repos = append(repos, repo)
-	}
-	return root, repos, nil
+// gitDir is an opened Git directory: either the repository's own or one of its
+// object alternates.
+type gitDir struct {
+	path string
+	repo *git.Repository
 }
 
-func isBareRepository(repositoryPath string) (bool, error) {
-	cmd := gitCommand(repositoryPath, "rev-parse", "--is-bare-repository")
-	output, err := cmd.Output()
+// gitDirError records why one Git directory could not provide an object.
+type gitDirError struct {
+	index int // position in Repo.gitDirs
+	path  string
+	err   error
+}
+
+func (e gitDirError) Error() string { return fmt.Sprintf("git dir %q: %v", e.path, e.err) }
+
+func (e gitDirError) Unwrap() error { return e.err }
+
+// gitCommonDir returns the absolute path of the Git directory that holds the
+// shared state (objects, refs, config) of the repository containing
+// repositoryPath.
+//
+// For a normal clone this is <root>/.git, for a bare repository it is the
+// repository itself, and for a linked worktree (where <root>/.git is a file
+// containing "gitdir: ...") it is the .git directory of the main worktree
+// rather than the per-worktree .git/worktrees/<name> directory.
+func gitCommonDir(repositoryPath string) (string, error) {
+	output, err := gitCommand(repositoryPath, "rev-parse", "--path-format=absolute", "--git-common-dir").Output()
 	if err != nil {
-		return false, err
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
+			if msg := strings.TrimSpace(string(exitErr.Stderr)); msg != "" {
+				return "", fmt.Errorf("%w: %s", err, msg)
+			}
+		}
+		return "", err
 	}
-	return strings.TrimSpace(string(output)) == "true", nil
+	return filepath.Clean(strings.TrimSuffix(string(output), "\n")), nil
+}
+
+// readAlternates returns the object directories listed in the
+// objects/info/alternates file of gitDirPath. Relative paths are resolved
+// against the objects directory, as Git does. A missing file is not an error.
+func readAlternates(gitDirPath string) ([]string, error) {
+	objectsDir := filepath.Join(gitDirPath, "objects")
+	file, err := os.Open(filepath.Join(objectsDir, "info", "alternates"))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+
+	var alternates []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if !filepath.IsAbs(line) {
+			line = filepath.Join(objectsDir, line)
+		}
+		alternates = append(alternates, filepath.Clean(line))
+	}
+	return alternates, scanner.Err()
+}
+
+func openGitDir(gitDirPath string) (*git.Repository, error) {
+	return git.Open(filesystem.NewStorage(osfs.New(gitDirPath), cache.NewObjectLRUDefault()), nil)
+}
+
+// openGitRepositories opens the Git directory backing repositoryPath and every
+// (possibly nested) object alternate configured for it.
+//
+// The Git directory is resolved by asking Git, so repositoryPath may be a
+// normal clone, a bare repository, or a linked worktree. Alternates that do not
+// exist are logged and skipped, as Git itself only warns about them.
+func openGitRepositories(repositoryPath string) ([]gitDir, error) {
+	common, err := gitCommonDir(repositoryPath)
+	if err != nil {
+		return nil, err
+	}
+	dirs := make([]gitDir, 0, 2)
+	seen := make(map[string]bool)
+	for queue := []string{common}; len(queue) > 0; queue = queue[1:] {
+		dirPath := queue[0]
+		if seen[dirPath] {
+			continue
+		}
+		seen[dirPath] = true
+		repo, err := openGitDir(dirPath)
+		if err != nil {
+			return nil, fmt.Errorf("open git dir %q: %w", dirPath, err)
+		}
+		dirs = append(dirs, gitDir{path: dirPath, repo: repo})
+		alternates, err := readAlternates(dirPath)
+		if err != nil {
+			return nil, fmt.Errorf("read alternates of %q: %w", dirPath, err)
+		}
+		for _, objectsDir := range alternates {
+			if info, err := os.Stat(objectsDir); err != nil || !info.IsDir() {
+				slog.Warn("ignoring unusable git alternate", "path", objectsDir, "error", err)
+				continue
+			}
+			// An alternate is an objects directory; go-git wants its parent.
+			queue = append(queue, filepath.Dir(objectsDir))
+		}
+	}
+	return dirs, nil
+}
+
+// hashWorkingTreeFile streams a working-tree file once and returns the object
+// id Git would assign to it if committed, as `git hash-object` prints.
+func hashWorkingTreeFile(fsys billy.Filesystem, name string, size int64) (plumbing.Hash, error) {
+	file, err := fsys.Open(name)
+	if err != nil {
+		return plumbing.ZeroHash, err
+	}
+	defer func() { _ = file.Close() }()
+	hasher := plumbing.NewHasher(plumbing.BlobObject, size)
+	n, err := io.Copy(hasher, file)
+	if err != nil {
+		return plumbing.ZeroHash, err
+	}
+	if n != size {
+		return plumbing.ZeroHash, errors.New("file changed while being read")
+	}
+	return hasher.Sum(), nil
 }
 
 func (r *Repo) readTree(repositoryPath, ref string) error {
@@ -222,48 +311,39 @@ func (r *Repo) overlayWorkingTree() error {
 	// The command must run in the repository root; the Billy filesystem's root
 	// is not necessarily available as a portable OS path.
 	root := r.worktree.Root()
-	tracked, err := runGitNul(root, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
-	if err != nil {
-		return fmt.Errorf("list working-tree files: %w", err)
-	}
-	modified, err := runGitNul(root, "diff-files", "--name-only", "-z")
-	if err != nil {
-		return fmt.Errorf("list modified working-tree files: %w", err)
-	}
-	staged, err := runGitNul(root, "diff", "--cached", "--name-only", "-z")
-	if err != nil {
-		return fmt.Errorf("list staged working-tree files: %w", err)
-	}
-	workingTreePaths := make(map[string]bool, len(modified)+len(staged))
-	for _, raw := range modified {
-		workingTreePaths[string(raw)] = true
-	}
-	for _, raw := range staged {
-		workingTreePaths[string(raw)] = true
-	}
-	untracked, err := runGitNul(root, "ls-files", "--others", "--exclude-standard", "-z")
-	if err != nil {
-		return fmt.Errorf("list untracked working-tree files: %w", err)
-	}
-	for _, raw := range untracked {
-		workingTreePaths[string(raw)] = true
+	// Every path that may differ from the selected ref: unstaged and staged
+	// changes (including deletions) and untracked files. --no-renames makes a
+	// staged rename report the old path as well as the new one; without it Git
+	// reports only the new path and the old path would stay visible.
+	paths := make(map[string]struct{})
+	for _, query := range [][]string{
+		{"diff-files", "--name-only", "-z"},
+		{"diff", "--cached", "--no-renames", "--name-only", "-z"},
+		{"ls-files", "--others", "--exclude-standard", "-z"},
+	} {
+		names, err := runGitNul(root, query...)
+		if err != nil {
+			return fmt.Errorf("list working-tree changes (git %s): %w", strings.Join(query, " "), err)
+		}
+		for _, name := range names {
+			paths[string(name)] = struct{}{}
+		}
 	}
 
-	for _, raw := range tracked {
-		p, err := reference.ParseBlob(string(raw))
+	for _, name := range slices.Sorted(maps.Keys(paths)) {
+		p, err := reference.ParseBlob(name)
 		if err != nil {
 			return err
 		}
-		info, err := r.worktree.Lstat(string(p))
+		info, err := r.worktree.Lstat(name)
 		if err != nil {
-			if os.IsNotExist(err) {
+			if errors.Is(err, os.ErrNotExist) {
+				// Deleted in the working tree, staged or not: it must no longer
+				// be visible even though it exists at the ref.
 				r.removePath(p)
 				continue
 			}
 			return fmt.Errorf("stat working-tree path %q: %w", p, err)
-		}
-		if !workingTreePaths[string(raw)] {
-			continue
 		}
 		// FileMode's type bits occupy 0170000; 0120000 identifies a symlink.
 		if info.Mode()&os.ModeSymlink != 0 {
@@ -272,17 +352,39 @@ func (r *Repo) overlayWorkingTree() error {
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("working-tree path %q is not a regular file", p)
 		}
+		hash, err := hashWorkingTreeFile(r.worktree, name, info.Size())
+		if err != nil {
+			return fmt.Errorf("hash working-tree path %q: %w", p, err)
+		}
 		r.removePath(p)
-		r.Obj[p] = Obj{Path: p, Kind: Blob, Source: WorkingTreeSource}
+		r.Obj[p] = Obj{Path: p, Hash: hash, Kind: Blob, Source: WorkingTreeSource}
 	}
+	r.pruneEmptyTrees()
 	return nil
 }
 
+// pruneEmptyTrees drops trees that no longer contain any blob, such as those
+// whose last file was deleted in the working tree. Git cannot represent empty
+// trees, so none exist in the selected ref.
+func (r *Repo) pruneEmptyTrees() {
+	populated := make(map[reference.Path]bool)
+	for p, obj := range r.Obj {
+		if obj.Kind != Blob {
+			continue
+		}
+		for dir := parentTree(p, obj.Kind); dir != ""; dir = dir.Parent() {
+			populated[dir] = true
+		}
+	}
+	for p, obj := range r.Obj {
+		if obj.Kind == Tree && !populated[p] {
+			delete(r.Obj, p)
+		}
+	}
+}
+
 func runGitNul(root string, args ...string) ([][]byte, error) {
-	cmd := gitCommand("", "")
-	cmd.Args = append([]string{"git"}, args...)
-	cmd.Dir = root
-	output, err := cmd.Output()
+	output, err := gitCommand(root, args...).Output()
 	if err != nil {
 		return nil, err
 	}
@@ -397,16 +499,91 @@ func parentTree(p reference.Path, kind Kind) reference.Tree {
 	return p.Tree()
 }
 
-func (r *Repo) blobObject(hash plumbing.Hash) (*object.Blob, error) {
-	var err error
-	for _, repo := range r.gitRepos {
-		blob, readErr := repo.BlobObject(hash)
-		if readErr == nil {
-			return blob, nil
-		}
-		err = readErr
+// readGitBlob reads a blob from the first Git directory that has it.
+//
+// go-git lists a directory's pack .idx files once and caches that list for the
+// life of its storage, but the directories read here are modified concurrently
+// by other processes: a shared object alternate (such as a CI git mirror) can
+// be repacked at any time, which deletes packs go-git still has indexed. Two
+// errors come out of that stale cache:
+//
+//   - dotgit.ErrPackfileNotFound: a cached .idx points at a .pack that no
+//     longer exists.
+//   - plumbing.ErrObjectNotFound: the object was loose when the pack list was
+//     cached and has since been packed, so go-git never looks in the new pack.
+//
+// When a lookup fails that way, the failing directories are re-opened, which
+// re-reads their pack directories as Git does after a failed object read, and
+// the lookup is retried once. An object that is truly missing costs one extra
+// re-open and lookup before the error is reported.
+func (r *Repo) readGitBlob(hash plumbing.Hash) ([]byte, error) {
+	r.gitMu.Lock()
+	defer r.gitMu.Unlock()
+
+	data, failures, found := r.readGitBlobLocked(hash)
+	if !found && r.reopenStaleGitDirsLocked(failures) {
+		data, failures, found = r.readGitBlobLocked(hash)
 	}
-	return nil, err
+	if found {
+		return data, nil
+	}
+	if len(failures) == 0 {
+		return nil, errors.New("no git repositories to search")
+	}
+	errs := make([]error, 0, len(failures))
+	for _, failure := range failures {
+		errs = append(errs, failure)
+	}
+	return nil, errors.Join(errs...)
+}
+
+// readGitBlobLocked returns the blob from the first Git directory that has it.
+// When none does it returns each directory's failure instead. Callers must hold
+// r.gitMu.
+func (r *Repo) readGitBlobLocked(hash plumbing.Hash) (data []byte, failures []gitDirError, found bool) {
+	failures = make([]gitDirError, 0, len(r.gitDirs))
+	for i, dir := range r.gitDirs {
+		data, err := readBlobFrom(dir.repo, hash)
+		if err == nil {
+			return data, nil, true
+		}
+		failures = append(failures, gitDirError{index: i, path: dir.path, err: err})
+	}
+	return nil, failures, false
+}
+
+// reopenStaleGitDirsLocked re-opens every Git directory whose lookup failed
+// in a way that suggests go-git's cached pack list is stale, and reports whether
+// any was re-opened. Callers must hold r.gitMu.
+func (r *Repo) reopenStaleGitDirsLocked(failures []gitDirError) bool {
+	reopened := false
+	for _, failure := range failures {
+		if !errors.Is(failure.err, dotgit.ErrPackfileNotFound) && !errors.Is(failure.err, plumbing.ErrObjectNotFound) {
+			continue
+		}
+		repo, err := openGitDir(failure.path)
+		if err != nil {
+			slog.Warn("object lookup failed and re-opening the git dir failed", "path", failure.path, "error", err)
+			continue
+		}
+		slog.Warn("object lookup failed (concurrent repack?); re-opened git dir and retrying", "path", failure.path, "error", failure.err)
+		r.gitDirs[failure.index].repo = repo
+		reopened = true
+	}
+	return reopened
+}
+
+func readBlobFrom(repo *git.Repository, hash plumbing.Hash) ([]byte, error) {
+	blob, err := repo.BlobObject(hash)
+	if err != nil {
+		return nil, err
+	}
+	reader, err := blob.Reader()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = reader.Close() }()
+	return io.ReadAll(reader)
 }
 
 // Show lazily reads a blob's contents from the repository or working tree.
@@ -439,18 +616,7 @@ func (r *Repo) Show(relativePath reference.Path) ([]byte, error) {
 			err = openErr
 		}
 	} else {
-		blob, readErr := r.blobObject(obj.Hash)
-		if readErr == nil {
-			reader, readerErr := blob.Reader()
-			if readerErr == nil {
-				data, err = io.ReadAll(reader)
-				_ = reader.Close()
-			} else {
-				err = readerErr
-			}
-		} else {
-			err = readErr
-		}
+		data, err = r.readGitBlob(obj.Hash)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read blob %q: %w", relativePath, err)
