@@ -73,7 +73,7 @@ func WithWorkingTree() OpenOption {
 type DirTree map[reference.Tree][]reference.Tree
 
 // Repo contains the objects and direct-child index for one Git revision.
-// Show returns a new byte slice, so callers may safely modify its result.
+// Blob contents are cached and shared: see Show.
 type Repo struct {
 	Obj     map[reference.Path]Obj
 	ObjKeys []reference.Path
@@ -587,6 +587,9 @@ func readBlobFrom(repo *git.Repository, hash plumbing.Hash) ([]byte, error) {
 }
 
 // Show lazily reads a blob's contents from the repository or working tree.
+//
+// The returned slice is the cached copy shared by every caller. Callers must
+// not modify it; copy it first when mutation is needed.
 func (r *Repo) Show(relativePath reference.Path) ([]byte, error) {
 	obj, ok := r.Obj[relativePath]
 	blob, _ := relativePath.(reference.Blob)
@@ -598,12 +601,10 @@ func (r *Repo) Show(relativePath reference.Path) ([]byte, error) {
 	}
 	r.mu.RLock()
 	cached, ok := r.blobs[blob]
-	if ok {
-		result := append([]byte(nil), cached...)
-		r.mu.RUnlock()
-		return result, nil
-	}
 	r.mu.RUnlock()
+	if ok {
+		return cached, nil
+	}
 
 	var data []byte
 	var err error
@@ -621,15 +622,17 @@ func (r *Repo) Show(relativePath reference.Path) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read blob %q: %w", relativePath, err)
 	}
+	// Clip the capacity so an append by a caller reallocates rather than writing
+	// into the shared backing array.
+	data = slices.Clip(data)
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	if cached, ok := r.blobs[blob]; ok {
-		data = cached
-	} else {
-		r.blobs[blob] = append([]byte(nil), data...)
+		// Another goroutine cached the blob first; share its copy.
+		return cached, nil
 	}
-	result := append([]byte(nil), data...)
-	r.mu.Unlock()
-	return result, nil
+	r.blobs[blob] = data
+	return data, nil
 }
 
 // ShowContext is the context-aware form of Show.
