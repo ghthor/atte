@@ -15,14 +15,9 @@ import (
 func targetsFromEvaluated(repo *attegit.Repo, evaluated []evaluatedTarget) (map[hclblock.TargetKind][]hclblock.Target, error) {
 	targets := make(map[hclblock.TargetKind][]hclblock.Target, len(evaluated))
 	for _, item := range evaluated {
-		target := targetFromEvaluated(item)
-		if item.Spec.Script != nil {
-			script, inline, err := item.Spec.Script(repo, item.File, item.Decoded)
-			if err != nil {
-				return nil, err
-			}
-			target.Script = script
-			target.Inline = inline
+		target, err := targetFromEvaluated(item).ResolveScript(repo)
+		if err != nil {
+			return nil, err
 		}
 		targets[item.Kind] = append(targets[item.Kind], target)
 	}
@@ -31,25 +26,19 @@ func targetsFromEvaluated(repo *attegit.Repo, evaluated []evaluatedTarget) (map[
 
 func targetFromEvaluated(item evaluatedTarget) hclblock.Target {
 	identity := targetIdentityFor(item.File, item.Kind, item.Name, item.Index)
-	target := hclblock.Target{
-		ID:      identity.ID,
-		Kind:    identity.Kind,
-		File:    item.File,
-		Name:    item.Name,
-		Label:   item.Label,
-		Index:   item.Index,
-		Aliases: identity.Aliases,
-		Decoded: item.Decoded,
-		Source:  item.Source,
-	}
-	return hclblock.TargetBind(target, item.Spec)
+	target := item.Bound
+	target.ID = identity.ID
+	target.Kind = identity.Kind
+	target.File = item.File
+	target.Name = item.Name
+	target.Label = item.Label
+	target.Index = item.Index
+	target.Aliases = identity.Aliases
+	target.Source = item.Source
+	return target
 }
 
-func builtinTargetScript(repo *attegit.Repo, file reference.Blob, decoded any) (reference.Blob, string, error) {
-	target, ok := decoded.(decodedTarget)
-	if !ok {
-		return "", "", nil
-	}
+func builtinTargetScript(repo *attegit.Repo, file reference.Blob, target decodedTarget) (reference.Blob, string, error) {
 	if script, ok := strings.CutPrefix(target.Script, DecodingPathPrefix); ok {
 		return reference.Blob(script), "", nil
 	}
@@ -118,7 +107,7 @@ func DecodeEntityID(id graph.EntityID, scanner hclblock.TargetKindCapabilities) 
 	return kind, file, parts[3], nil
 }
 
-func executeScriptTarget(target hclblock.Target, root string) (hclblock.TargetCommand, error) {
+func executeScriptTarget(target hclblock.Target, _ decodedTarget, root string) (hclblock.TargetCommand, error) {
 	dir := filepath.Dir(filepath.Join(root, filepath.FromSlash(target.File.String())))
 	if target.Script != "" {
 		return hclblock.TargetCommand{
@@ -132,7 +121,7 @@ func executeScriptTarget(target hclblock.Target, root string) (hclblock.TargetCo
 	return hclblock.TargetCommand{}, fmt.Errorf("target %q has no script", target.ID)
 }
 
-func configScriptTarget(hclblock.Target) (map[string]any, error) {
+func configScriptTarget(hclblock.Target, decodedTarget) (map[string]any, error) {
 	return nil, nil
 }
 

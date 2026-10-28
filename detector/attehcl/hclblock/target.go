@@ -35,8 +35,9 @@ type TargetCommand struct {
 }
 
 // Target describes one target declared by an attached kind in an atte.hcl file.
-// Its fields carry the graph identity, source location, decoded value, and
-// optional script data. The optional projections are bound from TargetKindSpec.
+// Its fields carry the graph identity, source location, and optional script
+// data; the kind-owned decoded value is read with TargetDecodedAs. The optional
+// projections are bound from TargetKindSpec by TargetKindSpec.Decode.
 type Target struct {
 	ID      graph.EntityID
 	Kind    string
@@ -47,20 +48,35 @@ type Target struct {
 	Aliases []string
 	Script  reference.Blob
 	Inline  string
-	Decoded any
 	Source  hcl.Range
 
+	decoded   any
 	graph     TargetGraphProjection
-	execution TargetExecutionProjection
-	config    TargetConfigProjection
+	execution func(Target, string) (TargetCommand, error)
+	config    func(Target) (map[string]any, error)
+	script    func(*attegit.Repo, reference.Blob, any) (reference.Blob, string, error)
 }
 
-// TargetBind returns target with the optional projections from spec attached.
-func TargetBind(target Target, spec TargetKindSpec) Target {
-	target.graph = spec.Graph
-	target.execution = spec.Execution
-	target.config = spec.Config
-	return target
+// TargetDecodedAs returns the kind-owned decoded value of target as a T. The
+// error names the expected and actual types.
+func TargetDecodedAs[T any](target Target) (T, error) {
+	return decodedAs[T](fmt.Sprintf("target %q", target.ID), target.decoded)
+}
+
+// ResolveScript returns target with Script and Inline set from the kind's
+// script projection. Targets whose kind has no script projection are returned
+// unchanged.
+func (target Target) ResolveScript(repo *attegit.Repo) (Target, error) {
+	if target.script == nil {
+		return target, nil
+	}
+	script, inline, err := target.script(repo, target.File, target.decoded)
+	if err != nil {
+		return Target{}, err
+	}
+	target.Script = script
+	target.Inline = inline
+	return target, nil
 }
 
 // DisplayName returns the stable display identifier component for the target.

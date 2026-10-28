@@ -122,5 +122,5 @@ func configForWithCapabilities(
 	if err != nil {
 		return Config{}, err
 	}
-	return Config{Targets: allTargets, Settings: settingsFromEvaluated(evaluated.settings)}, nil
+	return Config{Targets: allTargets, Settings: evaluated.settings}, nil
 }

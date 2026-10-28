@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"reflect"
 	"strings"
 
 	"github.com/ghthor/atte/detector/attehcl/hclblock"
@@ -54,45 +53,23 @@ var testSchema = hcl.BodySchema{
 
 // BuiltInTargetKinds returns the target kinds provided by atte itself.
 func BuiltInTargetKinds() map[hclblock.TargetKind]hclblock.TargetKindSpec {
+	options := hclblock.TargetKindOptions[decodedTarget]{
+		Graph:     graphScriptTarget,
+		Execution: executeScriptTarget,
+		Config:    configScriptTarget,
+		Script:    builtinTargetScript,
+	}
+	spec := hclblock.NewTargetKindSpec(nil, decodeScriptTarget, options)
 	return map[hclblock.TargetKind]hclblock.TargetKindSpec{
-		KindTest: {
-			Decoder:   decodeScriptTarget,
-			Graph:     graphScriptTarget,
-			Execution: executeScriptTarget,
-			Config:    configScriptTarget,
-			Script:    builtinTargetScript,
-		},
-		KindCodegen: {
-			Decoder:   decodeScriptTarget,
-			Graph:     graphScriptTarget,
-			Execution: executeScriptTarget,
-			Config:    configScriptTarget,
-			Script:    builtinTargetScript,
-		},
-		KindLint: {
-			Decoder:   decodeScriptTarget,
-			Graph:     graphScriptTarget,
-			Execution: executeScriptTarget,
-			Config:    configScriptTarget,
-			Script:    builtinTargetScript,
-		},
+		KindTest:    spec,
+		KindCodegen: spec,
+		KindLint:    spec,
 	}
 }
 
 type decodedTarget struct {
 	Script string
 	Deps   []dependency
-}
-
-func validateDecoderResult(kind hclblock.TargetKind, decoded any) error {
-	if decoded == nil {
-		return fmt.Errorf("target kind %q decoder returned nil", kind)
-	}
-	value := reflect.ValueOf(decoded)
-	if value.Kind() == reflect.Pointer && value.IsNil() {
-		return fmt.Errorf("target kind %q decoder returned a nil pointer", kind)
-	}
-	return nil
 }
 
 const targetTraversalValuePrefix = "attehcl-target:"
@@ -106,21 +83,12 @@ func targetKinds(scanner hclblock.TargetKindCapabilities) map[hclblock.TargetKin
 	}
 	result := make(map[hclblock.TargetKind]hclblock.TargetKindSpec, len(provided))
 	for kind, spec := range provided {
-		schema := testSchema
-		if spec.Schema != nil {
-			schema = copyBodySchema(*spec.Schema)
+		if spec.Schema() == nil {
+			spec = spec.WithSchema(&testSchema)
 		}
-		spec.Schema = &schema
 		result[kind] = spec
 	}
 	return result
-}
-
-func copyBodySchema(schema hcl.BodySchema) hcl.BodySchema {
-	return hcl.BodySchema{
-		Attributes: append([]hcl.AttributeSchema(nil), schema.Attributes...),
-		Blocks:     append([]hcl.BlockHeaderSchema(nil), schema.Blocks...),
-	}
 }
 
 func targetTraversalValue(kind hclblock.TargetKind, name string) string {
@@ -306,15 +274,15 @@ func (err targetDiagnosticsError) Error() string {
 	return err.diagnostics.Error()
 }
 
-func decodeScriptTarget(content *hcl.BodyContent, ctx *hcl.EvalContext) (any, error) {
+func decodeScriptTarget(content *hcl.BodyContent, ctx *hcl.EvalContext) (decodedTarget, error) {
 	decoded := decodedTarget{}
 	if attribute, ok := content.Attributes["script"]; ok {
 		value, diagnostics := attribute.Expr.Value(ctx)
 		if diagnostics.HasErrors() {
-			return nil, targetDiagnosticsError{diagnostics: diagnostics}
+			return decodedTarget{}, targetDiagnosticsError{diagnostics: diagnostics}
 		}
 		if !value.IsKnown() {
-			return nil, fmt.Errorf("script must be known")
+			return decodedTarget{}, fmt.Errorf("script must be known")
 		}
 		switch {
 		case value.Type() == attegit.RepositoryPathType:
@@ -323,7 +291,7 @@ func decodeScriptTarget(content *hcl.BodyContent, ctx *hcl.EvalContext) (any, er
 		case value.Type() == cty.String:
 			decoded.Script = value.AsString()
 		default:
-			return nil, fmt.Errorf("script must be a string or path")
+			return decodedTarget{}, fmt.Errorf("script must be a string or path")
 		}
 	}
 
@@ -338,7 +306,7 @@ func decodeScriptTarget(content *hcl.BodyContent, ctx *hcl.EvalContext) (any, er
 		}
 		dependencies, err := decodeTargetDependencies(attribute, dependencyContext)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", name, err)
+			return decodedTarget{}, fmt.Errorf("%s: %w", name, err)
 		}
 		decoded.Deps = append(decoded.Deps, dependencies...)
 	}

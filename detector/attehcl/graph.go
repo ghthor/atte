@@ -18,15 +18,12 @@ func graphScriptTarget(
 	ctx context.Context,
 	repo *attegit.Repo,
 	target hclblock.Target,
+	decoded decodedTarget,
 	graphContext hclblock.TargetGraphContext,
 	attachToTree bool,
 ) (hclblock.TargetGraph, error) {
 	if err := ctx.Err(); err != nil {
 		return hclblock.TargetGraph{}, err
-	}
-	decoded, ok := target.Decoded.(decodedTarget)
-	if !ok {
-		return hclblock.TargetGraph{}, fmt.Errorf("target %q has an invalid built-in decoded value", target.ID)
 	}
 	if decoded.Script == "" {
 		return hclblock.TargetGraph{}, fmt.Errorf("target %q has no script", target.Name)

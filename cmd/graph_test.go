@@ -258,20 +258,24 @@ func TestPrintGraphIncludesCustomHCLTargets(t *testing.T) {
 	})
 	builder, err := scanner.NewDefault()
 	must.NoError(t, err)
-	must.NoError(t, detector.AttachHCLTargetBlock(builder, "deploy", hclblock.TargetKindSpec{
-		Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
+	must.NoError(t, detector.AttachHCLTargetBlock(builder, "deploy", hclblock.NewTargetKindSpec(
+		nil,
+		func(*hcl.BodyContent, *hcl.EvalContext) (struct{}, error) {
 			return struct{}{}, nil
 		},
-		Graph: func(
-			_ context.Context,
-			_ *attegit.Repo,
-			target hclblock.Target,
-			_ hclblock.TargetGraphContext,
-			attachToTree bool,
-		) (hclblock.TargetGraph, error) {
-			return target.GraphProjectionBase(attachToTree), nil
+		hclblock.TargetKindOptions[struct{}]{
+			Graph: func(
+				_ context.Context,
+				_ *attegit.Repo,
+				target hclblock.Target,
+				_ struct{},
+				_ hclblock.TargetGraphContext,
+				attachToTree bool,
+			) (hclblock.TargetGraph, error) {
+				return target.GraphProjectionBase(attachToTree), nil
+			},
 		},
-	}))
+	)))
 
 	detector := compileTestDetector(t, builder)
 	got := renderTestGraphWithDetector(t, repo, detector)

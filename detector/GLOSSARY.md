@@ -269,15 +269,15 @@ Entity decoding is dispatched by the namespace encoded in the entity ID. This le
 
 ## hclblock.TargetKindSpec
 
-`hclblock.TargetKindSpec` describes the capabilities of one attached HCL target kind. It contains the required decoder and optional graph, execution, configuration, and script projections.
+`hclblock.TargetKindSpec` describes the capabilities of one attached HCL target kind. It contains the required decoder and optional graph, execution, configuration, and script projections. Build one with `hclblock.NewTargetKindSpec[T]`, whose decoder returns the kind's own `T` and whose `TargetKindOptions[T]` projections receive the target and its typed value; the spec's fields are unexported, so the type-erased form exists only inside `hclblock`. Consumers read the decoded value with `hclblock.TargetDecodedAs[T]`.
 
 The target-kind API types and their dependencies belong to `detector/attehcl/hclblock`. The evaluator and root detector package depend on this shared package instead of importing each other.
 
 ## HCL setting blocks
 
-`hclblock.SettingBlock` contains the schema, decoder, and optional `Config` projection for a named HCL setting block. A Sensor provides these through `SensorProvidingHCLSettingBlocks` or an application attaches them with `AttachHCLSettingBlock`; the Builder validates them (valid identifier, no collision with a target kind or the reserved `locals`/`target` names) and the Scanner returns independent copies through `SettingBlocks()`.
+`hclblock.SettingBlock` contains the schema, decoder, and optional projection for a named HCL setting block. Build one with `hclblock.NewSettingBlock[T]`; consumers read a `hclblock.SettingValue`'s decoded value with `hclblock.DecodedAs[T]`. A Sensor provides these through `SensorProvidingHCLSettingBlocks` or an application attaches them with `AttachHCLSettingBlock`; the Builder validates them (valid identifier, no collision with a target kind or the reserved `locals`/`target` names) and the Scanner returns independent copies through `SettingBlocks()`.
 
-HCL evaluation decodes each unlabeled `name { ... }` block matching an attached setting block with the declaring file's evaluation context. At most one block per name may appear in a file. `attehcl.ConfigFor` returns the decoded blocks as `hclblock.SettingValue` entries in `Config.Settings`, and `atte config show` renders the `Config` projection of each under the `config` key.
+HCL evaluation decodes each unlabeled `name { ... }` block matching an attached setting block with the declaring file's evaluation context. At most one block per name may appear in a file. `attehcl.ConfigFor` returns the decoded blocks as `hclblock.SettingValue` entries in `Config.Settings`, and `atte config show` renders the projection of each under the `settings` key.
 
 Other Sensors read setting blocks at runtime through `Scanner.HCLSettings(ctx, repo, tree)`, which the HCL Sensor serves as an HCLSettingSensor. The Go Sensor uses this to honor the `go_test { command = [...] }` block: a block in a package directory overrides that package's test command, and a block in a module directory overrides every package in the module without a closer block.
 

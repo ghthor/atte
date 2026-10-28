@@ -11,6 +11,7 @@ import (
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attegittest"
 	"github.com/ghthor/atte/detector/attehcl"
+	"github.com/ghthor/atte/detector/attehcl/hclblock"
 	"github.com/ghthor/atte/detector/graphset"
 	"github.com/ghthor/atte/detector/scanner"
 	"github.com/ghthor/atte/reference"
@@ -93,11 +94,8 @@ func TestDeployTargetIdentityAndGraph(t *testing.T) {
 	test.EqOp(t, "attehcl:deploy", target.Kind)
 	test.EqOp(t, "release", target.Name)
 	test.EqOp(t, "//atte.hcl#deploy.release", attehcl.Selector(target).String())
-	decoded, ok := target.Decoded.(deployTarget)
-	test.True(t, ok, test.Sprintf("decoded deploy target should use deployTarget: %#v", target.Decoded))
-	if !ok {
-		return
-	}
+	decoded, err := hclblock.TargetDecodedAs[deployTarget](target)
+	test.NoError(t, err)
 	test.EqOp(t, "dev", decoded.Env)
 
 	graph, err := attehcl.Graph(

@@ -34,44 +34,36 @@ type GoTestSetting struct {
 // Sensor during attachment.
 func (Detector) HCLSettingBlocks() map[string]hclblock.SettingBlock {
 	return map[string]hclblock.SettingBlock{
-		GoTestSettingBlock: {
-			Schema:  &goTestConfigSchema,
-			Decoder: decodeGoTestSetting,
-			Config:  configGoTestSetting,
-		},
+		GoTestSettingBlock: hclblock.NewSettingBlock(&goTestConfigSchema, decodeGoTestSetting, configGoTestSetting),
 	}
 }
 
-func decodeGoTestSetting(content *hcl.BodyContent, ctx *hcl.EvalContext) (any, error) {
+func decodeGoTestSetting(content *hcl.BodyContent, ctx *hcl.EvalContext) (GoTestSetting, error) {
 	value, diagnostics := content.Attributes["command"].Expr.Value(ctx)
 	if diagnostics.HasErrors() {
-		return nil, diagnostics
+		return GoTestSetting{}, diagnostics
 	}
 	if !value.IsWhollyKnown() || value.IsNull() {
-		return nil, fmt.Errorf("command must be a known list of strings")
+		return GoTestSetting{}, fmt.Errorf("command must be a known list of strings")
 	}
 	if !value.Type().IsListType() && !value.Type().IsTupleType() {
-		return nil, fmt.Errorf("command must be a list of strings, got %s", value.Type().FriendlyName())
+		return GoTestSetting{}, fmt.Errorf("command must be a list of strings, got %s", value.Type().FriendlyName())
 	}
 	command := make([]string, 0, value.LengthInt())
 	for _, item := range value.AsValueSlice() {
 		if item.IsNull() || item.Type() != cty.String {
-			return nil, fmt.Errorf("command elements must be strings, got %s", item.Type().FriendlyName())
+			return GoTestSetting{}, fmt.Errorf("command elements must be strings, got %s", item.Type().FriendlyName())
 		}
 		command = append(command, item.AsString())
 	}
 	if len(command) == 0 {
-		return nil, fmt.Errorf("command must not be empty")
+		return GoTestSetting{}, fmt.Errorf("command must not be empty")
 	}
 	return GoTestSetting{Command: command}, nil
 }
 
-func configGoTestSetting(decoded any) (map[string]any, error) {
-	config, ok := decoded.(GoTestSetting)
-	if !ok {
-		return nil, fmt.Errorf("%s block has an invalid decoded value %T", GoTestSettingBlock, decoded)
-	}
-	return map[string]any{"command": config.Command}, nil
+func configGoTestSetting(setting GoTestSetting) (map[string]any, error) {
+	return map[string]any{"command": setting.Command}, nil
 }
 
 // goTestCommand resolves the command for target from the nearest go_test
@@ -101,11 +93,11 @@ func (d Detector) goTestCommand(ctx context.Context, repo *attegit.Repo, target 
 			if value.Name != GoTestSettingBlock {
 				continue
 			}
-			config, ok := value.Decoded.(GoTestSetting)
-			if !ok {
-				return nil, fmt.Errorf("%s block in %q has an invalid decoded value %T", GoTestSettingBlock, value.File, value.Decoded)
+			setting, err := hclblock.DecodedAs[GoTestSetting](value)
+			if err != nil {
+				return nil, err
 			}
-			return config.Command, nil
+			return setting.Command, nil
 		}
 	}
 	return DefaultGoTestCommand, nil

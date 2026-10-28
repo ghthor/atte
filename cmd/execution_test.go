@@ -113,11 +113,13 @@ func TestExecuteWithOptionsUsesInjectedDetectorWithoutRepositoryOverride(t *test
 	})
 	builder, err := scanner.NewDefault()
 	must.NoError(t, err)
-	must.NoError(t, detector.AttachHCLTargetBlock(builder, "custom", hclblock.TargetKindSpec{
-		Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
+	must.NoError(t, detector.AttachHCLTargetBlock(builder, "custom", hclblock.NewTargetKindSpec(
+		nil,
+		func(*hcl.BodyContent, *hcl.EvalContext) (struct{}, error) {
 			return struct{}{}, nil
 		},
-	}))
+		hclblock.TargetKindOptions[struct{}]{},
+	)))
 	detector := compileTestDetector(t, builder)
 	t.Chdir(repository.root)
 

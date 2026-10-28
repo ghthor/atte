@@ -33,16 +33,12 @@ func attachTestTarget[K ~string](kind K, spec hclblock.TargetKindSpec) error {
 	if !hclsyntax.ValidIdentifier(name) {
 		return fmt.Errorf("target kind %q is not a valid HCL identifier", kind)
 	}
-	if spec.Decoder == nil {
+	if !spec.HasDecoder() {
 		return fmt.Errorf("target kind %q has no decoder", kind)
 	}
 	key := hclblock.TargetKind(kind)
 	if _, exists := defaultTargetKinds[key]; exists {
 		return fmt.Errorf("target kind %q is already attached", kind)
-	}
-	if spec.Schema != nil {
-		schema := copyBodySchema(*spec.Schema)
-		spec.Schema = &schema
 	}
 	defaultTargetKinds[key] = spec
 	return nil
@@ -179,7 +175,8 @@ test {
 
 	grouped, err := testTargets(t.Context(), repo, provider)
 	must.NoError(t, err)
-	decoded := grouped[KindTest][0].Decoded.(decodedTarget)
+	decoded, err := hclblock.TargetDecodedAs[decodedTarget](grouped[KindTest][0])
+	must.NoError(t, err)
 	test.EqOp(t, DecodingPathPrefix+"test.sh", decoded.Script)
 	must.Len(t, 4, decoded.Deps)
 	test.EqOp(t, dependencyPath, decoded.Deps[0].kind)
@@ -462,16 +459,17 @@ func TestTargetCapabilitiesSupportsCustomKindAndWrapperForm(t *testing.T) {
 		Command string
 	}
 	schema := hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "command", Required: true}}}
-	must.NoError(t, attachTestTarget("package_test", hclblock.TargetKindSpec{
-		Schema: &schema,
-		Decoder: func(content *hcl.BodyContent, ctx *hcl.EvalContext) (any, error) {
+	must.NoError(t, attachTestTarget("package_test", hclblock.NewTargetKindSpec(
+		&schema,
+		func(content *hcl.BodyContent, ctx *hcl.EvalContext) (packageTarget, error) {
 			value, diagnostics := content.Attributes["command"].Expr.Value(ctx)
 			if diagnostics.HasErrors() {
-				return nil, fmt.Errorf("command: %s", diagnostics.Error())
+				return packageTarget{}, fmt.Errorf("command: %s", diagnostics.Error())
 			}
 			return packageTarget{Command: value.AsString()}, nil
 		},
-	}))
+		hclblock.TargetKindOptions[packageTarget]{},
+	)))
 
 	repo := newHCLFixture(t, map[string]string{
 		"atte.hcl": `target "package_test" "go" {
@@ -484,27 +482,29 @@ func TestTargetCapabilitiesSupportsCustomKindAndWrapperForm(t *testing.T) {
 	test.Len(t, 1, SortedTargets(config.Targets))
 	test.EqOp(t, "package_test", strings.TrimPrefix(SortedTargets(config.Targets)[0].Kind, Namespace+":"))
 	test.EqOp(t, "go", SortedTargets(config.Targets)[0].Name)
-	got, ok := SortedTargets(config.Targets)[0].Decoded.(packageTarget)
-	test.True(t, ok, test.Sprintf("custom decoder value should be preserved"))
+	got, err := hclblock.TargetDecodedAs[packageTarget](SortedTargets(config.Targets)[0])
+	must.NoError(t, err, must.Sprint("custom decoder value should be preserved"))
 	test.EqOp(t, "go test ./...", got.Command)
 }
 
 func TestTargetKindCapabilitiesAreIndependent(t *testing.T) {
 	kind := hclblock.TargetKind("non_runnable_capability_test")
-	must.NoError(t, attachTestTarget(kind, hclblock.TargetKindSpec{
-		Schema: &hcl.BodySchema{},
-		Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
-			return struct{ Value string }{Value: "decoded"}, nil
+	type capabilityValue struct{ Value string }
+	must.NoError(t, attachTestTarget(kind, hclblock.NewTargetKindSpec(
+		&hcl.BodySchema{},
+		func(*hcl.BodyContent, *hcl.EvalContext) (capabilityValue, error) {
+			return capabilityValue{Value: "decoded"}, nil
 		},
-	}))
+		hclblock.TargetKindOptions[capabilityValue]{},
+	)))
 	repo := newHCLFixture(t, map[string]string{"atte.hcl": "non_runnable_capability_test \"target\" {}"})
 	config, err := testConfigFor(t.Context(), repo, "", nil)
 	must.NoError(t, err)
 	targets := SortedTargets(config.Targets)
 	test.Len(t, 1, targets)
 	test.False(t, targets[0].Runnable())
-	decoded, ok := targets[0].Decoded.(struct{ Value string })
-	test.True(t, ok, test.Sprintf("non-runnable target should preserve its decoded value"))
+	decoded, err := hclblock.TargetDecodedAs[capabilityValue](targets[0])
+	must.NoError(t, err, must.Sprint("non-runnable target should preserve its decoded value"))
 	test.EqOp(t, "decoded", decoded.Value)
 	graph, err := Graph(t.Context(), repo, testCapabilities{})
 	must.NoError(t, err)
@@ -516,12 +516,13 @@ func TestTargetCapabilitiesSnapshotsCapabilities(t *testing.T) {
 	repo := newHCLFixture(t, map[string]string{"atte.hcl": "registry_snapshot_test {}"})
 	evaluator, err := newEvaluator(t.Context(), repo, nil)
 	must.NoError(t, err)
-	must.NoError(t, attachTestTarget(kind, hclblock.TargetKindSpec{
-		Schema: &hcl.BodySchema{},
-		Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
+	must.NoError(t, attachTestTarget(kind, hclblock.NewTargetKindSpec(
+		&hcl.BodySchema{},
+		func(*hcl.BodyContent, *hcl.EvalContext) (struct{}, error) {
 			return struct{}{}, nil
 		},
-	}))
+		hclblock.TargetKindOptions[struct{}]{},
+	)))
 	_, err = evaluator.evaluatedTargets()
 	test.ErrorContains(t, err, "unknown target kind \"registry_snapshot_test\"")
 	_, err = testTargets(t.Context(), repo, nil)
@@ -529,23 +530,28 @@ func TestTargetCapabilitiesSnapshotsCapabilities(t *testing.T) {
 }
 
 func TestTargetCapabilitiesAttachmentValidation(t *testing.T) {
-	decoder := func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
-		return struct{}{}, nil
-	}
-	test.Error(t, attachTestTarget("test", hclblock.TargetKindSpec{Decoder: decoder}))
-	test.Error(t, attachTestTarget("bad name", hclblock.TargetKindSpec{Decoder: decoder}))
+	spec := hclblock.NewTargetKindSpec(
+		nil,
+		func(*hcl.BodyContent, *hcl.EvalContext) (struct{}, error) {
+			return struct{}{}, nil
+		},
+		hclblock.TargetKindOptions[struct{}]{},
+	)
+	test.Error(t, attachTestTarget("test", spec))
+	test.Error(t, attachTestTarget("bad name", spec))
 	test.Error(t, attachTestTarget("valid_attachment", hclblock.TargetKindSpec{}))
 }
 
 func TestTargetCapabilitiesCopiesSchema(t *testing.T) {
 	schema := hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "command", Required: true}}}
 	kind := "schema_copy_test"
-	must.NoError(t, attachTestTarget(kind, hclblock.TargetKindSpec{
-		Schema: &schema,
-		Decoder: func(content *hcl.BodyContent, _ *hcl.EvalContext) (any, error) {
+	must.NoError(t, attachTestTarget(kind, hclblock.NewTargetKindSpec(
+		&schema,
+		func(content *hcl.BodyContent, _ *hcl.EvalContext) (string, error) {
 			return content.Attributes["command"].Name, nil
 		},
-	}))
+		hclblock.TargetKindOptions[string]{},
+	)))
 	schema.Attributes[0].Name = "changed"
 
 	repo := newHCLFixture(t, map[string]string{
@@ -553,7 +559,9 @@ func TestTargetCapabilitiesCopiesSchema(t *testing.T) {
 	})
 	config, err := testConfigFor(t.Context(), repo, "", nil)
 	must.NoError(t, err)
-	test.EqOp(t, "command", SortedTargets(config.Targets)[0].Decoded)
+	copied, err := hclblock.TargetDecodedAs[string](SortedTargets(config.Targets)[0])
+	must.NoError(t, err)
+	test.EqOp(t, "command", copied)
 }
 
 func TestTargetCapabilitiesRejectsInvalidTargetNames(t *testing.T) {
@@ -631,7 +639,8 @@ test {
 
 	grouped, err := testTargets(t.Context(), repo, attegit.PathHCLFunctions)
 	must.NoError(t, err)
-	decoded := grouped[KindTest][2].Decoded.(decodedTarget)
+	decoded, err := hclblock.TargetDecodedAs[decodedTarget](grouped[KindTest][2])
+	must.NoError(t, err)
 	must.Len(t, 3, decoded.Deps)
 	for index, name := range []string{"go", "py"} {
 		test.EqOp(t, dependencyTarget, decoded.Deps[index].kind)
@@ -741,7 +750,8 @@ lint {
 	test.EqOp(t, 0, grouped[KindCodegen][0].Index)
 	test.EqOp(t, "", grouped[KindLint][0].Name)
 	test.EqOp(t, 0, grouped[KindLint][0].Index)
-	decoded := grouped[KindTest][0].Decoded.(decodedTarget)
+	decoded, err := hclblock.TargetDecodedAs[decodedTarget](grouped[KindTest][0])
+	must.NoError(t, err)
 	must.Len(t, 1, decoded.Deps)
 	test.Len(t, 2, decoded.Deps[0].traversal)
 
@@ -800,19 +810,19 @@ func TestConfigForReturnsOnlyRequestedFile(t *testing.T) {
 }
 
 func shellSettingBlock() hclblock.SettingBlock {
-	return hclblock.SettingBlock{
-		Schema: &hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "shell", Required: true}}},
-		Decoder: func(content *hcl.BodyContent, ctx *hcl.EvalContext) (any, error) {
+	return hclblock.NewSettingBlock(
+		&hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "shell", Required: true}}},
+		func(content *hcl.BodyContent, ctx *hcl.EvalContext) (map[string]any, error) {
 			value, diagnostics := content.Attributes["shell"].Expr.Value(ctx)
 			if diagnostics.HasErrors() {
 				return nil, targetDiagnosticsError{diagnostics: diagnostics}
 			}
 			return map[string]any{"shell": value.AsString()}, nil
 		},
-		Config: func(decoded any) (map[string]any, error) {
-			return decoded.(map[string]any), nil
+		func(decoded map[string]any) (map[string]any, error) {
+			return decoded, nil
 		},
-	}
+	)
 }
 
 func TestConfigForDecodesSettingBlocks(t *testing.T) {

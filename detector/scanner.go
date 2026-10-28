@@ -14,7 +14,6 @@ import (
 	"github.com/ghthor/atte/detector/graphtarget"
 	"github.com/ghthor/atte/reference"
 	"github.com/ghthor/atte/reference/selector"
-	"github.com/hashicorp/hcl/v2"
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 	"github.com/zclconf/go-cty/cty/function"
 )
@@ -218,7 +217,7 @@ func (b *Builder) normalizeHCLTargetBlock(kind hclblock.TargetKind, spec hclbloc
 	if !hclsyntax.ValidIdentifier(name) {
 		return spec, fmt.Errorf("target kind %q is not a valid HCL identifier", kind)
 	}
-	if spec.Decoder == nil {
+	if !spec.HasDecoder() {
 		return spec, fmt.Errorf("target kind %q has no decoder", kind)
 	}
 	if _, exists := b.targetKinds[kind]; exists {
@@ -226,10 +225,6 @@ func (b *Builder) normalizeHCLTargetBlock(kind hclblock.TargetKind, spec hclbloc
 	}
 	if _, exists := b.settingBlocks[name]; exists {
 		return spec, fmt.Errorf("target kind %q conflicts with setting block %q", kind, name)
-	}
-	if spec.Schema != nil {
-		schema := copyBodySchema(*spec.Schema)
-		spec.Schema = &schema
 	}
 	return spec, nil
 }
@@ -245,10 +240,10 @@ func (b *Builder) normalizeHCLSettingBlock(name string, block hclblock.SettingBl
 	if !hclsyntax.ValidIdentifier(name) {
 		return block, fmt.Errorf("setting block name %q is not a valid HCL identifier", name)
 	}
-	if block.Schema == nil {
+	if block.Schema() == nil {
 		return block, fmt.Errorf("setting block %q has no schema", name)
 	}
-	if block.Decoder == nil {
+	if !block.HasDecoder() {
 		return block, fmt.Errorf("setting block %q has no decoder", name)
 	}
 	if _, exists := b.settingBlocks[name]; exists {
@@ -260,40 +255,15 @@ func (b *Builder) normalizeHCLSettingBlock(name string, block hclblock.SettingBl
 	if reservedHCLBlockNames[name] {
 		return block, fmt.Errorf("setting block name %q is reserved", name)
 	}
-	schema := copyBodySchema(*block.Schema)
-	block.Schema = &schema
 	return block, nil
 }
 
 func cloneTargetKinds(source map[hclblock.TargetKind]hclblock.TargetKindSpec) map[hclblock.TargetKind]hclblock.TargetKindSpec {
-	result := make(map[hclblock.TargetKind]hclblock.TargetKindSpec, len(source))
-	for kind, spec := range source {
-		if spec.Schema != nil {
-			schema := copyBodySchema(*spec.Schema)
-			spec.Schema = &schema
-		}
-		result[kind] = spec
-	}
-	return result
+	return maps.Clone(source)
 }
 
 func cloneSettingBlocks(source map[string]hclblock.SettingBlock) map[string]hclblock.SettingBlock {
-	result := make(map[string]hclblock.SettingBlock, len(source))
-	for name, block := range source {
-		if block.Schema != nil {
-			schema := copyBodySchema(*block.Schema)
-			block.Schema = &schema
-		}
-		result[name] = block
-	}
-	return result
-}
-
-func copyBodySchema(schema hcl.BodySchema) hcl.BodySchema {
-	return hcl.BodySchema{
-		Attributes: append([]hcl.AttributeSchema(nil), schema.Attributes...),
-		Blocks:     append([]hcl.BlockHeaderSchema(nil), schema.Blocks...),
-	}
+	return maps.Clone(source)
 }
 
 // Attach adds a SensorSpec to a detector Builder. Namespaces must be unique

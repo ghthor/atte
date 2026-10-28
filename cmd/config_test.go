@@ -74,9 +74,10 @@ test "child" {
 	})
 	builder, err := scanner.NewDefault()
 	must.NoError(t, err)
-	must.NoError(t, detector.AttachHCLSettingBlock(builder, "settings", hclblock.SettingBlock{
-		Schema: &hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "shell", Required: true}, {Name: "flags"}}},
-		Decoder: func(content *hcl.BodyContent, ctx *hcl.EvalContext) (any, error) {
+	schema := hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "shell", Required: true}, {Name: "flags"}}}
+	must.NoError(t, detector.AttachHCLSettingBlock(builder, "settings", hclblock.NewSettingBlock(
+		&schema,
+		func(content *hcl.BodyContent, ctx *hcl.EvalContext) (map[string]any, error) {
 			values := make(map[string]any, len(content.Attributes))
 			for name, attribute := range content.Attributes {
 				value, diagnostics := attribute.Expr.Value(ctx)
@@ -95,10 +96,10 @@ test "child" {
 			}
 			return values, nil
 		},
-		Config: func(decoded any) (map[string]any, error) {
-			return decoded.(map[string]any), nil
+		func(decoded map[string]any) (map[string]any, error) {
+			return decoded, nil
 		},
-	}))
+	)))
 	detector := compileTestDetector(t, builder)
 	config, err := attehcl.ConfigFor(t.Context(), repo, "child", detector)
 	must.NoError(t, err)

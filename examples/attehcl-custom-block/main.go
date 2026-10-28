@@ -38,23 +38,25 @@ type deployTarget struct {
 }
 
 func attachDeployBlock(builder *detector.Builder) error {
-	return detector.AttachHCLTargetBlock(builder, KindDeploy, hclblock.TargetKindSpec{
-		Schema:    &deploySchema,
-		Decoder:   decodeDeployTarget,
-		Graph:     graphDeployTarget,
-		Execution: executeDeployTarget,
-		Config:    configDeployTarget,
-	})
+	return detector.AttachHCLTargetBlock(
+		builder,
+		KindDeploy,
+		hclblock.NewTargetKindSpec(&deploySchema, decodeDeployTarget, hclblock.TargetKindOptions[deployTarget]{
+			Graph:     graphDeployTarget,
+			Execution: executeDeployTarget,
+			Config:    configDeployTarget,
+		}),
+	)
 }
 
-func decodeDeployTarget(content *hcl.BodyContent, ctx *hcl.EvalContext) (any, error) {
+func decodeDeployTarget(content *hcl.BodyContent, ctx *hcl.EvalContext) (deployTarget, error) {
 	attribute := content.Attributes["env"]
 	value, diagnostics := attribute.Expr.Value(ctx)
 	if diagnostics.HasErrors() {
-		return nil, fmt.Errorf("evaluate env: %s", diagnostics.Error())
+		return deployTarget{}, fmt.Errorf("evaluate env: %s", diagnostics.Error())
 	}
 	if !value.IsKnown() || value.IsNull() || value.Type() != cty.String {
-		return nil, fmt.Errorf("env must be a known string")
+		return deployTarget{}, fmt.Errorf("env must be a known string")
 	}
 	return deployTarget{Env: value.AsString()}, nil
 }
@@ -63,31 +65,21 @@ func graphDeployTarget(
 	ctx context.Context,
 	_ *attegit.Repo,
 	target hclblock.Target,
+	_ deployTarget,
 	_ hclblock.TargetGraphContext,
 	attachToTree bool,
 ) (hclblock.TargetGraph, error) {
 	if err := ctx.Err(); err != nil {
 		return hclblock.TargetGraph{}, err
 	}
-	if _, ok := target.Decoded.(deployTarget); !ok {
-		return hclblock.TargetGraph{}, fmt.Errorf("target %q has an invalid deploy decoded value", target.ID)
-	}
 	return target.GraphProjectionBase(attachToTree), nil
 }
 
-func configDeployTarget(target hclblock.Target) (map[string]any, error) {
-	decoded, ok := target.Decoded.(deployTarget)
-	if !ok {
-		return nil, fmt.Errorf("target %q has an invalid deploy decoded value", target.ID)
-	}
+func configDeployTarget(_ hclblock.Target, decoded deployTarget) (map[string]any, error) {
 	return map[string]any{"env": decoded.Env}, nil
 }
 
-func executeDeployTarget(target hclblock.Target, root string) (hclblock.TargetCommand, error) {
-	decoded, ok := target.Decoded.(deployTarget)
-	if !ok {
-		return hclblock.TargetCommand{}, fmt.Errorf("target %q has an invalid deploy decoded value", target.ID)
-	}
+func executeDeployTarget(target hclblock.Target, decoded deployTarget, root string) (hclblock.TargetCommand, error) {
 	return hclblock.TargetCommand{
 		Dir:  root,
 		Args: []string{"echo", fmt.Sprintf("deploy %s to %s", target.Name, decoded.Env)},

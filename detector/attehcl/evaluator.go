@@ -43,19 +43,10 @@ type normalizedSetting struct {
 	name  string
 }
 
-// evaluatedSetting is a decoded setting block from one file.
-type evaluatedSetting struct {
-	Name    string
-	File    reference.Blob
-	Decoded any
-	Block   hclblock.SettingBlock
-	Source  hcl.Range
-}
-
 // evaluatedFile holds the decoded targets and setting blocks of one file.
 type evaluatedFile struct {
 	targets  []evaluatedTarget
-	settings []evaluatedSetting
+	settings []hclblock.SettingValue
 }
 
 // targetDeclaration describes the identity and source location of a target
@@ -70,14 +61,14 @@ type targetDeclaration struct {
 }
 
 type evaluatedTarget struct {
-	Kind    hclblock.TargetKind
-	File    reference.Blob
-	Name    string
-	Label   string
-	Index   int
-	Decoded any
-	Spec    hclblock.TargetKindSpec
-	Source  hcl.Range
+	Kind  hclblock.TargetKind
+	File  reference.Blob
+	Name  string
+	Label string
+	Index int
+	// Bound carries the decoded value and the kind's projections.
+	Bound  hclblock.Target
+	Source hcl.Range
 }
 
 type declarationsPhase struct {
@@ -338,14 +329,14 @@ func (p targetsPhase) evaluateFile(file *hclFile) (evaluatedFile, error) {
 	return evaluatedFile{targets: targets, settings: settings}, nil
 }
 
-func (p targetsPhase) evaluatedSettings(file *hclFile, ctx *hcl.EvalContext) ([]evaluatedSetting, error) {
-	settings := make([]evaluatedSetting, 0, len(file.settings))
+func (p targetsPhase) evaluatedSettings(file *hclFile, ctx *hcl.EvalContext) ([]hclblock.SettingValue, error) {
+	settings := make([]hclblock.SettingValue, 0, len(file.settings))
 	for _, item := range file.settings {
 		if err := p.evaluator.ctx.Err(); err != nil {
 			return nil, err
 		}
 		block := p.evaluator.settingBlocks[item.name]
-		content, diagnostics := item.block.Body.Content(block.Schema)
+		content, diagnostics := item.block.Body.Content(block.Schema())
 		if diagnostics.HasErrors() {
 			return nil, fmt.Errorf(
 				"decode HCL %q %s block at %s: %w",
@@ -355,23 +346,16 @@ func (p targetsPhase) evaluatedSettings(file *hclFile, ctx *hcl.EvalContext) ([]
 				hclDiagnosticError(p.evaluator.repo, file.file, diagnostics),
 			)
 		}
-		decoded, err := block.Decoder(content, ctx)
+		value, err := block.Decode(item.name, content, ctx)
 		if err != nil {
 			if diagnostic, ok := errors.AsType[targetDiagnosticsError](err); ok {
 				err = hclDiagnosticError(p.evaluator.repo, file.file, diagnostic.diagnostics)
 			}
 			return nil, fmt.Errorf("decode HCL %q %s block at %s: %w", file.file, item.name, item.block.Range().String(), err)
 		}
-		if err := validateSettingDecoderResult(item.name, decoded); err != nil {
-			return nil, fmt.Errorf("decode HCL %q %s block at %s: %w", file.file, item.name, item.block.Range().String(), err)
-		}
-		settings = append(settings, evaluatedSetting{
-			Name:    item.name,
-			File:    file.file,
-			Decoded: decoded,
-			Block:   block,
-			Source:  item.block.Range(),
-		})
+		value.File = file.file
+		value.Source = item.block.Range()
+		settings = append(settings, value)
 	}
 	return settings, nil
 }
@@ -385,7 +369,7 @@ func (p targetsPhase) evaluatedTargets(file *hclFile, ctx *hcl.EvalContext) ([]e
 		}
 		kind, name, body, index := item.kind, item.name, item.block.Body, item.index
 		spec := p.evaluator.kindSpecs[kind]
-		content, diagnostics := body.Content(spec.Schema)
+		content, diagnostics := body.Content(spec.Schema())
 		if diagnostics.HasErrors() {
 			return nil, fmt.Errorf(
 				"decode HCL %q target %s.%s at %s: %w",
@@ -396,7 +380,7 @@ func (p targetsPhase) evaluatedTargets(file *hclFile, ctx *hcl.EvalContext) ([]e
 				hclDiagnosticError(p.evaluator.repo, file.file, diagnostics),
 			)
 		}
-		decoded, err := spec.Decoder(content, ctx)
+		bound, err := spec.Decode(kind, content, ctx)
 		if err != nil {
 			if diagnostic, ok := errors.AsType[targetDiagnosticsError](err); ok {
 				return nil, fmt.Errorf(
@@ -410,18 +394,14 @@ func (p targetsPhase) evaluatedTargets(file *hclFile, ctx *hcl.EvalContext) ([]e
 			}
 			return nil, fmt.Errorf("decode HCL %q target %s.%s at %s: %w", file.file, kind, displayName(name, index), item.block.Range().String(), err)
 		}
-		if err := validateDecoderResult(kind, decoded); err != nil {
-			return nil, fmt.Errorf("decode HCL %q target %s.%s at %s: %w", file.file, kind, displayName(name, index), item.block.Range().String(), err)
-		}
 		targets = append(targets, evaluatedTarget{
-			Kind:    kind,
-			File:    file.file,
-			Name:    name,
-			Label:   name,
-			Index:   index,
-			Decoded: decoded,
-			Spec:    spec,
-			Source:  item.block.Range(),
+			Kind:   kind,
+			File:   file.file,
+			Name:   name,
+			Label:  name,
+			Index:  index,
+			Bound:  bound,
+			Source: item.block.Range(),
 		})
 	}
 	return targets, nil

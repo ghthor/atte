@@ -18,7 +18,9 @@ wants the standard Sensors, target kinds, and HCL functions. Attach custom HCL t
 with `detector.AttachHCLTargetBlock`. The attachment requires a decoder and can
 optionally provide graph, execution, configuration, and script projections.
 Those optional projections determine which capabilities are available for the
-custom target. Shared types such as `TargetKind`, `TargetKindSpec`, `Target`,
+custom target. Build the spec with `hclblock.NewTargetKindSpec`: the decoder
+returns your own type, and each projection receives the target together with
+that typed value, so no projection asserts the decoded value itself. Shared types such as `TargetKind`, `TargetKindSpec`, `Target`,
 `TargetGraph`, and `TargetCommand` are provided by `detector/attehcl/hclblock`.
 
 ```go
@@ -27,13 +29,15 @@ if err != nil {
 	return err
 }
 
-err = detector.AttachHCLTargetBlock(builder, "deploy", hclblock.TargetKindSpec{
-	Schema:    &deploySchema,
-	Decoder:   decodeDeploy,
-	Graph:     graphDeploy,
-	Execution: executeDeploy,
-	Config:    configDeploy,
-})
+err = detector.AttachHCLTargetBlock(builder, "deploy", hclblock.NewTargetKindSpec(
+	&deploySchema,
+	decodeDeploy, // func(*hcl.BodyContent, *hcl.EvalContext) (deployTarget, error)
+	hclblock.TargetKindOptions[deployTarget]{
+		Graph:     graphDeploy,
+		Execution: executeDeploy,
+		Config:    configDeploy,
+	},
+))
 if err != nil {
 	return err
 }
@@ -83,15 +87,18 @@ Setting blocks are unlabeled top-level blocks, such as `settings { ... }`,
 that carry file-local settings rather than runnable targets. Attach them with
 `detector.AttachHCLSettingBlock` or by implementing
 `detector.SensorProvidingHCLSettingBlocks` on a Sensor. A setting block
-requires a schema and a decoder and may provide a `Config` projection that
-renders the decoded value in `atte config show` output.
+requires a schema and a decoder and may provide a projection that renders the
+decoded value in `atte config show` output. Build one with
+`hclblock.NewSettingBlock`; consumers read the decoded value with
+`hclblock.DecodedAs[T]`, which reports the expected and actual types on a
+mismatch. Target consumers use `hclblock.TargetDecodedAs[T]`.
 
 ```go
-err = detector.AttachHCLSettingBlock(builder, "settings", hclblock.SettingBlock{
-	Schema:  &settingsSchema,
-	Decoder: decodeSettings,
-	Config:  configSettings,
-})
+err = detector.AttachHCLSettingBlock(builder, "settings", hclblock.NewSettingBlock(
+	&settingsSchema,
+	decodeSettings, // func(*hcl.BodyContent, *hcl.EvalContext) (settings, error)
+	configSettings, // func(settings) (map[string]any, error); optional
+))
 ```
 
 A file declares at most one block per setting name, and the block takes
@@ -102,7 +109,7 @@ attached target kind, and cannot use the reserved `locals` or `target` names.
 
 `attehcl.ConfigFor` returns the decoded blocks for the requested file in
 `Config.Settings`; `atte config show` renders them under a `settings` key beside
-`target`, keyed by `//<file>#<name>`, with the `Config` projection's result
+`target`, keyed by `//<file>#<name>`, with the projection's result
 under `values`.
 
 The HCL Sensor also serves settings evaluation to other Sensors through
