@@ -27,6 +27,7 @@ type SensorSpec struct {
 	TargetSelector func(graphtarget.ID) selector.Target
 	ExecuteTarget  func(context.Context, *attegit.Repo, string, graphtarget.ID) (graphtarget.Execution, error)
 	DecodeID       func(graph.EntityID) (graph.Entity, error)
+	HCLSettings    func(context.Context, *attegit.Repo, reference.Tree) ([]hclblock.SettingValue, error)
 }
 
 // HCLFunctionFactory constructs a function for one repository and HCL file.
@@ -63,14 +64,18 @@ type Scanner interface {
 	// callers may modify without changing the Scanner.
 	TargetKinds() map[hclblock.TargetKind]hclblock.TargetKindSpec
 
-	// ConfigBlocks returns the attached HCL configuration blocks. The returned
+	// SettingBlocks returns the attached HCL setting blocks. The returned
 	// map and schemas are independent copies that callers may modify without
 	// changing the Scanner.
-	ConfigBlocks() map[string]hclblock.ConfigBlock
+	SettingBlocks() map[string]hclblock.SettingBlock
 
 	// DecodeID resolves id by dispatching it to the Sensor attached for its
 	// namespace.
 	DecodeID(graph.EntityID) (graph.Entity, error)
+
+	// HCLSettings evaluates the setting blocks declared in tree's atte.hcl
+	// file by dispatching to the Sensor providing HCL settings evaluation.
+	HCLSettings(context.Context, *attegit.Repo, reference.Tree) ([]hclblock.SettingValue, error)
 
 	// HCLFunctions constructs fresh HCL functions for repo and file. Factories
 	// receive the context, repository, and source file so functions can be
@@ -78,7 +83,7 @@ type Scanner interface {
 	HCLFunctions(context.Context, *attegit.Repo, reference.Blob) (map[string]function.Function, error)
 }
 
-// Builder collects Sensor, target-kind, configuration-block, and HCL function
+// Builder collects Sensor, target-kind, setting-block, and HCL function
 // attachments.
 // Builders are setup-only values, are not safe for concurrent mutation, and
 // must be compiled before being passed to detector consumers.
@@ -87,15 +92,16 @@ type Builder struct {
 	scannerSensors map[string]Sensor
 	functions      map[string]HCLFunctionFactory
 	targetKinds    map[hclblock.TargetKind]hclblock.TargetKindSpec
-	configBlocks   map[string]hclblock.ConfigBlock
+	settingBlocks  map[string]hclblock.SettingBlock
 }
 
 type compiledScanner struct {
 	sensors       []SensorSpec
 	sensorsByName map[string]SensorSpec
+	hclSettings   SensorSpec
 	functions     map[string]HCLFunctionFactory
 	targetKinds   map[hclblock.TargetKind]hclblock.TargetKindSpec
-	configBlocks  map[string]hclblock.ConfigBlock
+	settingBlocks map[string]hclblock.SettingBlock
 }
 
 var (
@@ -110,7 +116,7 @@ func NewBuilder() *Builder {
 		scannerSensors: make(map[string]Sensor),
 		functions:      make(map[string]HCLFunctionFactory),
 		targetKinds:    make(map[hclblock.TargetKind]hclblock.TargetKindSpec),
-		configBlocks:   make(map[string]hclblock.ConfigBlock),
+		settingBlocks:  make(map[string]hclblock.SettingBlock),
 	}
 }
 
@@ -126,7 +132,7 @@ func (b *Builder) Compile() (Scanner, error) {
 		sensorsByName: make(map[string]SensorSpec, sensorCount),
 		functions:     maps.Clone(b.functions),
 		targetKinds:   cloneTargetKinds(b.targetKinds),
-		configBlocks:  cloneConfigBlocks(b.configBlocks),
+		settingBlocks: cloneSettingBlocks(b.settingBlocks),
 		sensors:       make([]SensorSpec, 0, sensorCount),
 	}
 	for _, sensor := range b.sensors {
@@ -158,6 +164,15 @@ func (b *Builder) Compile() (Scanner, error) {
 	sort.Slice(result.sensors, func(i, j int) bool {
 		return result.sensors[i].Namespace < result.sensors[j].Namespace
 	})
+	for _, sensor := range result.sensors {
+		if sensor.HCLSettings == nil {
+			continue
+		}
+		if result.hclSettings.Namespace != "" {
+			return nil, fmt.Errorf("sensors %q and %q both provide HCL settings evaluation", result.hclSettings.Namespace, sensor.Namespace)
+		}
+		result.hclSettings = sensor
+	}
 	return result, nil
 }
 
@@ -180,18 +195,18 @@ func AttachHCLTargetBlock[K ~string](b *Builder, kind K, spec hclblock.TargetKin
 	return nil
 }
 
-// AttachHCLConfigBlock adds a named configuration block to a detector Builder.
+// AttachHCLSettingBlock adds a named setting block to a detector Builder.
 // Names must be valid HCL identifiers, and blocks must provide a schema and
 // decoder. Duplicate names are rejected.
-func AttachHCLConfigBlock(b *Builder, name string, block hclblock.ConfigBlock) error {
+func AttachHCLSettingBlock(b *Builder, name string, block hclblock.SettingBlock) error {
 	if b == nil {
 		return fmt.Errorf("builder is nil")
 	}
-	normalized, err := b.normalizeHCLConfigBlock(name, block)
+	normalized, err := b.normalizeHCLSettingBlock(name, block)
 	if err != nil {
 		return err
 	}
-	b.configBlocks[name] = normalized
+	b.settingBlocks[name] = normalized
 	return nil
 }
 
@@ -209,6 +224,9 @@ func (b *Builder) normalizeHCLTargetBlock(kind hclblock.TargetKind, spec hclbloc
 	if _, exists := b.targetKinds[kind]; exists {
 		return spec, fmt.Errorf("target kind %q is already attached", kind)
 	}
+	if _, exists := b.settingBlocks[name]; exists {
+		return spec, fmt.Errorf("target kind %q conflicts with setting block %q", kind, name)
+	}
 	if spec.Schema != nil {
 		schema := copyBodySchema(*spec.Schema)
 		spec.Schema = &schema
@@ -216,21 +234,31 @@ func (b *Builder) normalizeHCLTargetBlock(kind hclblock.TargetKind, spec hclbloc
 	return spec, nil
 }
 
-func (b *Builder) normalizeHCLConfigBlock(name string, block hclblock.ConfigBlock) (hclblock.ConfigBlock, error) {
+// reservedHCLBlockNames are top-level atte.hcl block types owned by HCL
+// evaluation and unavailable to setting blocks.
+var reservedHCLBlockNames = map[string]bool{"locals": true, "target": true}
+
+func (b *Builder) normalizeHCLSettingBlock(name string, block hclblock.SettingBlock) (hclblock.SettingBlock, error) {
 	if name == "" {
-		return block, fmt.Errorf("configuration block name is empty")
+		return block, fmt.Errorf("setting block name is empty")
 	}
 	if !hclsyntax.ValidIdentifier(name) {
-		return block, fmt.Errorf("configuration block name %q is not a valid HCL identifier", name)
+		return block, fmt.Errorf("setting block name %q is not a valid HCL identifier", name)
 	}
 	if block.Schema == nil {
-		return block, fmt.Errorf("configuration block %q has no schema", name)
+		return block, fmt.Errorf("setting block %q has no schema", name)
 	}
 	if block.Decoder == nil {
-		return block, fmt.Errorf("configuration block %q has no decoder", name)
+		return block, fmt.Errorf("setting block %q has no decoder", name)
 	}
-	if _, exists := b.configBlocks[name]; exists {
-		return block, fmt.Errorf("configuration block %q is already attached", name)
+	if _, exists := b.settingBlocks[name]; exists {
+		return block, fmt.Errorf("setting block %q is already attached", name)
+	}
+	if _, exists := b.targetKinds[hclblock.TargetKind(name)]; exists {
+		return block, fmt.Errorf("setting block %q conflicts with target kind %q", name, name)
+	}
+	if reservedHCLBlockNames[name] {
+		return block, fmt.Errorf("setting block name %q is reserved", name)
 	}
 	schema := copyBodySchema(*block.Schema)
 	block.Schema = &schema
@@ -249,8 +277,8 @@ func cloneTargetKinds(source map[hclblock.TargetKind]hclblock.TargetKindSpec) ma
 	return result
 }
 
-func cloneConfigBlocks(source map[string]hclblock.ConfigBlock) map[string]hclblock.ConfigBlock {
-	result := make(map[string]hclblock.ConfigBlock, len(source))
+func cloneSettingBlocks(source map[string]hclblock.SettingBlock) map[string]hclblock.SettingBlock {
+	result := make(map[string]hclblock.SettingBlock, len(source))
 	for name, block := range source {
 		if block.Schema != nil {
 			schema := copyBodySchema(*block.Schema)
@@ -296,7 +324,7 @@ func (b *Builder) validateSensor(sensor SensorSpec, hasHCLCapabilities bool) err
 			return fmt.Errorf("sensor %q target capability is missing ExecuteTarget", sensor.Namespace)
 		}
 	}
-	if sensor.Graph == nil && !targetCapability && sensor.DecodeID == nil && !hasHCLCapabilities {
+	if sensor.Graph == nil && !targetCapability && sensor.DecodeID == nil && sensor.HCLSettings == nil && !hasHCLCapabilities {
 		return fmt.Errorf("sensor %q has no capabilities", sensor.Namespace)
 	}
 	if _, exists := b.sensors[sensor.Namespace]; exists {
@@ -319,12 +347,12 @@ func (b *Builder) AttachSensor(value Sensor) error {
 	}
 	sensor := adaptSensor(value)
 	_, scannerAware := value.(SensorWithScanner)
-	functions, targetBlocks, configBlocks := sensorCapabilities(value)
-	hasHCLCapabilities := len(functions) > 0 || len(targetBlocks) > 0 || len(configBlocks) > 0
+	functions, targetBlocks, settingBlocks := sensorCapabilities(value)
+	hasHCLCapabilities := len(functions) > 0 || len(targetBlocks) > 0 || len(settingBlocks) > 0
 	if err := b.validateSensor(sensor, hasHCLCapabilities); err != nil {
 		return err
 	}
-	if err := b.validateHCLCapabilities(functions, targetBlocks, configBlocks); err != nil {
+	if err := b.validateHCLCapabilities(functions, targetBlocks, settingBlocks); err != nil {
 		return err
 	}
 	if scannerAware {
@@ -332,11 +360,11 @@ func (b *Builder) AttachSensor(value Sensor) error {
 	} else {
 		b.sensors[sensor.Namespace] = sensor
 	}
-	b.attachHCLCapabilities(functions, targetBlocks, configBlocks)
+	b.attachHCLCapabilities(functions, targetBlocks, settingBlocks)
 	return nil
 }
 
-func sensorCapabilities(value Sensor) (map[string]HCLFunctionFactory, map[hclblock.TargetKind]hclblock.TargetKindSpec, map[string]hclblock.ConfigBlock) {
+func sensorCapabilities(value Sensor) (map[string]HCLFunctionFactory, map[hclblock.TargetKind]hclblock.TargetKindSpec, map[string]hclblock.SettingBlock) {
 	functions := make(map[string]HCLFunctionFactory)
 	if provider, ok := value.(SensorProvidingHCLFunctions); ok {
 		maps.Copy(functions, provider.HCLFunctions())
@@ -345,17 +373,17 @@ func sensorCapabilities(value Sensor) (map[string]HCLFunctionFactory, map[hclblo
 	if provider, ok := value.(SensorProvidingHCLTargetBlocks); ok {
 		maps.Copy(targetBlocks, provider.HCLTargetBlocks())
 	}
-	configBlocks := make(map[string]hclblock.ConfigBlock)
-	if provider, ok := value.(SensorProvidingHCLConfigBlocks); ok {
-		maps.Copy(configBlocks, provider.HCLConfigBlocks())
+	settingBlocks := make(map[string]hclblock.SettingBlock)
+	if provider, ok := value.(SensorProvidingHCLSettingBlocks); ok {
+		maps.Copy(settingBlocks, provider.HCLSettingBlocks())
 	}
-	return functions, targetBlocks, configBlocks
+	return functions, targetBlocks, settingBlocks
 }
 
 func (b *Builder) validateHCLCapabilities(
 	functions map[string]HCLFunctionFactory,
 	targetBlocks map[hclblock.TargetKind]hclblock.TargetKindSpec,
-	configBlocks map[string]hclblock.ConfigBlock,
+	settingBlocks map[string]hclblock.SettingBlock,
 ) error {
 	functionNames := make([]string, 0, len(functions))
 	for name := range functions {
@@ -379,14 +407,17 @@ func (b *Builder) validateHCLCapabilities(
 		}
 	}
 
-	configBlockNames := make([]string, 0, len(configBlocks))
-	for name := range configBlocks {
-		configBlockNames = append(configBlockNames, name)
+	settingBlockNames := make([]string, 0, len(settingBlocks))
+	for name := range settingBlocks {
+		settingBlockNames = append(settingBlockNames, name)
 	}
-	sort.Strings(configBlockNames)
-	for _, name := range configBlockNames {
-		if _, err := b.normalizeHCLConfigBlock(name, configBlocks[name]); err != nil {
+	sort.Strings(settingBlockNames)
+	for _, name := range settingBlockNames {
+		if _, err := b.normalizeHCLSettingBlock(name, settingBlocks[name]); err != nil {
 			return err
+		}
+		if _, exists := targetBlocks[hclblock.TargetKind(name)]; exists {
+			return fmt.Errorf("setting block %q conflicts with target kind %q", name, name)
 		}
 	}
 	return nil
@@ -395,16 +426,16 @@ func (b *Builder) validateHCLCapabilities(
 func (b *Builder) attachHCLCapabilities(
 	functions map[string]HCLFunctionFactory,
 	targetBlocks map[hclblock.TargetKind]hclblock.TargetKindSpec,
-	configBlocks map[string]hclblock.ConfigBlock,
+	settingBlocks map[string]hclblock.SettingBlock,
 ) {
 	maps.Copy(b.functions, functions)
 	for kind, spec := range targetBlocks {
 		normalized, _ := b.normalizeHCLTargetBlock(kind, spec)
 		b.targetKinds[kind] = normalized
 	}
-	for name, block := range configBlocks {
-		normalized, _ := b.normalizeHCLConfigBlock(name, block)
-		b.configBlocks[name] = normalized
+	for name, block := range settingBlocks {
+		normalized, _ := b.normalizeHCLSettingBlock(name, block)
+		b.settingBlocks[name] = normalized
 	}
 }
 
@@ -420,6 +451,9 @@ func adaptSensor(value Sensor) SensorSpec {
 	}
 	if sensor, ok := value.(EntityDecodingSensor); ok {
 		adapted.DecodeID = sensor.DecodeID
+	}
+	if sensor, ok := value.(HCLSettingSensor); ok {
+		adapted.HCLSettings = sensor.HCLSettings
 	}
 	return adapted
 }
@@ -455,9 +489,9 @@ func (s *compiledScanner) TargetKinds() map[hclblock.TargetKind]hclblock.TargetK
 	return cloneTargetKinds(s.targetKinds)
 }
 
-// ConfigBlocks returns a copy of the compiled configuration-block capabilities.
-func (s *compiledScanner) ConfigBlocks() map[string]hclblock.ConfigBlock {
-	return cloneConfigBlocks(s.configBlocks)
+// SettingBlocks returns a copy of the compiled setting-block capabilities.
+func (s *compiledScanner) SettingBlocks() map[string]hclblock.SettingBlock {
+	return cloneSettingBlocks(s.settingBlocks)
 }
 
 // HCLFunctions returns fresh functions for the repository and file.
@@ -631,4 +665,20 @@ func (s *compiledScanner) DecodeID(id graph.EntityID) (graph.Entity, error) {
 		return graph.Entity{}, fmt.Errorf("decode %q entity ID: %w", namespace, err)
 	}
 	return entity, nil
+}
+
+// HCLSettings dispatches settings evaluation for tree to the Sensor that
+// provides it.
+func (s *compiledScanner) HCLSettings(ctx context.Context, repo *attegit.Repo, tree reference.Tree) ([]hclblock.SettingValue, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if s.hclSettings.HCLSettings == nil {
+		return nil, fmt.Errorf("no Sensor attached provides HCL settings evaluation")
+	}
+	values, err := s.hclSettings.HCLSettings(ctx, repo, tree)
+	if err != nil {
+		return nil, fmt.Errorf("evaluate HCL settings for %q: %w", tree, err)
+	}
+	return values, nil
 }

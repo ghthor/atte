@@ -20,13 +20,14 @@ import (
 )
 
 type evaluator struct {
-	ctx          context.Context
-	repo         *attegit.Repo
-	files        hclFiles
-	scanner      targetEvaluationCapabilities
-	functions    map[reference.Blob]map[string]function.Function
-	kindSpecs    map[hclblock.TargetKind]hclblock.TargetKindSpec
-	declarations declarationIndex
+	ctx           context.Context
+	repo          *attegit.Repo
+	files         hclFiles
+	scanner       targetEvaluationCapabilities
+	functions     map[reference.Blob]map[string]function.Function
+	kindSpecs     map[hclblock.TargetKind]hclblock.TargetKindSpec
+	settingBlocks map[string]hclblock.SettingBlock
+	declarations  declarationIndex
 }
 
 type normalizedBlock struct {
@@ -34,6 +35,27 @@ type normalizedBlock struct {
 	kind  hclblock.TargetKind
 	name  string
 	index int
+}
+
+// normalizedSetting is a setting block matched to an attached SettingBlock.
+type normalizedSetting struct {
+	block *hclsyntax.Block
+	name  string
+}
+
+// evaluatedSetting is a decoded setting block from one file.
+type evaluatedSetting struct {
+	Name    string
+	File    reference.Blob
+	Decoded any
+	Block   hclblock.SettingBlock
+	Source  hcl.Range
+}
+
+// evaluatedFile holds the decoded targets and setting blocks of one file.
+type evaluatedFile struct {
+	targets  []evaluatedTarget
+	settings []evaluatedSetting
 }
 
 // targetDeclaration describes the identity and source location of a target
@@ -124,12 +146,13 @@ func newEvaluatorWithFiles(
 	scanner targetEvaluationCapabilities,
 ) *evaluator {
 	return &evaluator{
-		ctx:       ctx,
-		repo:      repo,
-		files:     files,
-		scanner:   scanner,
-		functions: make(map[reference.Blob]map[string]function.Function),
-		kindSpecs: targetKinds(scanner),
+		ctx:           ctx,
+		repo:          repo,
+		files:         files,
+		scanner:       scanner,
+		functions:     make(map[reference.Blob]map[string]function.Function),
+		kindSpecs:     targetKinds(scanner),
+		settingBlocks: settingBlocks(scanner),
 	}
 }
 
@@ -270,11 +293,11 @@ func (e *evaluator) evaluatedTargets(only ...reference.Blob) ([]evaluatedTarget,
 	blocks := make([]evaluatedTarget, 0)
 	phase := targetsPhase{evaluator: e}
 	err := e.forEachFile(only, func(_ reference.Blob, config *hclFile) error {
-		fileBlocks, err := phase.evaluatedTargets(config)
+		evaluated, err := phase.evaluateFile(config)
 		if err != nil {
 			return err
 		}
-		blocks = append(blocks, fileBlocks...)
+		blocks = append(blocks, evaluated.targets...)
 		return nil
 	})
 	if err != nil {
@@ -283,16 +306,78 @@ func (e *evaluator) evaluatedTargets(only ...reference.Blob) ([]evaluatedTarget,
 	return blocks, nil
 }
 
-func (p targetsPhase) evaluatedTargets(file *hclFile) ([]evaluatedTarget, error) {
-	normalized := file.normalized
-	scope, err := localsPhase(p).scopeFor(file, normalized)
+// evaluatedFile decodes the targets and setting blocks declared in file.
+func (e *evaluator) evaluatedFile(file reference.Blob) (evaluatedFile, error) {
+	if err := e.initializeDeclarations(); err != nil {
+		return evaluatedFile{}, err
+	}
+	config, ok := e.files[file]
+	if !ok {
+		return evaluatedFile{}, fmt.Errorf("HCL file %q is not loaded", file)
+	}
+	return targetsPhase{evaluator: e}.evaluateFile(config)
+}
+
+func (p targetsPhase) evaluateFile(file *hclFile) (evaluatedFile, error) {
+	scope, err := localsPhase(p).scopeFor(file, file.normalized)
 	if err != nil {
-		return nil, err
+		return evaluatedFile{}, err
 	}
 	ctx, err := p.evaluator.evalContext(file.file, scope)
 	if err != nil {
-		return nil, err
+		return evaluatedFile{}, err
 	}
+	targets, err := p.evaluatedTargets(file, ctx)
+	if err != nil {
+		return evaluatedFile{}, err
+	}
+	settings, err := p.evaluatedSettings(file, ctx)
+	if err != nil {
+		return evaluatedFile{}, err
+	}
+	return evaluatedFile{targets: targets, settings: settings}, nil
+}
+
+func (p targetsPhase) evaluatedSettings(file *hclFile, ctx *hcl.EvalContext) ([]evaluatedSetting, error) {
+	settings := make([]evaluatedSetting, 0, len(file.settings))
+	for _, item := range file.settings {
+		if err := p.evaluator.ctx.Err(); err != nil {
+			return nil, err
+		}
+		block := p.evaluator.settingBlocks[item.name]
+		content, diagnostics := item.block.Body.Content(block.Schema)
+		if diagnostics.HasErrors() {
+			return nil, fmt.Errorf(
+				"decode HCL %q %s block at %s: %w",
+				file.file,
+				item.name,
+				item.block.Range().String(),
+				hclDiagnosticError(p.evaluator.repo, file.file, diagnostics),
+			)
+		}
+		decoded, err := block.Decoder(content, ctx)
+		if err != nil {
+			if diagnostic, ok := errors.AsType[targetDiagnosticsError](err); ok {
+				err = hclDiagnosticError(p.evaluator.repo, file.file, diagnostic.diagnostics)
+			}
+			return nil, fmt.Errorf("decode HCL %q %s block at %s: %w", file.file, item.name, item.block.Range().String(), err)
+		}
+		if err := validateSettingDecoderResult(item.name, decoded); err != nil {
+			return nil, fmt.Errorf("decode HCL %q %s block at %s: %w", file.file, item.name, item.block.Range().String(), err)
+		}
+		settings = append(settings, evaluatedSetting{
+			Name:    item.name,
+			File:    file.file,
+			Decoded: decoded,
+			Block:   block,
+			Source:  item.block.Range(),
+		})
+	}
+	return settings, nil
+}
+
+func (p targetsPhase) evaluatedTargets(file *hclFile, ctx *hcl.EvalContext) ([]evaluatedTarget, error) {
+	normalized := file.normalized
 	targets := make([]evaluatedTarget, 0, len(normalized))
 	for _, item := range normalized {
 		if err := p.evaluator.ctx.Err(); err != nil {
@@ -344,6 +429,8 @@ func (p targetsPhase) evaluatedTargets(file *hclFile) ([]evaluatedTarget, error)
 
 func (p declarationsPhase) normalizeBlocks(file *hclFile) ([]normalizedBlock, error) {
 	blocks := make([]normalizedBlock, 0, len(file.body.Blocks))
+	settings := make([]normalizedSetting, 0)
+	seenSettings := make(map[string]struct{})
 	kindIndexes := make(map[hclblock.TargetKind]int, len(p.evaluator.kindSpecs))
 	named := make(map[hclblock.TargetKind]map[string]struct{}, len(p.evaluator.kindSpecs))
 	for _, block := range file.body.Blocks {
@@ -351,6 +438,17 @@ func (p declarationsPhase) normalizeBlocks(file *hclFile) ([]normalizedBlock, er
 			return nil, err
 		}
 		if block.Type == "locals" {
+			continue
+		}
+		if _, attached := p.evaluator.settingBlocks[block.Type]; attached {
+			if len(block.Labels) > 0 {
+				return nil, fmt.Errorf("parse HCL %q %s block at %s: setting blocks take no labels", file.file, block.Type, block.Range().String())
+			}
+			if _, exists := seenSettings[block.Type]; exists {
+				return nil, fmt.Errorf("parse HCL %q: duplicate %s block at %s", file.file, block.Type, block.Range().String())
+			}
+			seenSettings[block.Type] = struct{}{}
+			settings = append(settings, normalizedSetting{block: block, name: block.Type})
 			continue
 		}
 		kind, name, _, err := p.normalizeBlock(block)
@@ -370,6 +468,7 @@ func (p declarationsPhase) normalizeBlocks(file *hclFile) ([]normalizedBlock, er
 		}
 		blocks = append(blocks, normalizedBlock{block: block, kind: kind, name: name, index: index})
 	}
+	file.settings = settings
 	return blocks, nil
 }
 

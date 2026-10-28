@@ -1,14 +1,19 @@
 package attego
 
 import (
+	"maps"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	detectorpkg "github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attegittest"
+	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graph/graphtest"
 	"github.com/ghthor/atte/detector/graphset"
+	"github.com/ghthor/atte/detector/graphtarget"
 	"github.com/ghthor/atte/reference"
 	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
@@ -87,6 +92,138 @@ func TestAttachScannerRetainsCompiledScanner(t *testing.T) {
 	test.True(t, configured != sensor, test.Sprintf("AttachScanner should return a new Sensor instance"))
 	test.True(t, configured.scanner == scanner, test.Sprintf("configured Sensor should retain the compiled Scanner"))
 	test.Nil(t, sensor.scanner)
+}
+
+// goTestFixture is a repository with a root module containing packages a and b,
+// plus a nested module containing package n. Each package has tests.
+type goTestFixture struct {
+	git  *attegittest.GitRepo
+	repo *attegit.Repo
+}
+
+func newGoTestFixture(t *testing.T, hclFiles map[string]string) goTestFixture {
+	t.Helper()
+	git := attegittest.NewGitRepo(t)
+	files := map[string]string{
+		"go.mod":             "module example.com/root\n\ngo 1.24\n",
+		"a/a.go":             "package a\n",
+		"a/a_test.go":        "package a\n",
+		"b/b.go":             "package b\n",
+		"b/b_test.go":        "package b\n",
+		"nested/go.mod":      "module example.com/nested\n\ngo 1.24\n",
+		"nested/n/n.go":      "package n\n",
+		"nested/n/n_test.go": "package n\n",
+	}
+	maps.Copy(files, hclFiles)
+	git.WriteFiles(t, files)
+	git.CommitAll(t, "init")
+	repo, err := attegit.Open(git.Dir(), "HEAD")
+	must.NoError(t, err)
+	return goTestFixture{git: git, repo: repo}
+}
+
+func (f goTestFixture) scanner(t *testing.T) detectorpkg.Scanner {
+	t.Helper()
+	builder := detectorpkg.NewBuilder()
+	must.NoError(t, builder.AttachSensor(attehcl.NewDetector()))
+	must.NoError(t, builder.AttachSensor(NewDetector()))
+	scanner, err := builder.Compile()
+	must.NoError(t, err)
+	return scanner
+}
+
+func (f goTestFixture) target(t *testing.T, scanner detectorpkg.Scanner, packageDir string) graphtarget.ID {
+	t.Helper()
+	targets, err := scanner.Targets(t.Context(), f.repo)
+	must.NoError(t, err)
+	for _, target := range targets {
+		if target.Namespace == Namespace && target.Path == packageDir {
+			return target
+		}
+	}
+	t.Fatalf("no go_test target for %q", packageDir)
+	return graphtarget.ID{}
+}
+
+func TestExecuteTargetHonorsGoTestSetting(t *testing.T) {
+	fixture := newGoTestFixture(t, map[string]string{
+		"atte.hcl": strings.TrimLeft(`
+locals {
+  race = "-race"
+}
+
+go_test {
+  command = ["go", "test", local.race, "./..."]
+}
+`, "\n"),
+		"b/atte.hcl": strings.TrimLeft(`
+go_test {
+  command = ["go", "test", "-count=1"]
+}
+`, "\n"),
+	})
+	scanner := fixture.scanner(t)
+	execute := func(packageDir string, want []string) {
+		t.Helper()
+		target := fixture.target(t, scanner, packageDir)
+		execution, err := scanner.ExecuteTarget(t.Context(), fixture.repo, fixture.git.Dir(), target)
+		must.NoError(t, err)
+		test.SliceEqOp(t, want, execution.Args)
+		test.EqOp(t, filepath.Join(fixture.git.Dir(), filepath.FromSlash(packageDir)), execution.Dir)
+	}
+	t.Run("module override", func(t *testing.T) {
+		execute("a", []string{"go", "test", "-race", "./..."})
+	})
+	t.Run("package override", func(t *testing.T) {
+		execute("b", []string{"go", "test", "-count=1"})
+	})
+	t.Run("other module default", func(t *testing.T) {
+		execute("nested/n", DefaultGoTestCommand)
+	})
+}
+
+func TestExecuteTargetWithoutScannerUsesDefault(t *testing.T) {
+	execution, err := NewDetector().ExecuteTarget(t.Context(), nil, "/root", graphtarget.ID{Path: "a"})
+	must.NoError(t, err)
+	test.SliceEqOp(t, DefaultGoTestCommand, execution.Args)
+}
+
+func TestGoTestSettingRejectsInvalidCommands(t *testing.T) {
+	evaluate := func(t *testing.T, body, want string) {
+		t.Helper()
+		fixture := newGoTestFixture(t, map[string]string{"a/atte.hcl": body})
+		_, err := fixture.scanner(t).HCLSettings(t.Context(), fixture.repo, reference.Tree("a"))
+		test.ErrorContains(t, err, want)
+	}
+	t.Run("missing", func(t *testing.T) {
+		evaluate(t, `go_test {}`, "command")
+	})
+	t.Run("empty", func(t *testing.T) {
+		evaluate(t, `go_test { command = [] }`, "command must not be empty")
+	})
+	t.Run("not a list", func(t *testing.T) {
+		evaluate(t, `go_test { command = "go test" }`, "command must be a list of strings")
+	})
+	t.Run("non-string element", func(t *testing.T) {
+		evaluate(t, `go_test { command = ["go", 1] }`, "command elements must be strings")
+	})
+	t.Run("labels", func(t *testing.T) {
+		evaluate(t, `go_test "a" { command = ["go"] }`, "setting blocks take no labels")
+	})
+}
+
+func TestGoTestSettingShowsInConfigOutput(t *testing.T) {
+	fixture := newGoTestFixture(t, map[string]string{
+		"a/atte.hcl": `go_test { command = ["go", "test", "-short"] }`,
+	})
+	scanner := fixture.scanner(t)
+	values, err := scanner.HCLSettings(t.Context(), fixture.repo, reference.Tree("a"))
+	must.NoError(t, err)
+	must.Len(t, 1, values)
+	test.EqOp(t, GoTestSettingBlock, values[0].Name)
+	projected, err := values[0].Configuration()
+	must.NoError(t, err)
+	test.Eq(t, map[string]any{"command": []string{"go", "test", "-short"}}, projected)
 }
 
 func TestHCLFunctionsResolvePackages(t *testing.T) {

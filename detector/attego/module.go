@@ -3,6 +3,12 @@
 // All Go files are parsed conservatively without evaluating build constraints.
 // Files belong to the deepest enclosing go.mod. Imports that cannot be resolved
 // to a package in the repository are scoped to the importing module.
+//
+// Each package with tests is a runnable go_test target. The command defaults to
+// DefaultGoTestCommand and may be overridden by a go_test setting block in
+// the package directory's atte.hcl, or in the module directory's atte.hcl for
+// every package in the module; see GoTestSettingBlock and
+// examples/attehcl-go-test-override.
 package attego
 
 import (
@@ -130,10 +136,16 @@ func (Detector) TargetSelector(target graphtarget.ID) selector.Target {
 	return result
 }
 
-func (Detector) ExecuteTarget(_ context.Context, _ *attegit.Repo, root string, target graphtarget.ID) (graphtarget.Execution, error) {
+// ExecuteTarget constructs the go_test command for target, honoring the nearest
+// go_test setting block in the package or module directory.
+func (d Detector) ExecuteTarget(ctx context.Context, repo *attegit.Repo, root string, target graphtarget.ID) (graphtarget.Execution, error) {
+	command, err := d.goTestCommand(ctx, repo, target)
+	if err != nil {
+		return graphtarget.Execution{}, err
+	}
 	return graphtarget.Execution{
 		Dir:  filepath.Join(root, filepath.FromSlash(target.Path)),
-		Args: []string{"go", "test", "-v"},
+		Args: append([]string(nil), command...),
 	}, nil
 }
 

@@ -49,12 +49,17 @@ func attachTestTarget[K ~string](kind K, spec hclblock.TargetKindSpec) error {
 }
 
 type testCapabilities struct {
-	functions func(context.Context, *attegit.Repo, reference.Blob) (map[string]function.Function, error)
-	decodeID  func(graph.EntityID) (graph.Entity, error)
+	functions     func(context.Context, *attegit.Repo, reference.Blob) (map[string]function.Function, error)
+	decodeID      func(graph.EntityID) (graph.Entity, error)
+	settingBlocks map[string]hclblock.SettingBlock
 }
 
 func (p testCapabilities) TargetKinds() map[hclblock.TargetKind]hclblock.TargetKindSpec {
 	return defaultTargetKinds
+}
+
+func (p testCapabilities) SettingBlocks() map[string]hclblock.SettingBlock {
+	return p.settingBlocks
 }
 
 func (p testCapabilities) HCLFunctions(ctx context.Context, repo *attegit.Repo, file reference.Blob) (map[string]function.Function, error) {
@@ -792,6 +797,87 @@ func TestConfigForReturnsOnlyRequestedFile(t *testing.T) {
 	test.Len(t, 1, targets)
 	test.EqOp(t, reference.Blob("child/atte.hcl"), targets[0].File)
 	test.EqOp(t, "child", targets[0].Name)
+}
+
+func shellSettingBlock() hclblock.SettingBlock {
+	return hclblock.SettingBlock{
+		Schema: &hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "shell", Required: true}}},
+		Decoder: func(content *hcl.BodyContent, ctx *hcl.EvalContext) (any, error) {
+			value, diagnostics := content.Attributes["shell"].Expr.Value(ctx)
+			if diagnostics.HasErrors() {
+				return nil, targetDiagnosticsError{diagnostics: diagnostics}
+			}
+			return map[string]any{"shell": value.AsString()}, nil
+		},
+		Config: func(decoded any) (map[string]any, error) {
+			return decoded.(map[string]any), nil
+		},
+	}
+}
+
+func TestConfigForDecodesSettingBlocks(t *testing.T) {
+	repo := newHCLFixture(t, map[string]string{
+		"child/atte.hcl": strings.TrimLeft(`
+locals {
+  shell = "bash"
+}
+
+settings {
+  shell = local.shell
+}
+
+test "child" { script = "child" }
+`, "\n"),
+		"sibling/atte.hcl": strings.TrimLeft(`
+settings {
+  shell = "zsh"
+}
+`, "\n"),
+	})
+	capabilities := testCapabilities{settingBlocks: map[string]hclblock.SettingBlock{"settings": shellSettingBlock()}}
+	config, err := ConfigFor(t.Context(), repo, "child", capabilities)
+	must.NoError(t, err)
+	test.Len(t, 1, SortedTargets(config.Targets))
+	must.Len(t, 1, config.Settings)
+	test.EqOp(t, "settings", config.Settings[0].Name)
+	test.EqOp(t, reference.Blob("child/atte.hcl"), config.Settings[0].File)
+	values, err := config.Settings[0].Configuration()
+	must.NoError(t, err)
+	test.Eq(t, map[string]any{"shell": "bash"}, values)
+
+	targets, err := Targets(t.Context(), repo, capabilities)
+	must.NoError(t, err)
+	test.Len(t, 1, SortedTargets(targets))
+}
+
+func TestSettingBlockErrors(t *testing.T) {
+	capabilities := testCapabilities{settingBlocks: map[string]hclblock.SettingBlock{"settings": shellSettingBlock()}}
+	evaluate := func(t *testing.T, body, want string) {
+		t.Helper()
+		repo := newHCLFixture(t, map[string]string{"atte.hcl": body})
+		_, err := ConfigFor(t.Context(), repo, "", capabilities)
+		test.ErrorContains(t, err, want)
+	}
+	t.Run("labels", func(t *testing.T) {
+		evaluate(t, `settings "named" { shell = "bash" }`, "setting blocks take no labels")
+	})
+	t.Run("duplicate", func(t *testing.T) {
+		evaluate(t, strings.TrimLeft(`
+settings { shell = "bash" }
+settings { shell = "zsh" }
+`, "\n"), "duplicate settings block")
+	})
+	t.Run("schema", func(t *testing.T) {
+		evaluate(t, `settings { unknown = true }`, "decode HCL \"atte.hcl\" settings block")
+	})
+	t.Run("expression", func(t *testing.T) {
+		evaluate(t, `settings { shell = local.missing }`, "decode HCL \"atte.hcl\" settings block")
+	})
+	t.Run("unknown", func(t *testing.T) {
+		repo := newHCLFixture(t, map[string]string{"atte.hcl": `settings { shell = "bash" }`})
+		_, err := ConfigFor(t.Context(), repo, "", testCapabilities{})
+		test.ErrorContains(t, err, "unknown target kind \"settings\"")
+	})
 }
 
 func TestEntityIDRoundTrip(t *testing.T) {

@@ -46,6 +46,7 @@ Sensor capability interfaces use the Sensor suffix so their capability is explic
 * GraphSensor provides graph construction.
 * TargetSensor provides target discovery, selector presentation, and execution as one capability.
 * EntityDecodingSensor provides entity-ID decoding.
+* HCLSettingSensor provides HCL setting-block evaluation for a directory.
 
 The capability interfaces are:
 
@@ -66,14 +67,20 @@ type EntityDecodingSensor interface {
     Sensor
     DecodeID(graph.EntityID) (graph.Entity, error)
 }
+
+type HCLSettingSensor interface {
+    Sensor
+    HCLSettings(context.Context, *attegit.Repo, reference.Tree) ([]hclblock.SettingValue, error)
+}
 ```
 
-Capabilities are optional. A Sensor may provide graph construction, target discovery, entity decoding, or any combination of them. Target discovery, selector presentation, and executable command construction are coupled: method-based Sensors are adapted as target-capable only when they implement the complete TargetSensor interface, and SensorSpec must provide all three functions or none.
+Capabilities are optional. A Sensor may provide graph construction, target discovery, entity decoding, HCL settings evaluation, or any combination of them. At most one attached Sensor may provide HCL settings evaluation; the HCL Sensor provides it in the default Builder, and compilation fails if two Sensors provide it. Target discovery, selector presentation, and executable command construction are coupled: method-based Sensors are adapted as target-capable only when they implement the complete TargetSensor interface, and SensorSpec must provide all three functions or none.
 
 Sensors may also expose HCL capabilities during attachment:
 
 * SensorProvidingHCLFunctions supplies HCL function factories.
 * SensorProvidingHCLTargetBlocks supplies HCL target-kind specifications.
+* SensorProvidingHCLSettingBlocks supplies HCL setting-block specifications.
 
 AttachSensor discovers these interfaces and attaches the supplied HCL
 capabilities to the Builder together with the Sensor.
@@ -98,6 +105,7 @@ type SensorSpec struct {
     TargetSelector func(graphtarget.ID) selector.Target
     ExecuteTarget  func(context.Context, *attegit.Repo, string, graphtarget.ID) (graphtarget.Execution, error)
     DecodeID       func(graph.EntityID) (graph.Entity, error)
+    HCLSettings      func(context.Context, *attegit.Repo, reference.Tree) ([]hclblock.SettingValue, error)
 }
 ```
 
@@ -145,7 +153,7 @@ Attach is the setup-time verb for adding capabilities to a Builder:
 * AttachHCLFunction attaches an HCL function factory.
 
 AttachSensor also discovers SensorProvidingHCLFunctions,
-SensorProvidingHCLTargetBlocks, and SensorProvidingHCLConfigBlocks implementations
+SensorProvidingHCLTargetBlocks, and SensorProvidingHCLSettingBlocks implementations
 and attaches their HCL capabilities.
 
 ## Default Builder
@@ -170,8 +178,9 @@ type Scanner interface {
     ExecuteTarget(context.Context, *attegit.Repo, string, graphtarget.ID) (graphtarget.Execution, error)
     Graph(context.Context, *attegit.Repo, ...graphset.Option) (*graph.Graph, error)
     TargetKinds() map[hclblock.TargetKind]hclblock.TargetKindSpec
-    ConfigBlocks() map[string]hclblock.ConfigBlock
+    SettingBlocks() map[string]hclblock.SettingBlock
     DecodeID(graph.EntityID) (graph.Entity, error)
+    HCLSettings(context.Context, *attegit.Repo, reference.Tree) ([]hclblock.SettingValue, error)
     HCLFunctions(context.Context, *attegit.Repo, reference.Blob) (map[string]function.Function, error)
 }
 ```
@@ -185,6 +194,7 @@ A Scanner:
 * renders, matches, and resolves targets using only the target Sensors in its compiled snapshot
 * constructs execution commands through the Sensor that discovered each target
 * dispatches entity-ID decoding by namespace
+* dispatches HCL settings evaluation to the Sensor that provides it, so other Sensors can read `atte.hcl` setting blocks without importing the HCL package
 * supplies the capabilities required by HCL evaluation
 
 Scanner-aware target operations belong to detector. The selector package retains only shared selector values and pure syntax/path helpers; it does not discover repository targets or maintain process-global Sensor mappings.
@@ -197,7 +207,7 @@ Compile transforms mutable Builder state into an immutable Scanner.
 
 Compilation:
 
-* copies regular Sensor attachments, target-kind and configuration-block specifications, schemas, and HCL function factories
+* copies regular Sensor attachments, target-kind and setting-block specifications, schemas, and HCL function factories
 * injects the newly compiled Scanner into Sensors implementing SensorWithScanner
 * adapts those Sensors into the compiled runtime snapshot
 * returns an error if a Sensor rejects the Scanner
@@ -263,9 +273,13 @@ Entity decoding is dispatched by the namespace encoded in the entity ID. This le
 
 The target-kind API types and their dependencies belong to `detector/attehcl/hclblock`. The evaluator and root detector package depend on this shared package instead of importing each other.
 
-## HCL configuration blocks
+## HCL setting blocks
 
-`hclblock.ConfigBlock` contains the schema and decoder for a named HCL configuration block. A Sensor provides these through `SensorProvidingHCLConfigBlocks`; the Builder validates and attaches them, and the Scanner returns independent copies through `ConfigBlocks()`.
+`hclblock.SettingBlock` contains the schema, decoder, and optional `Config` projection for a named HCL setting block. A Sensor provides these through `SensorProvidingHCLSettingBlocks` or an application attaches them with `AttachHCLSettingBlock`; the Builder validates them (valid identifier, no collision with a target kind or the reserved `locals`/`target` names) and the Scanner returns independent copies through `SettingBlocks()`.
+
+HCL evaluation decodes each unlabeled `name { ... }` block matching an attached setting block with the declaring file's evaluation context. At most one block per name may appear in a file. `attehcl.ConfigFor` returns the decoded blocks as `hclblock.SettingValue` entries in `Config.Settings`, and `atte config show` renders the `Config` projection of each under the `config` key.
+
+Other Sensors read setting blocks at runtime through `Scanner.HCLSettings(ctx, repo, tree)`, which the HCL Sensor serves as an HCLSettingSensor. The Go Sensor uses this to honor the `go_test { command = [...] }` block: a block in a package directory overrides that package's test command, and a block in a module directory overrides every package in the module without a closer block.
 
 ## Namespace
 

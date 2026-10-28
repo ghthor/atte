@@ -33,6 +33,7 @@ type EntityCapabilities interface {
 // compiled Scanner without importing the detector package.
 type Capabilities interface {
 	hclblock.TargetKindCapabilities
+	hclblock.SettingBlockCapabilities
 	FunctionCapabilities
 	EntityCapabilities
 }

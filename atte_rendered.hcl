@@ -60,3 +60,4 @@ target = {
     script = "atte_test.sh"
   }
 }
+settings = {}

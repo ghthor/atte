@@ -14,6 +14,7 @@ import (
 
 type targetEvaluationCapabilities interface {
 	hclblock.TargetKindCapabilities
+	hclblock.SettingBlockCapabilities
 	FunctionCapabilities
 }
 
@@ -76,9 +77,12 @@ func targetsWithCapabilities(
 	return targetsFromEvaluated(repo, blocks)
 }
 
-// Config is the evaluated target configuration for a repository directory.
+// Config is the evaluated configuration for a repository directory. Targets
+// groups the file's target declarations by kind; Settings lists the file's
+// setting blocks in source order.
 type Config struct {
-	Targets map[hclblock.TargetKind][]hclblock.Target
+	Targets  map[hclblock.TargetKind][]hclblock.Target
+	Settings []hclblock.SettingValue
 }
 
 // ConfigFor evaluates the file-local target configuration for a repository-relative directory.
@@ -110,13 +114,13 @@ func configForWithCapabilities(
 	if err != nil {
 		return Config{}, err
 	}
-	blocks, err := evaluator.evaluatedTargets(currentBlob)
+	evaluated, err := evaluator.evaluatedFile(currentBlob)
 	if err != nil {
 		return Config{}, err
 	}
-	allTargets, err := targetsFromEvaluated(repo, blocks)
+	allTargets, err := targetsFromEvaluated(repo, evaluated.targets)
 	if err != nil {
 		return Config{}, err
 	}
-	return Config{Targets: allTargets}, nil
+	return Config{Targets: allTargets, Settings: settingsFromEvaluated(evaluated.settings)}, nil
 }

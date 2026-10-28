@@ -77,6 +77,51 @@ err := cmd.ExecuteWithOptions(ctx, args, cmd.ExecuteOptions{
 })
 ```
 
+## Attaching setting blocks
+
+Setting blocks are unlabeled top-level blocks, such as `settings { ... }`,
+that carry file-local settings rather than runnable targets. Attach them with
+`detector.AttachHCLSettingBlock` or by implementing
+`detector.SensorProvidingHCLSettingBlocks` on a Sensor. A setting block
+requires a schema and a decoder and may provide a `Config` projection that
+renders the decoded value in `atte config show` output.
+
+```go
+err = detector.AttachHCLSettingBlock(builder, "settings", hclblock.SettingBlock{
+	Schema:  &settingsSchema,
+	Decoder: decodeSettings,
+	Config:  configSettings,
+})
+```
+
+A file declares at most one block per setting name, and the block takes
+no labels. Setting blocks are decoded with the same evaluation context as
+the file's targets, so they may read `local.*` values and call HCL functions.
+Setting block names must be valid HCL identifiers, cannot collide with an
+attached target kind, and cannot use the reserved `locals` or `target` names.
+
+`attehcl.ConfigFor` returns the decoded blocks for the requested file in
+`Config.Settings`; `atte config show` renders them under a `settings` key beside
+`target`, keyed by `//<file>#<name>`, with the `Config` projection's result
+under `values`.
+
+The HCL Sensor also serves settings evaluation to other Sensors through
+the compiled Scanner's `HCLSettings(ctx, repo, tree)` method (the
+`detector.HCLSettingSensor` capability). A Sensor that owns a setting
+block, such as the Go Sensor's `go_test` block, attaches the block through
+`SensorProvidingHCLSettingBlocks` and reads its decoded values at runtime
+through the Scanner rather than importing this package. See
+`examples/attehcl-go-test-override` for a runnable repository that overrides
+`go_test` at module and package scope:
+
+```hcl
+# Overrides the go_test command for this package, or for every package in the
+# module when declared beside go.mod.
+go_test {
+  command = ["go", "test", "-race", "-count=1"]
+}
+```
+
 ## Attaching HCL functions
 
 Applications can add repository- and file-aware HCL functions to the same

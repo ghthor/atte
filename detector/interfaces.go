@@ -8,6 +8,7 @@ import (
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphset"
 	"github.com/ghthor/atte/detector/graphtarget"
+	"github.com/ghthor/atte/reference"
 	"github.com/ghthor/atte/reference/selector"
 )
 
@@ -42,6 +43,14 @@ type EntityDecodingSensor interface {
 	DecodeID(id graph.EntityID) (graph.Entity, error)
 }
 
+// HCLSettingSensor evaluates the attached HCL setting blocks declared in
+// one repository directory. At most one attached Sensor may provide this
+// capability; the Scanner dispatches HCLSettings requests to it.
+type HCLSettingSensor interface {
+	Sensor
+	HCLSettings(context.Context, *attegit.Repo, reference.Tree) ([]hclblock.SettingValue, error)
+}
+
 // SensorWithScanner opts a Sensor into receiving the compiled Scanner during
 // Builder.Compile. Implementations may validate the Scanner against a local
 // capability interface and return a new bound Sensor to keep compiled snapshots
@@ -64,10 +73,10 @@ type SensorProvidingHCLTargetBlocks interface {
 	HCLTargetBlocks() map[hclblock.TargetKind]hclblock.TargetKindSpec
 }
 
-// SensorProvidingHCLConfigBlocks allows a Sensor to provide named HCL
-// configuration blocks for decoding. The Scanner stores and exposes these
-// blocks for future use.
-type SensorProvidingHCLConfigBlocks interface {
+// SensorProvidingHCLSettingBlocks allows a Sensor to provide named HCL
+// setting blocks. HCL evaluation decodes matching unlabeled top-level
+// blocks in each atte.hcl file and exposes them through attehcl.ConfigFor.
+type SensorProvidingHCLSettingBlocks interface {
 	Sensor
-	HCLConfigBlocks() map[string]hclblock.ConfigBlock
+	HCLSettingBlocks() map[string]hclblock.SettingBlock
 }

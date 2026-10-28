@@ -63,7 +63,15 @@ func newConfigCommand() *cobra.Command {
 }
 
 type configOutput struct {
-	Target map[string]target.Computed `json:"target"`
+	Target   map[string]target.Computed `json:"target"`
+	Settings map[string]settingComputed `json:"settings"`
+}
+
+// settingComputed is the config show representation of one setting block.
+type settingComputed struct {
+	File   string         `json:"file"`
+	Name   string         `json:"name"`
+	Values map[string]any `json:"values,omitempty"`
 }
 
 func writeConfig(w interface{ Write([]byte) (int, error) }, config attehcl.Config, format string) error {
@@ -93,14 +101,26 @@ func configOutputFor(config attehcl.Config) (configOutput, error) {
 		}
 		targets[key] = computed
 	}
-	return configOutput{Target: targets}, nil
+	settings := make(map[string]settingComputed, len(config.Settings))
+	for _, item := range config.Settings {
+		values, err := item.Configuration()
+		if err != nil {
+			return configOutput{}, err
+		}
+		settings[fmt.Sprintf("//%s#%s", item.File, item.Name)] = settingComputed{
+			File:   item.File.String(),
+			Name:   item.Name,
+			Values: values,
+		}
+	}
+	return configOutput{Target: targets, Settings: settings}, nil
 }
 
 func writeConfigHCL(w interface{ Write([]byte) (int, error) }, output configOutput) error {
 	file := hclwrite.NewEmptyFile()
 	body := file.Body()
-	values := map[string]any{"target": output.Target}
-	for _, name := range []string{"target"} {
+	values := map[string]any{"target": output.Target, "settings": output.Settings}
+	for _, name := range []string{"target", "settings"} {
 		value, err := anyCty(values[name])
 		if err != nil {
 			return fmt.Errorf("encode %s: %w", name, err)
@@ -121,6 +141,29 @@ func anyCty(value any) (cty.Value, error) {
 		return cty.BoolVal(value), nil
 	case int:
 		return cty.NumberIntVal(int64(value)), nil
+	case int64:
+		return cty.NumberIntVal(value), nil
+	case float64:
+		return cty.NumberFloatVal(value), nil
+	case []string:
+		items := make([]any, 0, len(value))
+		for _, item := range value {
+			items = append(items, item)
+		}
+		return anyCty(items)
+	case []any:
+		if len(value) == 0 {
+			return cty.ListValEmpty(cty.DynamicPseudoType), nil
+		}
+		items := make([]cty.Value, 0, len(value))
+		for _, item := range value {
+			converted, err := anyCty(item)
+			if err != nil {
+				return cty.NilVal, err
+			}
+			items = append(items, converted)
+		}
+		return cty.TupleVal(items), nil
 	case map[string]any:
 		values := make(map[string]cty.Value, len(value))
 		for key, item := range value {
@@ -147,6 +190,21 @@ func anyCty(value any) (cty.Value, error) {
 		}
 		if value.Meta != nil {
 			values["meta"] = value.Meta
+		}
+		return anyCty(values)
+	case settingComputed:
+		values := map[string]any{
+			"file": value.File,
+			"name": value.Name,
+		}
+		if value.Values != nil {
+			values["values"] = value.Values
+		}
+		return anyCty(values)
+	case map[string]settingComputed:
+		values := make(map[string]any, len(value))
+		for key, item := range value {
+			values[key] = item
 		}
 		return anyCty(values)
 	case map[string]target.Computed:

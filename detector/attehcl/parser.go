@@ -19,6 +19,7 @@ type hclFile struct {
 	body       *hclsyntax.Body
 	locals     map[string]hcl.Expression
 	normalized []normalizedBlock
+	settings   []normalizedSetting
 }
 
 type hclFiles map[reference.Blob]*hclFile

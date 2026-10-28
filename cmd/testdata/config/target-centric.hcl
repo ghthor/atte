@@ -20,3 +20,4 @@ target = {
     script = "child/child.sh"
   }
 }
+settings = {}

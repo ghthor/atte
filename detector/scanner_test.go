@@ -10,6 +10,7 @@ import (
 	"github.com/ghthor/atte/detector/attehcl/hclblock"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphtarget"
+	"github.com/ghthor/atte/reference"
 	"github.com/ghthor/atte/reference/selector"
 	"github.com/hashicorp/hcl/v2"
 	"github.com/shoenig/test"
@@ -302,7 +303,7 @@ func TestAttachSensor(t *testing.T) {
 	test.NoError(t, err)
 	test.NotNil(t, functions["method"])
 	test.NotNil(t, scanner.TargetKinds()["method"])
-	test.NotNil(t, scanner.ConfigBlocks()["method"])
+	test.NotNil(t, scanner.SettingBlocks()["method_settings"])
 	target := graphtarget.ID{ID: "method:target", Namespace: "method"}
 	canonical, ok := scanner.TargetString(target)
 	test.True(t, ok, test.Sprintf("method-based TargetSensor should adapt its selector capability"))
@@ -313,7 +314,7 @@ func TestAttachSensor(t *testing.T) {
 
 	configBuilder := NewBuilder()
 	must.NoError(t, configBuilder.AttachSensor(configOnlySensor{}))
-	test.NotNil(t, compileScanner(t, configBuilder).ConfigBlocks()["settings"])
+	test.NotNil(t, compileScanner(t, configBuilder).SettingBlocks()["settings"])
 }
 
 func TestAttachSensorRequiresCompleteTargetCapability(t *testing.T) {
@@ -374,29 +375,35 @@ func TestAttachTarget(t *testing.T) {
 	test.NotNil(t, attachedSpec.Schema)
 }
 
-func TestAttachConfigBlock(t *testing.T) {
+func TestAttachSettingBlock(t *testing.T) {
 	decoder := func(*hcl.BodyContent, *hcl.EvalContext) (any, error) { return struct{}{}, nil }
 	schema := hcl.BodySchema{Attributes: []hcl.AttributeSchema{{Name: "value"}}}
-	block := hclblock.ConfigBlock{Schema: &schema, Decoder: decoder}
+	block := hclblock.SettingBlock{Schema: &schema, Decoder: decoder}
 
-	test.Error(t, AttachHCLConfigBlock(nil, "settings", block))
+	test.Error(t, AttachHCLSettingBlock(nil, "settings", block))
 	builder := NewBuilder()
-	test.Error(t, AttachHCLConfigBlock(builder, "", block))
-	test.Error(t, AttachHCLConfigBlock(builder, "bad name", block))
-	test.Error(t, AttachHCLConfigBlock(builder, "missing_schema", hclblock.ConfigBlock{Decoder: decoder}))
-	test.Error(t, AttachHCLConfigBlock(builder, "missing_decoder", hclblock.ConfigBlock{Schema: &schema}))
-	test.NoError(t, AttachHCLConfigBlock(builder, "settings", block))
-	test.Error(t, AttachHCLConfigBlock(builder, "settings", block))
+	test.Error(t, AttachHCLSettingBlock(builder, "", block))
+	test.Error(t, AttachHCLSettingBlock(builder, "bad name", block))
+	test.Error(t, AttachHCLSettingBlock(builder, "missing_schema", hclblock.SettingBlock{Decoder: decoder}))
+	test.Error(t, AttachHCLSettingBlock(builder, "missing_decoder", hclblock.SettingBlock{Schema: &schema}))
+	test.NoError(t, AttachHCLSettingBlock(builder, "settings", block))
+	test.Error(t, AttachHCLSettingBlock(builder, "settings", block))
+	test.ErrorContains(t, AttachHCLSettingBlock(builder, "locals", block), "reserved")
+	test.ErrorContains(t, AttachHCLSettingBlock(builder, "target", block), "reserved")
+	must.NoError(t, AttachHCLTargetBlock(builder, "deploy", hclblock.TargetKindSpec{Decoder: decoder}))
+	test.ErrorContains(t, AttachHCLSettingBlock(builder, "deploy", block), "conflicts with target kind")
+	test.ErrorContains(t, AttachHCLTargetBlock(builder, "settings", hclblock.TargetKindSpec{Decoder: decoder}), "conflicts with setting block")
+	test.ErrorContains(t, NewBuilder().AttachSensor(conflictingSensor{}), "conflicts with target kind")
 
 	schema.Attributes[0].Name = "changed"
 	scanner := compileScanner(t, builder)
-	attached := scanner.ConfigBlocks()
+	attached := scanner.SettingBlocks()
 	test.EqOp(t, 1, len(attached))
 	attachedSchema := attached["settings"].Schema
 	test.NotNil(t, attachedSchema)
 	test.EqOp(t, "value", attachedSchema.Attributes[0].Name)
 	attachedSchema.Attributes[0].Name = "mutated result"
-	test.EqOp(t, "value", scanner.ConfigBlocks()["settings"].Schema.Attributes[0].Name)
+	test.EqOp(t, "value", scanner.SettingBlocks()["settings"].Schema.Attributes[0].Name)
 }
 
 func TestAttachHCLFunction(t *testing.T) {
@@ -409,15 +416,50 @@ func TestCompileSnapshotsAttachments(t *testing.T) {
 	builder := NewBuilder()
 	decoder := func(*hcl.BodyContent, *hcl.EvalContext) (any, error) { return struct{}{}, nil }
 	must.NoError(t, AttachHCLTargetBlock(builder, "first", hclblock.TargetKindSpec{Decoder: decoder}))
-	must.NoError(t, AttachHCLConfigBlock(builder, "first", hclblock.ConfigBlock{Schema: &hcl.BodySchema{}, Decoder: decoder}))
+	must.NoError(t, AttachHCLSettingBlock(builder, "first_config", hclblock.SettingBlock{Schema: &hcl.BodySchema{}, Decoder: decoder}))
 	compiled := compileScanner(t, builder)
 	must.NoError(t, AttachHCLTargetBlock(builder, "second", hclblock.TargetKindSpec{Decoder: decoder}))
-	must.NoError(t, AttachHCLConfigBlock(builder, "second", hclblock.ConfigBlock{Schema: &hcl.BodySchema{}, Decoder: decoder}))
+	must.NoError(t, AttachHCLSettingBlock(builder, "second_config", hclblock.SettingBlock{Schema: &hcl.BodySchema{}, Decoder: decoder}))
 
 	test.EqOp(t, 1, len(compiled.TargetKinds()))
 	test.EqOp(t, 2, len(compileScanner(t, builder).TargetKinds()))
-	test.EqOp(t, 1, len(compiled.ConfigBlocks()))
-	test.EqOp(t, 2, len(compileScanner(t, builder).ConfigBlocks()))
+	test.EqOp(t, 1, len(compiled.SettingBlocks()))
+	test.EqOp(t, 2, len(compileScanner(t, builder).SettingBlocks()))
+}
+
+type hclSettingsSensor struct{ namespace string }
+
+func (s hclSettingsSensor) Namespace() string { return s.namespace }
+
+func (s hclSettingsSensor) HCLSettings(_ context.Context, _ *attegit.Repo, tree reference.Tree) ([]hclblock.SettingValue, error) {
+	file, err := tree.Blob("atte.hcl")
+	if err != nil {
+		return nil, err
+	}
+	return []hclblock.SettingValue{{Name: s.namespace, File: file}}, nil
+}
+
+func TestHCLConfigDispatch(t *testing.T) {
+	t.Run("no provider", func(t *testing.T) {
+		_, err := compileScanner(t, NewBuilder()).HCLSettings(t.Context(), nil, reference.Root)
+		test.ErrorContains(t, err, "no Sensor attached provides HCL settings evaluation")
+	})
+	t.Run("single provider", func(t *testing.T) {
+		builder := NewBuilder()
+		must.NoError(t, builder.AttachSensor(hclSettingsSensor{namespace: "config"}))
+		values, err := compileScanner(t, builder).HCLSettings(t.Context(), nil, reference.Tree("dir"))
+		must.NoError(t, err)
+		must.Len(t, 1, values)
+		test.EqOp(t, "config", values[0].Name)
+		test.EqOp(t, reference.Blob("dir/atte.hcl"), values[0].File)
+	})
+	t.Run("duplicate providers", func(t *testing.T) {
+		builder := NewBuilder()
+		must.NoError(t, builder.AttachSensor(hclSettingsSensor{namespace: "first"}))
+		must.NoError(t, builder.AttachSensor(hclSettingsSensor{namespace: "second"}))
+		_, err := builder.Compile()
+		test.ErrorContains(t, err, "both provide HCL settings evaluation")
+	})
 }
 
 func TestAttachTargetValidation(t *testing.T) {
@@ -455,12 +497,12 @@ type configOnlySensor struct{}
 
 func (configOnlySensor) Namespace() string { return "config-only" }
 
-func (configOnlySensor) HCLConfigBlocks() map[string]hclblock.ConfigBlock {
-	return map[string]hclblock.ConfigBlock{"settings": testConfigBlock()}
+func (configOnlySensor) HCLSettingBlocks() map[string]hclblock.SettingBlock {
+	return map[string]hclblock.SettingBlock{"settings": testSettingBlock()}
 }
 
-func testConfigBlock() hclblock.ConfigBlock {
-	return hclblock.ConfigBlock{
+func testSettingBlock() hclblock.SettingBlock {
+	return hclblock.SettingBlock{
 		Schema: &hcl.BodySchema{},
 		Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) {
 			return struct{}{}, nil
@@ -510,8 +552,22 @@ func (methodSensor) HCLTargetBlocks() map[hclblock.TargetKind]hclblock.TargetKin
 	}
 }
 
-func (methodSensor) HCLConfigBlocks() map[string]hclblock.ConfigBlock {
-	return map[string]hclblock.ConfigBlock{"method": testConfigBlock()}
+func (methodSensor) HCLSettingBlocks() map[string]hclblock.SettingBlock {
+	return map[string]hclblock.SettingBlock{"method_settings": testSettingBlock()}
+}
+
+type conflictingSensor struct{}
+
+func (conflictingSensor) Namespace() string { return "conflicting" }
+
+func (conflictingSensor) HCLTargetBlocks() map[hclblock.TargetKind]hclblock.TargetKindSpec {
+	return map[hclblock.TargetKind]hclblock.TargetKindSpec{
+		"shared": {Decoder: func(*hcl.BodyContent, *hcl.EvalContext) (any, error) { return struct{}{}, nil }},
+	}
+}
+
+func (conflictingSensor) HCLSettingBlocks() map[string]hclblock.SettingBlock {
+	return map[string]hclblock.SettingBlock{"shared": testSettingBlock()}
 }
 
 type rejectingScannerSensor struct{}
