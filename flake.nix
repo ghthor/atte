@@ -12,21 +12,23 @@
     #### Main stable release branch
     # https://hydra.nixos.org/jobset/nixos/release-26.05/evals
     nixpkgs = {
-      # https://hydra.nixos.org/eval/1828759#tabs-inputs
-      url = "github:NixOS/nixpkgs/a5cc6f2c37bf518436dc8d1c288ccd0c43c2f4c4";
+      # https://hydra.nixos.org/eval/1830478#tabs-inputs
+      url = "github:NixOS/nixpkgs/cd4ea8d57de16f4810bc5f14207bac45fbf19f67";
       # url = "nixpkgs/nixos-26.05";
     };
 
     #### Unstable release branch
     # https://hydra.nixos.org/jobset/nixos/unstable
     nixpkgs-unstable = {
-      # https://hydra.nixos.org/eval/1828722#tabs-inputs
-      url = "github:NixOS/nixpkgs/3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2";
+      # https://hydra.nixos.org/eval/1830477#tabs-inputs
+      url = "github:NixOS/nixpkgs/02c087f3fe673c9e317f206a627cb6b910336dbe";
       # url = "nixpkgs/nixos-unstable";
     };
 
-    # Pin the Nucleus source to a reproducible remote revision.
-    nucleus.url = "github:sig-id/nucleus/dbe87fa29879bfee059a5d708811a3da74bb9225";
+    #### Master branch (for cacerts)
+    nixpkgs-master = {
+      url = "github:NixOS/nixpkgs/f903b88037954e42a165c27b686201c2f242ae28";
+    };
 
     flake-utils.url = "github:numtide/flake-utils";
   };
@@ -36,7 +38,7 @@
       self,
       nixpkgs,
       nixpkgs-unstable,
-      nucleus,
+      nixpkgs-master,
       flake-utils,
       ...
     }:
@@ -59,22 +61,15 @@
             inherit system;
             config.allowUnfreePredicate = pkg: nixpkgs.lib.getName pkg == "claude-code";
           };
+          pkgs-master = import nixpkgs-master {
+            inherit system;
+          };
           cobraCli = pkgs.writeShellScriptBin "cobra-cli" ''
             exec ${pkgs-unstable.cobra-cli}/bin/cobra-cli \
               -l MIT \
               --author "$(git config get user.name)" \
               "$@"
           '';
-          agentToolchainRootfs = nucleus.lib.mkAgentToolchainRootfs {
-            inherit pkgs;
-            # TODO: this needs to ref my system wrapped claude package somehow, maybe we need to move this into ~/src/shrc/nix home-manager?
-            providerPackages = [ pkgs-unstable.claude-code ];
-            extraPackages = [ cobraCli ];
-            name = "atte-agent-toolchain-rootfs";
-          };
-          nucleusPackage = nucleus.packages.${system}.default.overrideAttrs (_: {
-            doCheck = false;
-          });
         in
         {
           packages = {
@@ -92,8 +87,7 @@
             inherit
               pkgs
               pkgs-unstable
-              agentToolchainRootfs
-              nucleusPackage
+              pkgs-master
               cobraCli
               ;
           };

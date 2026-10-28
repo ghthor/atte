@@ -1,8 +1,7 @@
 {
   pkgs,
   pkgs-unstable,
-  nucleusPackage,
-  agentToolchainRootfs,
+  pkgs-master,
   cobraCli,
 }:
 
@@ -38,24 +37,12 @@ pkgs.mkShell {
     pkgs.marksman
     pkgs.shellcheck
     pkgs.uv
-    # nucleusPackage
     cobraCli
-    (pkgs.writeShellScriptBin "atte-agent" ''
-      set -eu
-
-      workspace="''${ATTE_AGENT_WORKSPACE:-$PWD}"
-      exec ${nucleusPackage}/bin/nucleus run \
-        --service-mode strict-agent \
-        --agent-toolchain-rootfs ${agentToolchainRootfs} \
-        --workspace "$workspace" \
-        --workspace-exec \
-        --provider-config-rw "$HOME/.claude:.claude" \
-        -- claude "$@"
-    '')
   ];
 
   shellHook = ''
     export UV_NO_MANAGED_PYTHON=1
+    export NIX_SSL_CERT_FILE=${pkgs-master.cacert}/etc/ssl/certs/ca-bundle.crt
 
     if [ -z "''${ATTE_DEV_DIR:-}" ]; then
       export ATTE_DEV_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
