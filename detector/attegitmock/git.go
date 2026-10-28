@@ -24,6 +24,12 @@ func New(ctx context.Context) (*Repo, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Canonicalize the temporary directory so it matches the paths Git reports
+	// (macOS places TMPDIR under /var, a symlink to /private/var).
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		return nil, err
+	}
 	dir := filepath.Join(root, "repo")
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		_ = os.RemoveAll(root)

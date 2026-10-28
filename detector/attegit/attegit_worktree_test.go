@@ -63,7 +63,11 @@ func TestOpenGitDirectories(t *testing.T) {
 
 	t.Run("relative alternates", func(t *testing.T) {
 		src := initialRepo(t)
-		clone := filepath.Join(t.TempDir(), "clone")
+		// Canonicalize the temp dir so the relative alternate path is computed
+		// between two real paths (macOS: /tmp -> /private/tmp).
+		tmp, err := filepath.EvalSymlinks(t.TempDir())
+		must.NoError(t, err)
+		clone := filepath.Join(tmp, "clone")
 		gitIn(t, src.Dir(), "clone", "--shared", src.Dir(), clone)
 		objects := filepath.Join(clone, ".git", "objects")
 		rel, err := filepath.Rel(objects, filepath.Join(src.Dir(), ".git", "objects"))

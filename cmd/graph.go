@@ -95,7 +95,13 @@ func repositoryContext(ctx context.Context, cwd string) (string, string, error) 
 		return "", "", fmt.Errorf("resolve repository root: %w", err)
 	}
 	root := strings.TrimSpace(out.String())
-	relative, err := filepath.Rel(root, cwd)
+	// Git reports the canonical repository root; canonicalize cwd as well so
+	// symlinked paths (for example /var -> /private/var on macOS) stay relative.
+	realCwd, err := filepath.EvalSymlinks(cwd)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve working directory: %w", err)
+	}
+	relative, err := filepath.Rel(root, realCwd)
 	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		return "", "", fmt.Errorf("resolve repository-relative working directory")
 	}
