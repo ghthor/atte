@@ -1,0 +1,38 @@
+name: Verify
+
+on:
+  push:
+    branches: [main, atte-genesis]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+
+      - name: Build tests
+        run: nix develop --command atte run test.build
+
+      - name: Go tests
+        run: nix develop --command atte run test.go
+
+      - name: Codegen
+        run: nix develop --command atte run codegen.go
+
+      - name: Format
+        run: nix develop --command atte run codegen.fmt
+
+      - name: Rendered codegen
+        run: nix develop --command atte run codegen.rendered
+
+      - name: Lint
+        run: nix develop --command atte run lint.go
+
+      - name: Check for uncommitted changes
+        run: git diff --exit-code
