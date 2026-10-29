@@ -36,6 +36,7 @@ pkgs.mkShell {
     pkgs.graph-easy
     pkgs.marksman
     pkgs.shellcheck
+    pkgs.actionlint
     pkgs.uv
     cobraCli
   ];

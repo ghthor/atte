@@ -155,7 +155,7 @@ func runCommand(cmd *cobra.Command, args []string, options runOptions) error {
 		return err
 	}
 	if options.dryRun {
-		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "attr run %s\n%s\n", target.selector, formatRunArgs(target.argv)); err != nil {
+		if _, err := fmt.Fprintf(cmd.OutOrStdout(), "atte run %s\n%s\n", target.selector, formatRunArgs(target.argv)); err != nil {
 			return fmt.Errorf("print dry run: %w", err)
 		}
 		return nil

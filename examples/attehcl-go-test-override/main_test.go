@@ -70,7 +70,7 @@ func TestGoTestRunDryRunUsesNearestOverride(t *testing.T) {
 		stdout, stderr, err := executeAcceptanceCommand(t, repository, "run", "--dry-run", selector)
 		test.NoError(t, err)
 		test.EqOp(t, "", stderr)
-		test.StrContains(t, stdout, "attr run "+selector+"\n")
+		test.StrContains(t, stdout, "atte run "+selector+"\n")
 		test.StrContains(t, stdout, wantCommand+"\n")
 	}
 	t.Run("module override", func(t *testing.T) {

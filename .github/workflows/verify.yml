@@ -16,6 +16,15 @@ jobs:
 
       - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
 
+      - name: Format
+        run: nix develop --command atte run codegen.fmt
+
+      - name: Lint
+        run: nix develop --command atte run lint.go
+
+      - name: Lint workflows
+        run: nix develop --command atte run //.github/workflows/atte.hcl#lint.actionlint
+
       - name: Build tests
         run: nix develop --command atte run test.build
 
@@ -25,14 +34,8 @@ jobs:
       - name: Codegen
         run: nix develop --command atte run codegen.go
 
-      - name: Format
-        run: nix develop --command atte run codegen.fmt
-
       - name: Rendered codegen
         run: nix develop --command atte run codegen.rendered
-
-      - name: Lint
-        run: nix develop --command atte run lint.go
 
       - name: Check for uncommitted changes
         run: git diff --exit-code

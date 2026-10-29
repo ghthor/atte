@@ -96,7 +96,7 @@ func TestRunSelectsTargetsInConfiguredFile(t *testing.T) {
 		stdout, stderr, err := executeAcceptanceCommandIn(t, repository, workingDirectory, "run", "--dry-run", selector)
 		test.NoError(t, err, test.Sprintf("selector %q from %q", selector, workingDirectory))
 		test.EqOp(t, "", stderr)
-		test.StrContains(t, stdout, "attr run "+wantSelector+"\n")
+		test.StrContains(t, stdout, "atte run "+wantSelector+"\n")
 		test.StrContains(t, stdout, `bash -c "echo unit"`+"\n")
 	}
 

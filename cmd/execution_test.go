@@ -67,13 +67,13 @@ func TestExecuteWithOptionsIsolatesRunFlags(t *testing.T) {
 	dryRun, stderr, err := executeTestCommand(t, repository, "run", "--dry-run", "test.unit")
 	test.NoError(t, err)
 	test.EqOp(t, "", stderr)
-	test.StrContains(t, dryRun, "attr run")
+	test.StrContains(t, dryRun, "atte run")
 
 	list, stderr, err := executeTestCommand(t, repository, "run", "--list")
 	test.NoError(t, err)
 	test.EqOp(t, "", stderr)
 	test.StrContains(t, list, "test.unit")
-	test.StrNotContains(t, list, "attr run")
+	test.StrNotContains(t, list, "atte run")
 
 	list, stderr, err = executeTestCommand(t, repository, "run", "--list")
 	test.NoError(t, err)
@@ -83,7 +83,7 @@ func TestExecuteWithOptionsIsolatesRunFlags(t *testing.T) {
 	dryRun, stderr, err = executeTestCommand(t, repository, "run", "--dry-run", "test.unit")
 	test.NoError(t, err)
 	test.EqOp(t, "", stderr)
-	test.StrContains(t, dryRun, "attr run")
+	test.StrContains(t, dryRun, "atte run")
 }
 
 func TestExecuteWithOptionsIsolatesConfigFormat(t *testing.T) {
