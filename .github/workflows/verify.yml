@@ -11,19 +11,24 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
 
-      - uses: cachix/install-nix-action@75c75c31ebece974e48ebc36b4ad125bd97bd97b # v31.11.3
+      - uses: cachix/install-nix-action@v31.11.3
+
+      - name: Lint workflows
+        run: nix develop --command atte run //.github/workflows/atte.hcl#lint.actionlint
+
+      - name: Lock workflows
+        run: nix develop --command atte run //.github/workflows/atte.hcl#codegen.actions-lock
 
       - name: Format
         run: nix develop --command atte run codegen.fmt
 
       - name: Lint
         run: nix develop --command atte run lint.go
-
-      - name: Lint workflows
-        run: nix develop --command atte run //.github/workflows/atte.hcl#lint.actionlint
 
       - name: Build tests
         run: nix develop --command atte run test.build
