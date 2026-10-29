@@ -106,11 +106,12 @@ func configForWithCapabilities(
 	if err != nil {
 		return Config{}, fmt.Errorf("invalid repository directory %q: %w", relativePath, err)
 	}
-	currentBlob, err := tree.Blob(Filename)
+	layout, err := LoadLayout(ctx, repo)
 	if err != nil {
 		return Config{}, err
 	}
-	evaluator, err := newEvaluatorForFile(ctx, repo, currentBlob, scanner)
+	currentBlob := layout.File(tree)
+	evaluator, err := newEvaluatorForFile(ctx, repo, layout, currentBlob, scanner)
 	if err != nil {
 		return Config{}, err
 	}

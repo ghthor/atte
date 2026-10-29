@@ -22,6 +22,7 @@ import (
 type evaluator struct {
 	ctx           context.Context
 	repo          *attegit.Repo
+	layout        Layout
 	files         hclFiles
 	scanner       targetEvaluationCapabilities
 	functions     map[reference.Blob]map[string]function.Function
@@ -97,16 +98,21 @@ func newEvaluator(ctx context.Context, repo *attegit.Repo, scanner targetEvaluat
 	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
-	files, err := readHCLFiles(ctx, repo)
+	layout, err := LoadLayout(ctx, repo)
 	if err != nil {
 		return nil, err
 	}
-	return newEvaluatorWithFiles(ctx, repo, files, scanner), nil
+	files, err := readHCLFiles(ctx, repo, layout)
+	if err != nil {
+		return nil, err
+	}
+	return newEvaluatorWithFiles(ctx, repo, layout, files, scanner), nil
 }
 
 func newEvaluatorForFile(
 	ctx context.Context,
 	repo *attegit.Repo,
+	layout Layout,
 	file reference.Blob,
 	scanner targetEvaluationCapabilities,
 ) (*evaluator, error) {
@@ -116,7 +122,7 @@ func newEvaluatorForFile(
 	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
-	files, err := readHCLFiles(ctx, repo)
+	files, err := readHCLFiles(ctx, repo, layout)
 	if err != nil {
 		return nil, err
 	}
@@ -127,18 +133,20 @@ func newEvaluatorForFile(
 			locals: make(map[string]hcl.Expression),
 		}
 	}
-	return newEvaluatorWithFiles(ctx, repo, files, scanner), nil
+	return newEvaluatorWithFiles(ctx, repo, layout, files, scanner), nil
 }
 
 func newEvaluatorWithFiles(
 	ctx context.Context,
 	repo *attegit.Repo,
+	layout Layout,
 	files hclFiles,
 	scanner targetEvaluationCapabilities,
 ) *evaluator {
 	return &evaluator{
 		ctx:           ctx,
 		repo:          repo,
+		layout:        layout,
 		files:         files,
 		scanner:       scanner,
 		functions:     make(map[reference.Blob]map[string]function.Function),
@@ -207,7 +215,7 @@ func (e *evaluator) hclFunctions(file reference.Blob) (map[string]function.Funct
 }
 
 func (e *evaluator) registerInternalFunctions(file reference.Blob, functions map[string]function.Function) error {
-	target := targetHCLFunction(file, e.declarations)
+	target := targetHCLFunction(file, e.layout, e.declarations)
 	if _, exists := functions["atte::target"]; exists {
 		return fmt.Errorf("HCL function %q is already attached", "atte::target")
 	}
@@ -421,6 +429,16 @@ func (p declarationsPhase) normalizeBlocks(file *hclFile) ([]normalizedBlock, er
 			continue
 		}
 		if _, attached := p.evaluator.settingBlocks[block.Type]; attached {
+			if block.Type == LayoutBlock && file.file != RootFilename {
+				return nil, fmt.Errorf(
+					"parse HCL %q %s block at %s: the %s block is only valid in the repository root %s",
+					file.file,
+					block.Type,
+					block.Range().String(),
+					LayoutBlock,
+					RootFilename,
+				)
+			}
 			if len(block.Labels) > 0 {
 				return nil, fmt.Errorf("parse HCL %q %s block at %s: setting blocks take no labels", file.file, block.Type, block.Range().String())
 			}

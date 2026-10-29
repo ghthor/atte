@@ -13,11 +13,6 @@ import (
 	"github.com/ghthor/atte/reference"
 )
 
-// HclFilename is the canonical filename for HCL target declarations. It must
-// stay in sync with attehcl.Filename; the selector package cannot import
-// attehcl without creating an import cycle (attehcl imports selector).
-const HclFilename = "atte.hcl"
-
 const Seperator = "#"
 
 // NoMatchError reports that a selector did not match any discovered target.
@@ -84,8 +79,11 @@ func split(raw string) (string, string, error) {
 	return parts[0], parts[1], nil
 }
 
-func (s Selector) Tree() reference.Tree {
-	if s.HCL() {
+// Tree returns the directory the selector addresses. filenames are the HCL
+// configuration filenames the repository uses; a path ending in one of them
+// names its directory's configuration file.
+func (s Selector) Tree(filenames ...string) reference.Tree {
+	if s.HCL(filenames...) {
 		t := reference.Tree(filepath.Dir(s.Path))
 		if t == "." {
 			return reference.Root
@@ -95,8 +93,10 @@ func (s Selector) Tree() reference.Tree {
 	return reference.Tree(s.Path)
 }
 
-func (s Selector) HCL() bool {
-	return filepath.Base(s.Path) == HclFilename
+// HCL reports whether the selector path names an HCL configuration file called
+// one of filenames.
+func (s Selector) HCL(filenames ...string) bool {
+	return slices.Contains(filenames, filepath.Base(s.Path))
 }
 
 // ResolveRelative resolves a selector path against a repository-relative directory.
@@ -149,18 +149,6 @@ func PathMatches(inputPath, relative, candidatePath, candidateDir string) bool {
 	return resolved == candidatePath || resolved == candidateDir
 }
 
-// ContainingDir returns the directory containing an HCL target file, or
-// candidatePath unchanged if it does not name an HCL file.
-func ContainingDir(candidatePath string) string {
-	if candidatePath == HclFilename {
-		return ""
-	}
-	if !strings.HasSuffix(candidatePath, "/"+HclFilename) {
-		return candidatePath
-	}
-	return strings.TrimSuffix(candidatePath, "/"+HclFilename)
-}
-
 // PathIsWithin reports whether candidate is dir itself or a descendant of dir,
 // comparing complete slash-separated path segments rather than raw string
 // prefixes so that sibling paths sharing a prefix (e.g. "foo" and "foobar")
@@ -195,9 +183,10 @@ func RelativePath(candidate, dir string) (string, bool) {
 // String returns the canonical repository-root-qualified selector.
 func (s Selector) String() string { return "//" + s.Path + "#" + s.Identifier }
 
-// StringShort removed the /atte.hcl filename portion from a Canonical selector path
-func (s Selector) StringShort() string {
-	s.Path = string(s.Tree())
+// StringShort removes the HCL filename portion from a canonical selector path.
+// filenames are the HCL configuration filenames the repository uses.
+func (s Selector) StringShort(filenames ...string) string {
+	s.Path = string(s.Tree(filenames...))
 	return s.String()
 }
 
@@ -219,9 +208,15 @@ func normalizePath(raw string) (string, error) {
 // can type, while Aliases lists additional accepted spellings. Use String or
 // StringShort to render the target for the CLI, and Matches to compare input.
 type Target struct {
-	// Path is the canonical repository path, including atte.hcl for HCL targets.
-	// It is the path component of a user-facing selector, not a graph entity ID.
-	Path  string
+	// Path is the canonical repository path, including the HCL configuration
+	// filename for HCL targets. It is the path component of a user-facing
+	// selector, not a graph entity ID.
+	Path string
+	// Dir is the repository-relative directory containing the target: the
+	// package directory for Go targets and the directory of the declaring file
+	// for HCL targets. The root directory is the empty string. Build Targets
+	// with GoTest or HCL so Dir stays consistent with Path.
+	Dir   string
 	Kind  string
 	Name  string
 	Index int
@@ -252,12 +247,16 @@ func Render(path, target string) string {
 }
 
 func GoTest(packagePath string) Target {
-	return Target{Path: packagePath, Kind: "go_test"}
+	return Target{Path: packagePath, Dir: packagePath, Kind: "go_test"}
 }
 
 // HCL returns an HCL block selector target.
 func HCL(filePath, kind, name string, index int) Target {
-	return Target{Path: filePath, Kind: kind, Name: name, Index: index}
+	dir := path.Dir(filePath)
+	if dir == "." {
+		dir = ""
+	}
+	return Target{Path: filePath, Dir: dir, Kind: kind, Name: name, Index: index}
 }
 
 // Matches reports whether input selects t from relative, a repository-relative directory.
@@ -271,7 +270,7 @@ func (t Target) Matches(input, relative string) bool {
 	if !containsAlias(aliases, parts[1]) {
 		return false
 	}
-	return PathMatches(parts[0], relative, t.Path, ContainingDir(t.Path))
+	return PathMatches(parts[0], relative, t.Path, t.Dir)
 }
 
 func (t Target) identifierAliases() []string {

@@ -82,6 +82,39 @@ func TestResolveFromDirEscapingRepoRootIsRejected(t *testing.T) {
 	test.ErrorContains(t, err, "escapes repository root")
 }
 
+func TestResolveTreeFromTree(t *testing.T) {
+	resolve := func(tree Tree, value string, want Tree) {
+		t.Helper()
+		got, err := ResolveTreeFromTree(tree, SomePath(value))
+		test.NoError(t, err, test.Sprintf("tree=%q value=%q", tree, value))
+		test.EqOp(t, want, got, test.Sprintf("tree=%q value=%q", tree, value))
+	}
+
+	resolve("pkg", "", "pkg")
+	resolve("pkg", ".", "pkg")
+	resolve("pkg", "sub", "pkg/sub")
+	resolve("pkg", "../other", "other")
+	resolve("pkg", "..", Root)
+	resolve("pkg", "../", Root)
+	resolve("pkg", "//", Root)
+	resolve("pkg", "//other", "other")
+	resolve("pkg", "//other/..", Root)
+	resolve(Root, "", Root)
+	resolve(Root, ".", Root)
+	resolve(Root, "sub", "sub")
+}
+
+func TestResolveTreeFromTreeRejectsInvalidReferences(t *testing.T) {
+	_, err := ResolveTreeFromTree("pkg", "../..")
+	test.ErrorContains(t, err, "escapes repository root")
+
+	_, err = ResolveTreeFromTree(Root, "..")
+	test.ErrorContains(t, err, "escapes repository root")
+
+	_, err = ResolveTreeFromTree("pkg", "/config")
+	test.ErrorContains(t, err, "invalid repository reference")
+}
+
 func TestMatchFromBlobLiteralReference(t *testing.T) {
 	candidates := []Blob{"pkg/other.go", "pkg/script.sh", "pkg/sub/script.sh"}
 	got, err := MatchFromBlob("pkg/atte.hcl", "./script.sh", candidates)

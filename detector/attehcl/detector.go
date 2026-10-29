@@ -65,7 +65,8 @@ func (d Detector) Graph(ctx context.Context, repo *attegit.Repo, options ...grap
 	return Graph(ctx, repo, d.scanner, options...)
 }
 
-// HCLSettings evaluates the setting blocks declared in tree's atte.hcl file.
+// HCLSettings evaluates the setting blocks declared in tree's configuration
+// file.
 func (d Detector) HCLSettings(ctx context.Context, repo *attegit.Repo, tree reference.Tree) ([]hclblock.SettingValue, error) {
 	config, err := ConfigFor(ctx, repo, tree.String(), d.scanner)
 	if err != nil {

@@ -72,7 +72,7 @@ type Scanner interface {
 	// namespace.
 	DecodeID(graph.EntityID) (graph.Entity, error)
 
-	// HCLSettings evaluates the setting blocks declared in tree's atte.hcl
+	// HCLSettings evaluates the setting blocks declared in tree's configuration
 	// file by dispatching to the Sensor providing HCL settings evaluation.
 	HCLSettings(context.Context, *attegit.Repo, reference.Tree) ([]hclblock.SettingValue, error)
 
@@ -226,12 +226,16 @@ func (b *Builder) normalizeHCLTargetBlock(kind hclblock.TargetKind, spec hclbloc
 	if _, exists := b.settingBlocks[name]; exists {
 		return spec, fmt.Errorf("target kind %q conflicts with setting block %q", kind, name)
 	}
+	if reservedHCLBlockNames[name] {
+		return spec, fmt.Errorf("target kind %q is reserved", kind)
+	}
 	return spec, nil
 }
 
 // reservedHCLBlockNames are top-level atte.hcl block types owned by HCL
-// evaluation and unavailable to setting blocks.
-var reservedHCLBlockNames = map[string]bool{"locals": true, "target": true}
+// evaluation and unavailable to setting blocks and target kinds. "atte" is the
+// repository layout block built into the attehcl package (attehcl.LayoutBlock).
+var reservedHCLBlockNames = map[string]bool{"locals": true, "target": true, "atte": true}
 
 func (b *Builder) normalizeHCLSettingBlock(name string, block hclblock.SettingBlock) (hclblock.SettingBlock, error) {
 	if name == "" {

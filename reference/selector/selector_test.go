@@ -57,10 +57,17 @@ func TestPathMatchesFileAndContainingDirectory(t *testing.T) {
 	test.False(t, PathMatches("../outside", "detector", "detector/atte.hcl", "detector"), test.Sprintf("path outside the target should not match"))
 }
 
-func TestContainingDir(t *testing.T) {
-	test.EqOp(t, "", ContainingDir("atte.hcl"))
-	test.EqOp(t, "detector", ContainingDir("detector/atte.hcl"))
-	test.EqOp(t, "detector/attego", ContainingDir("detector/attego"), test.Sprintf("a non-HCL path is returned unchanged"))
+func TestTargetDir(t *testing.T) {
+	dir := func(target Target, want string) {
+		t.Helper()
+		test.EqOp(t, want, target.Dir, test.Sprintf("Dir of %s", target.Path))
+	}
+
+	dir(HCL("atte.hcl", "test", "go", 0), "")
+	dir(HCL("detector/atte.hcl", "test", "go", 0), "detector")
+	dir(HCL("detector/build.hcl", "test", "go", 0), "detector")
+	dir(HCL("a/b/custom.hcl", "test", "go", 0), "a/b")
+	dir(GoTest("detector/attego"), "detector/attego")
 }
 
 func TestPathIsWithin(t *testing.T) {
@@ -126,6 +133,22 @@ func TestTargetMatchesHCLRelative(t *testing.T) {
 	match("detectorx#test.go", "", false)
 }
 
+func TestTargetMatchesHCLCustomFilename(t *testing.T) {
+	target := HCL("sub/build.hcl", "test", "go", 0)
+	match := func(input, relative string, want bool) {
+		t.Helper()
+		test.EqOp(t, want, target.Matches(input, relative), test.Sprintf("input=%s relative=%s", input, relative))
+	}
+
+	match("//sub/build.hcl#test.go", "", true)
+	match("sub/build.hcl#test.go", "", true)
+	match("sub#test.go", "", true)
+	match("build.hcl#test.go", "sub", true)
+	match("../sub/build.hcl#test.go", "other", true)
+	match("sub/atte.hcl#test.go", "", false)
+	match("build.hcl#test.go", "", false)
+}
+
 func TestTargetMatchesGoTest(t *testing.T) {
 	target := GoTest("detector/attego")
 	test.True(t, target.Matches("attego#go_test", "detector"), test.Sprintf("relative package selector should match from the current directory"))
@@ -138,6 +161,26 @@ func TestTargetMatchesGoTest(t *testing.T) {
 	)
 }
 
+func TestSelectorTreeWithCustomFilename(t *testing.T) {
+	f := func(in, want string) {
+		t.Helper()
+
+		s, err := Parse(in)
+		test.NoError(t, err)
+
+		test.Eq(t, want, s.Tree("atte.hcl", "build.hcl").String(), test.Sprintf("selector %s", in))
+	}
+
+	f("atte.hcl#test", "")
+	f("subdir/build.hcl#test", "subdir")
+	f("//subdir/build.hcl#test", "subdir")
+	f("subdir#go_test", "subdir")
+	// Without the configured name, the path is a directory.
+	s, err := Parse("subdir/other.hcl#test")
+	test.NoError(t, err)
+	test.Eq(t, "subdir/other.hcl", s.Tree("atte.hcl", "build.hcl").String())
+}
+
 func TestSelectorNoHCLFile(t *testing.T) {
 	f := func(in, want string) {
 		t.Helper()
@@ -145,7 +188,7 @@ func TestSelectorNoHCLFile(t *testing.T) {
 		s, err := Parse(in)
 		test.NoError(t, err)
 
-		test.Eq(t, s.Tree().String(), want)
+		test.Eq(t, s.Tree("atte.hcl").String(), want)
 	}
 
 	f("atte.hcl#test", "")

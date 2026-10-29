@@ -10,7 +10,10 @@ import (
 	"github.com/ghthor/atte/reference/selector"
 )
 
-func Match(repoRoot, wd, toComplete string, targets []string) ([]string, error) {
+// Match returns the completions of toComplete among targets, canonical
+// selectors. filenames are the HCL configuration filenames the repository uses,
+// so a selector path ending in one is attributed to its containing directory.
+func Match(repoRoot, wd, toComplete string, targets, filenames []string) ([]string, error) {
 	path, id, ok := strings.Cut(toComplete, "#")
 	if ok {
 		id = "#" + id
@@ -40,7 +43,7 @@ func Match(repoRoot, wd, toComplete string, targets []string) ([]string, error) 
 	}
 
 	// Short matches first
-	wdTargets := matchToDirectory(relWd, toComplete, targets)
+	wdTargets := matchToDirectory(relWd, toComplete, targets, filenames)
 
 	// Long matches ordered second
 	matches := matchRepoPath(string(tree)+id, targets)
@@ -103,7 +106,7 @@ func matchRepoPath(toMatch string, targets []string) []string {
 	return matches
 }
 
-func matchToDirectory(wd, toComplete string, targets []string) []string {
+func matchToDirectory(wd, toComplete string, targets, filenames []string) []string {
 	matches := make([]string, 0, len(targets))
 	for _, t := range targets {
 		tt := strings.TrimPrefix(t, "//")
@@ -111,7 +114,7 @@ func matchToDirectory(wd, toComplete string, targets []string) []string {
 		if err != nil {
 			panic(fmt.Errorf("all targets should be valid selectors: %v", targets))
 		}
-		if wd == s.Tree().String() && (toComplete == "" || strings.HasPrefix(s.Identifier, toComplete)) {
+		if wd == s.Tree(filenames...).String() && (toComplete == "" || strings.HasPrefix(s.Identifier, toComplete)) {
 			matches = append(matches, s.Identifier)
 		}
 	}

@@ -184,7 +184,7 @@ type Target struct {
 // Targets returns runnable Go package tests with their repository directories.
 // Selector returns the canonical selector for a Go package-test target.
 func Selector(target Target) selector.Target {
-	return selector.Target{Path: target.PackageDir.String(), Kind: "go_test"}
+	return selector.GoTest(target.PackageDir.String())
 }
 
 func Targets(ctx context.Context, repo *attegit.Repo) ([]Target, error) {

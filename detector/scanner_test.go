@@ -384,6 +384,8 @@ func TestAttachSettingBlock(t *testing.T) {
 	test.Error(t, AttachHCLSettingBlock(builder, "settings", block))
 	test.ErrorContains(t, AttachHCLSettingBlock(builder, "locals", block), "reserved")
 	test.ErrorContains(t, AttachHCLSettingBlock(builder, "target", block), "reserved")
+	test.ErrorContains(t, AttachHCLSettingBlock(builder, "atte", block), "reserved")
+	test.ErrorContains(t, AttachHCLTargetBlock(builder, "atte", testTargetSpec(nil)), "reserved")
 	must.NoError(t, AttachHCLTargetBlock(builder, "deploy", testTargetSpec(nil)))
 	test.ErrorContains(t, AttachHCLSettingBlock(builder, "deploy", block), "conflicts with target kind")
 	test.ErrorContains(t, AttachHCLTargetBlock(builder, "settings", testTargetSpec(nil)), "conflicts with setting block")

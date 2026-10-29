@@ -1,4 +1,5 @@
-// Package attehcl detects test, codegen, and lint definitions in atte.hcl files.
+// Package attehcl detects test, codegen, and lint definitions in the HCL
+// configuration files named by a repository Layout (atte.hcl by default).
 package attehcl
 
 import (
@@ -9,8 +10,10 @@ import (
 )
 
 const (
-	Filename  = "atte.hcl"
-	Namespace = "attehcl"
+	// RootFilename is the name of the repository root's configuration file.
+	// Other directories use Layout.Filename, which defaults to RootFilename.
+	RootFilename = "atte.hcl"
+	Namespace    = "attehcl"
 
 	TestKind                              = Namespace + ":test"
 	CodegenKind                           = Namespace + ":codegen"

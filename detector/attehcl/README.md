@@ -8,7 +8,7 @@ script and does not evaluate target bodies; graph construction and execution
 reject missing scripts for script-backed target kinds.
 
 A file is evaluated independently. Target expressions cannot read declarations
-from an ancestor, sibling, or child `atte.hcl` file. Repository-wide target
+from an ancestor, sibling, or child configuration file. Repository-wide target
 dependency resolution is a later graph-assembly concern.
 
 ## Attaching target kinds
@@ -105,7 +105,8 @@ A file declares at most one block per setting name, and the block takes
 no labels. Setting blocks are decoded with the same evaluation context as
 the file's targets, so they may read `local.*` values and call HCL functions.
 Setting block names must be valid HCL identifiers, cannot collide with an
-attached target kind, and cannot use the reserved `locals` or `target` names.
+attached target kind, and cannot use the reserved `locals`, `target`, or `atte`
+names. Target kinds cannot use those names either.
 
 `attehcl.ConfigFor` returns the decoded blocks for the requested file in
 `Config.Settings`; `atte config show` renders them under a `settings` key beside
@@ -128,6 +129,46 @@ go_test {
   command = ["go", "test", "-race", "-count=1"]
 }
 ```
+
+## Configuring the configuration filename
+
+Every directory has at most one configuration file. By default it is named
+`atte.hcl`. The repository root's `atte.hcl` always keeps that name so it can be
+found without configuration, and it may declare the built-in `atte` setting
+block to rename the file used by every other directory:
+
+```hcl
+# atte.hcl at the repository root
+atte {
+  filename = "build.hcl"
+}
+```
+
+With this block the root is configured by `atte.hcl` and `sub/` by
+`sub/build.hcl`. The root file is otherwise a normal configuration file: it may
+declare `locals`, targets, and other setting blocks.
+
+- `filename` is required and must be a literal string: the block is read before
+  any file is evaluated, so it cannot use `local.*` values or functions. It must
+  be a bare file name ending in `.hcl`.
+- The `atte` block is only valid in the root `atte.hcl`, at most once, and takes
+  no labels.
+- When the filename differs from `atte.hcl`, a non-root `atte.hcl` or a root file
+  with the configured name is an error rather than being ignored.
+- `attehcl.LoadLayout(ctx, repo)` returns the repository's `attehcl.Layout`
+  (`DefaultLayout` when no block is declared). `Layout.File(dir)` names a
+  directory's configuration file. `ConfigFor`, `Targets`, `Graph`, and the
+  `target()` function all honor the layout; `atte config show` reports the `atte`
+  block under `//atte.hcl#atte`.
+- Selectors keep their shape and use the configured name where they would use
+  `atte.hcl`: `//sub/build.hcl#test.unit` and `//sub#test.unit` select the same
+  target.
+
+In `target(path, name)`, `path` names a directory and resolves to that
+directory's configuration file. An empty path refers to the declaring file's own
+directory, `"//"` names the repository root (whose file is always `atte.hcl`),
+and other paths are relative to the declaring directory. See
+`examples/attehcl-custom-filename` for a runnable repository.
 
 ## Attaching HCL functions
 
@@ -174,9 +215,14 @@ and `Graph` continue through decoding.
 repository
     |
     v
+[0. Load layout]
+    output: Layout
+      - configuration filename read from the root atte.hcl atte block
+    |
+    v
 [1. Parse HCL files]
     output: hclFiles
-      - sorted atte.hcl files
+      - sorted configuration files (named by the layout)
       - parsed HCL bodies
       - file-local local expressions
     |

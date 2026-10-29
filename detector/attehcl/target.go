@@ -72,12 +72,7 @@ type targetIdentity struct {
 
 func targetIdentityFor(file reference.Blob, kind hclblock.TargetKind, name string, index int) targetIdentity {
 	display := displayName(name, index)
-	selectorIdentity := selector.Target{
-		Path:  file.String(),
-		Kind:  string(kind),
-		Name:  display,
-		Index: index,
-	}
+	selectorIdentity := selector.HCL(file.String(), string(kind), display, index)
 	aliases := selector.Aliases(selectorIdentity)
 	selectorIdentity.Aliases = aliases
 	return targetIdentity{

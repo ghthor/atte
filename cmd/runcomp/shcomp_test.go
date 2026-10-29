@@ -13,6 +13,24 @@ func TestHasRelative(t *testing.T) {
 	test.True(t, hasRelative("/repo/path", ".."))
 }
 
+func TestMatchCompletionCustomFilename(t *testing.T) {
+	targets := []string{
+		"//atte.hcl#test.root",
+		"//sub/build.hcl#test.sub",
+		"//sub/other#go_test",
+	}
+	complete := func(wd, toComplete string, want ...string) {
+		t.Helper()
+		got, err := Match(filepath.FromSlash("/repo"), filepath.FromSlash(wd), toComplete, targets, []string{"atte.hcl", "build.hcl"})
+		test.NoError(t, err)
+		test.SliceEqOp(t, want, got, test.Sprintf("wd=%s toComplete=%s", wd, toComplete))
+	}
+
+	complete("/repo", "t", "test.root")
+	complete("/repo/sub", "t", "test.sub")
+	complete("/repo/sub", "", "test.sub", "build.hcl#test.sub", "other#go_test")
+}
+
 func TestMatchCompletionCorpus(t *testing.T) {
 	targets := []string{
 		"//atte.hcl#codegen.fmt",
@@ -38,7 +56,7 @@ func TestMatchCompletionCorpus(t *testing.T) {
 	}
 	complete := func(wd, toComplete string, want ...string) {
 		t.Helper()
-		got, err := Match(filepath.FromSlash("/repo"), filepath.FromSlash(wd), toComplete, targets)
+		got, err := Match(filepath.FromSlash("/repo"), filepath.FromSlash(wd), toComplete, targets, []string{"atte.hcl"})
 		test.NoError(t, err)
 		test.SliceEqOp(t, want, got, test.Sprintf("wd=%s toComplete=%s", wd, toComplete))
 		for _, completion := range got {

@@ -21,7 +21,7 @@ import (
 	"github.com/zclconf/go-cty/cty/function/stdlib"
 )
 
-func targetHCLFunction(file reference.Blob, declarations declarationIndex) function.Function {
+func targetHCLFunction(file reference.Blob, layout Layout, declarations declarationIndex) function.Function {
 	return function.New(&function.Spec{
 		Params: []function.Parameter{
 			{Name: "path", Type: cty.String},
@@ -29,7 +29,7 @@ func targetHCLFunction(file reference.Blob, declarations declarationIndex) funct
 		},
 		Type: function.StaticReturnType(cty.String),
 		Impl: func(args []cty.Value, _ cty.Type) (cty.Value, error) {
-			targetFile, err := targetFileFromPath(file, args[0].AsString())
+			targetFile, err := targetFileFromPath(file, layout, args[0].AsString())
 			if err != nil {
 				return cty.NilVal, err
 			}
@@ -50,12 +50,16 @@ func targetHCLFunction(file reference.Blob, declarations declarationIndex) funct
 	})
 }
 
-func targetFileFromPath(file reference.Blob, raw string) (reference.Blob, error) {
-	path := raw
-	if !strings.HasSuffix(path, "/") {
-		path += "/"
+// targetFileFromPath resolves the path argument of target() to the
+// configuration file of the directory it names. An empty path names the
+// declaring file's own directory and "//" names the repository root, whose
+// file is always RootFilename.
+func targetFileFromPath(file reference.Blob, layout Layout, raw string) (reference.Blob, error) {
+	dir, err := reference.ResolveTreeFromTree(file.Tree(), reference.SomePath(raw))
+	if err != nil {
+		return "", err
 	}
-	return reference.ResolveBlobFromTree(file.Tree(), reference.SomePath(path+Filename))
+	return layout.File(dir), nil
 }
 
 func parseTargetName(raw string) (hclblock.TargetKind, string, error) {

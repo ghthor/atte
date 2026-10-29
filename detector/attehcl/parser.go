@@ -44,7 +44,7 @@ func declarationBlocks(file reference.Blob, body *hclsyntax.Body) (map[string]hc
 	return locals, nil
 }
 
-func readHCLFiles(ctx context.Context, repo *attegit.Repo) (hclFiles, error) {
+func readHCLFiles(ctx context.Context, repo *attegit.Repo, layout Layout) (hclFiles, error) {
 	files := make(hclFiles)
 	for _, file := range repo.ObjKeys {
 		if ctx != nil {
@@ -52,12 +52,19 @@ func readHCLFiles(ctx context.Context, repo *attegit.Repo) (hclFiles, error) {
 				return nil, err
 			}
 		}
-		if repo.Obj[file].Kind != attegit.Blob || path.Base(file.String()) != Filename {
+		if repo.Obj[file].Kind != attegit.Blob || !layout.mayBeConfigFile(path.Base(file.String())) {
 			continue
 		}
 		fileBlob, err := reference.ParseBlob(file.String())
 		if err != nil {
 			return nil, fmt.Errorf("invalid HCL file path %q: %w", file, err)
+		}
+		owned, err := layout.owns(fileBlob)
+		if err != nil {
+			return nil, err
+		}
+		if !owned {
+			continue
 		}
 		parsed, err := readHCLFile(repo, fileBlob)
 		if err != nil {

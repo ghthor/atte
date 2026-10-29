@@ -37,6 +37,7 @@ type loadedRunTargets struct {
 	root     string
 	cwd      string
 	relative string
+	layout   attehcl.Layout
 	scanner  detector.Scanner
 	targets  []runTarget
 }
@@ -101,6 +102,10 @@ func loadRunTargets(ctx context.Context) (loadedRunTargets, error) {
 	if err != nil {
 		return loadedRunTargets{}, fmt.Errorf("open repository: %w", err)
 	}
+	layout, err := attehcl.LoadLayout(ctx, repo)
+	if err != nil {
+		return loadedRunTargets{}, err
+	}
 	scanner, err := scannerForContext(ctx)
 	if err != nil {
 		return loadedRunTargets{}, err
@@ -113,6 +118,7 @@ func loadRunTargets(ctx context.Context) (loadedRunTargets, error) {
 		root:     root,
 		cwd:      cwd,
 		relative: relative,
+		layout:   layout,
 		scanner:  scanner,
 		targets:  targets,
 	}, nil
@@ -187,10 +193,10 @@ func runCmdValidArgs(cmd *cobra.Command, args []string, toComplete string) ([]st
 		return nil, cobra.ShellCompDirectiveError
 	}
 
-	return runCmdValidArgsFromTargets(args, toComplete, loaded.root, loaded.cwd, loaded.targets)
+	return runCmdValidArgsFromTargets(args, toComplete, loaded.root, loaded.cwd, loaded.layout, loaded.targets)
 }
 
-func runCmdValidArgsFromTargets(args []string, toComplete, root, cwd string, targets []runTarget) ([]string, cobra.ShellCompDirective) {
+func runCmdValidArgsFromTargets(args []string, toComplete, root, cwd string, layout attehcl.Layout, targets []runTarget) ([]string, cobra.ShellCompDirective) {
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
@@ -199,7 +205,7 @@ func runCmdValidArgsFromTargets(args []string, toComplete, root, cwd string, tar
 	for _, target := range targets {
 		completionTargets = append(completionTargets, target.selector)
 	}
-	matches, err := runcomp.Match(root, cwd, toComplete, completionTargets)
+	matches, err := runcomp.Match(root, cwd, toComplete, completionTargets, layout.Filenames())
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveError
 	}
@@ -226,7 +232,7 @@ func runTargets(ctx context.Context, repo *attegit.Repo, root, cwd, relative str
 			return nil, err
 		}
 		dir := execution.Dir
-		if selector.ContainingDir(presentation.Path) == relative {
+		if presentation.Dir == relative {
 			// Preserve the caller's working-directory path for the local target
 			// while retaining repository-wide target discovery.
 			dir = cwd
@@ -332,9 +338,8 @@ func resolveRunTargetAt(ctx context.Context, scanner detector.Scanner, input str
 // preferLocalRunTargets narrows candidates to those rooted at relative when a
 // pathless alias matches more than one target, so a short alias like "test"
 // prefers the current directory's target over targets elsewhere in the
-// repository. It falls back to any target within relative (excluding
-// relative's own atte.hcl file, whose block-scoped aliases already matched
-// directly) when no candidate is rooted exactly at relative.
+// repository. It falls back to any target within relative when no candidate is
+// rooted exactly at relative.
 func preferLocalRunTargets(candidates []runTarget, relative string) []runTarget {
 	local := make([]runTarget, 0, len(candidates))
 	for _, target := range candidates {
@@ -346,13 +351,9 @@ func preferLocalRunTargets(candidates []runTarget, relative string) []runTarget 
 	if len(local) > 0 {
 		return local
 	}
-	relativeHCLFile := relative + "/" + attehcl.Filename
-	if relative == "" {
-		relativeHCLFile = attehcl.Filename
-	}
 	for _, target := range candidates {
 		_, canonicalDir := runTargetPaths(target)
-		if selector.PathIsWithin(canonicalDir, relative) && strings.TrimPrefix(target.selector, "//") != relativeHCLFile {
+		if selector.PathIsWithin(canonicalDir, relative) {
 			local = append(local, target)
 		}
 	}
@@ -399,8 +400,7 @@ func ambiguousRunTargetError(input string, candidates []runTarget) error {
 }
 
 func runTargetPaths(target runTarget) (string, string) {
-	path := target.presentation.Path
-	return path, selector.ContainingDir(path)
+	return target.presentation.Path, target.presentation.Dir
 }
 
 func matchesRunTargetAt(scanner detector.Scanner, input string, target runTarget, relative string) bool {

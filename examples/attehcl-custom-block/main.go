@@ -126,7 +126,7 @@ func newMockRepository(ctx context.Context) (*attegit.Repo, string, func(), erro
 		return nil, "", func() {}, err
 	}
 	cleanup := func() { _ = mock.Cleanup() }
-	if err := mock.WriteFile(attehcl.Filename, []byte(mockAtteHCL), 0o644); err != nil {
+	if err := mock.WriteFile(attehcl.RootFilename, []byte(mockAtteHCL), 0o644); err != nil {
 		cleanup()
 		return nil, "", func() {}, err
 	}

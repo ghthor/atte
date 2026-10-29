@@ -8,6 +8,7 @@ import (
 
 	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
+	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphtarget"
 	"github.com/ghthor/atte/reference/selector"
@@ -124,7 +125,7 @@ func TestRunCmdValidArgs(t *testing.T) {
 	repoRoot := filepath.FromSlash("/repo")
 	complete := func(relative, prefix string, want []string) {
 		t.Helper()
-		matches, directive := runCmdValidArgsFromTargets(nil, prefix, repoRoot, filepath.Join(repoRoot, relative), targets)
+		matches, directive := runCmdValidArgsFromTargets(nil, prefix, repoRoot, filepath.Join(repoRoot, relative), attehcl.DefaultLayout(), targets)
 		test.SliceEqOp(t, want, matches)
 		test.EqOp(t, cobra.ShellCompDirectiveNoFileComp, directive)
 		for _, want := range want {
@@ -142,7 +143,7 @@ func TestRunCmdValidArgs(t *testing.T) {
 	complete("", "//atte", []string{"//atte.hcl#test.go"})
 	complete("", "//detector/", []string{"//detector/atte.hcl#test.py", "//detector/attego#go_test"})
 
-	matches, directive := runCmdValidArgsFromTargets([]string{"existing"}, "", "/repo", "/repo", targets)
+	matches, directive := runCmdValidArgsFromTargets([]string{"existing"}, "", "/repo", "/repo", attehcl.DefaultLayout(), targets)
 	test.Nil(t, matches)
 	test.EqOp(t, cobra.ShellCompDirectiveNoFileComp, directive)
 }

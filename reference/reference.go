@@ -141,6 +141,28 @@ func ResolveBlobFromTree(tree Tree, value SomePath) (Blob, error) {
 	return Blob(clean), nil
 }
 
+// ResolveTreeFromTree resolves a directory reference from a typed tree. The
+// empty value and "." name tree itself, and "//" names the repository root.
+// Unlike ResolveBlobFromTree, the result may be the root.
+func ResolveTreeFromTree(tree Tree, value SomePath) (Tree, error) {
+	raw := strings.ReplaceAll(string(value), "\\", "/")
+	if raw == "" {
+		return tree, nil
+	}
+	if strings.HasPrefix(raw, "/") && !strings.HasPrefix(raw, "//") {
+		return "", fmt.Errorf("invalid repository reference %q", value)
+	}
+	joined := path.Join(string(tree), raw)
+	if rooted, ok := strings.CutPrefix(raw, "//"); ok {
+		joined = path.Clean(rooted)
+	}
+	resolved, err := ParseTree(joined)
+	if err != nil {
+		return "", fmt.Errorf("repository reference %q escapes repository root", value)
+	}
+	return resolved, nil
+}
+
 // Resolve resolves a general path reference relative to a typed tree.
 func (p SomePath) Resolve(tree Tree) (Blob, error) { return ResolveBlobFromTree(tree, p) }
 
