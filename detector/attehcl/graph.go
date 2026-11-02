@@ -90,19 +90,37 @@ func projectDependency(
 		}
 		entity = graph.Entity{ID: dependency.entity, Kind: kind}
 	case dependencyPath:
-		targetBlob, err := reference.ResolveBlobFromBlob(target.File, reference.SomePath(dependency.path))
+		resolved, err := resolvePathDependency(repo, target, dependency.path)
 		if err != nil {
-			return graph.Entity{}, graph.Relationship{}, fmt.Errorf("%q: %w", target.File, err)
+			return graph.Entity{}, graph.Relationship{}, err
 		}
-		obj, ok := repo.Obj[targetBlob]
-		if !ok || obj.Kind != attegit.Blob {
-			return graph.Entity{}, graph.Relationship{}, fmt.Errorf("%q: dependency %q not found", target.File, targetBlob)
-		}
-		entity = graph.Entity{ID: attegit.EntityID(targetBlob), Kind: attegit.BlobKind}
+		entity = resolved
 	default:
 		return graph.Entity{}, graph.Relationship{}, fmt.Errorf("dependency has unknown kind %d", dependency.kind)
 	}
 	return entity, graph.Relationship{From: target.ID, To: entity.ID, Kind: DependsOnRelation}, nil
+}
+
+// resolvePathDependency resolves a path dependency, relative to the file that
+// declares target, to a Git blob or tree entity. A directory dependency names
+// the tree itself, so "." is the declaring file's directory and "//" is the
+// repository root, which has no entry in repo.Obj.
+func resolvePathDependency(repo *attegit.Repo, target hclblock.Target, raw string) (graph.Entity, error) {
+	if blob, err := reference.ResolveBlobFromBlob(target.File, reference.SomePath(raw)); err == nil {
+		if obj, ok := repo.Obj[blob]; ok && obj.Kind == attegit.Blob {
+			return graph.Entity{ID: attegit.EntityID(blob), Kind: attegit.BlobKind}, nil
+		}
+	}
+	tree, err := reference.ResolveTreeFromTree(target.File.Tree(), reference.SomePath(raw))
+	if err != nil {
+		return graph.Entity{}, fmt.Errorf("%q: %w", target.File, err)
+	}
+	if tree != reference.Root {
+		if obj, ok := repo.Obj[tree]; !ok || obj.Kind != attegit.Tree {
+			return graph.Entity{}, fmt.Errorf("%q: dependency %q not found", target.File, tree)
+		}
+	}
+	return graph.Entity{ID: attegit.EntityID(tree), Kind: attegit.TreeKind}, nil
 }
 
 // Graph builds the HCL Sensor graph using capabilities from the supplied Scanner.

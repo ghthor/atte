@@ -170,6 +170,32 @@ func TestPrintGraphContentHashGolden(t *testing.T) {
 	}))
 }
 
+func TestPrintGraphDirectoryDependenciesGolden(t *testing.T) {
+	repo := repoWithFiles(t, map[string]string{
+		"atte.hcl": `
+			test "root" {
+				script       = "true"
+				triggered_by = ["."]
+			}
+
+			test "subdir" {
+				script     = "true"
+				depends_on = ["//subdir"]
+			}
+		`,
+		"subdir/atte.hcl": `
+			lint "own-dir" {
+				script       = "true"
+				triggered_by = ["."]
+			}
+		`,
+		"subdir/file.txt": "content\n",
+	})
+	assertGraphGolden(t, "directory-dependencies", renderTestGraph(t, repo, PrintGraphOptions{
+		IncludeContentHash: true,
+	}))
+}
+
 // hashOf returns the content hash printed next to the line containing needle
 // when the graph is printed from relativePath.
 func hashOf(t *testing.T, repo *attegit.Repo, relativePath, needle string) string {
