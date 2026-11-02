@@ -501,6 +501,37 @@ func TestContentHashesCombineSensors(t *testing.T) {
 	test.EqOp(t, "c", calculator.Token("two:c"))
 }
 
+func TestContentCapabilityValidation(t *testing.T) {
+	tokens := func(context.Context, *attegit.Repo, *graph.Graph) (map[graph.EntityID]string, error) { return nil, nil }
+
+	err := NewBuilder().Attach(SensorSpec{Namespace: "content", DependencyRelations: []graph.RelationKind{"dep"}})
+	test.ErrorContains(t, err, "missing ContentTokens")
+	test.ErrorContains(t, err, "content")
+
+	test.NoError(t, NewBuilder().Attach(SensorSpec{Namespace: "tokens-only", ContentTokens: tokens}))
+	test.NoError(t, NewBuilder().Attach(SensorSpec{Namespace: "both", DependencyRelations: []graph.RelationKind{"dep"}, ContentTokens: tokens}))
+}
+
+func TestContentHashesWithoutDependencyRelations(t *testing.T) {
+	// A sensor that reports tokens and no relation kinds is still a content
+	// sensor: nothing is followed, but the tokens are used.
+	builder := NewBuilder()
+	must.NoError(t, builder.Attach(SensorSpec{
+		Namespace: "one",
+		ContentTokens: func(context.Context, *attegit.Repo, *graph.Graph) (map[graph.EntityID]string, error) {
+			return map[graph.EntityID]string{"one:b": "b"}, nil
+		},
+	}))
+
+	calculator, err := compileScanner(t, builder).ContentHashes(t.Context(), nil, contentGraph(t))
+	must.NoError(t, err)
+
+	closure, err := calculator.Closure("one:a")
+	must.NoError(t, err)
+	test.SliceEmpty(t, closure)
+	test.EqOp(t, "b", calculator.Token("one:b"))
+}
+
 func TestContentHashesErrors(t *testing.T) {
 	t.Run("no content sensor", func(t *testing.T) {
 		_, err := compileScanner(t, NewBuilder()).ContentHashes(t.Context(), nil, contentGraph(t))

@@ -1,6 +1,7 @@
 package attego
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -40,6 +41,48 @@ func externalToken(t *testing.T, mod, importPath string) (string, error) {
 		"p/p.go": fmt.Sprintf("package p\n\nimport _ %q\n", importPath),
 	})
 	return tokens[EntityID(PackageExternalKind, "", importPath)], err
+}
+
+func TestModulesAreParsedOncePerRepo(t *testing.T) {
+	git := attegittest.NewGitRepo(t)
+	git.WriteFiles(t, map[string]string{
+		"go.mod":        goMod(),
+		"p/p.go":        "package p\n",
+		"nested/go.mod": "module example.com/nested\n\ngo 1.24\n",
+	})
+	git.CommitAll(t, "init")
+	repo := openTestRepo(t, git.Dir())
+
+	before, err := modules(t.Context(), repo)
+	must.NoError(t, err)
+	must.SliceLen(t, 2, before)
+	test.EqOp(t, "nested", string(before[0].dir))
+
+	// Building the graph and the tokens reads the same parsed modules.
+	g, err := Graph(t.Context(), repo)
+	must.NoError(t, err)
+	_, err = Detector{}.ContentTokens(t.Context(), repo, g)
+	must.NoError(t, err)
+	after, err := modules(t.Context(), repo)
+	must.NoError(t, err)
+
+	must.True(t, before[0] == after[0] && before[1] == after[1], must.Sprint("go.mod files should be parsed once per repository"))
+}
+
+func TestModulesDoNotRememberCanceledReads(t *testing.T) {
+	git := attegittest.NewGitRepo(t)
+	git.WriteFiles(t, map[string]string{"go.mod": goMod()})
+	git.CommitAll(t, "init")
+	repo := openTestRepo(t, git.Dir())
+
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := modules(canceled, repo)
+	test.ErrorIs(t, err, context.Canceled)
+
+	mods, err := modules(t.Context(), repo)
+	must.NoError(t, err)
+	test.SliceLen(t, 1, mods)
 }
 
 func TestContentTokensExternalPackages(t *testing.T) {

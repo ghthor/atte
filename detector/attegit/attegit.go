@@ -92,6 +92,9 @@ type Repo struct {
 
 	blobs map[reference.Blob][]byte
 
+	// memo holds values stored by Memoize, guarded by mu.
+	memo map[any]any
+
 	// gitDirs holds the repository's common Git directory followed by its
 	// object alternates. gitMu guards it because Show replaces stale entries.
 	gitDirs  []gitDir
@@ -633,6 +636,44 @@ func (r *Repo) Show(relativePath reference.Path) ([]byte, error) {
 	}
 	r.blobs[blob] = data
 	return data, nil
+}
+
+// Memoize returns the value fn computes for key, remembering it on r so that
+// every later call with the same key returns the same value without calling fn.
+// It lets a Sensor derive something from repository contents, such as parsed
+// manifests, once per Repo rather than once per caller.
+//
+// A Repo does not change after Open, so a remembered value never goes stale.
+// Callers must treat the value as read-only because it is shared. Choose key as
+// a value of a type private to the calling package so that keys cannot collide,
+// and use the same T for every call with one key. An error is returned but not
+// remembered, so a failure caused by a canceled context does not stick. fn may
+// run more than once when callers race; the first value stored wins.
+func Memoize[T any](r *Repo, key any, fn func() (T, error)) (T, error) {
+	var zero T
+	r.mu.RLock()
+	cached, ok := r.memo[key]
+	r.mu.RUnlock()
+	if !ok {
+		value, err := fn()
+		if err != nil {
+			return zero, err
+		}
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if cached, ok = r.memo[key]; !ok {
+			if r.memo == nil {
+				r.memo = make(map[any]any)
+			}
+			r.memo[key] = value
+			return value, nil
+		}
+	}
+	value, ok := cached.(T)
+	if !ok {
+		return zero, fmt.Errorf("memoized value for key %v has type %T, not %T", key, cached, zero)
+	}
+	return value, nil
 }
 
 // ShowContext is the context-aware form of Show.

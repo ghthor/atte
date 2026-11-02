@@ -28,7 +28,7 @@ func (Detector) DependencyRelations() []graph.RelationKind {
 // Packages and standard library packages have no content of their own. An
 // external package whose module cannot be determined from go.mod is an error.
 func (Detector) ContentTokens(ctx context.Context, repo *attegit.Repo, g *graph.Graph) (map[graph.EntityID]string, error) {
-	mods, err := scanModules(ctx, repo)
+	mods, err := modules(ctx, repo)
 	if err != nil {
 		return nil, err
 	}
@@ -64,30 +64,6 @@ func (Detector) ContentTokens(ctx context.Context, repo *attegit.Repo, g *graph.
 		tokens[id] = token
 	}
 	return tokens, nil
-}
-
-// scanModules parses every go.mod in repo.
-func scanModules(ctx context.Context, repo *attegit.Repo) ([]*module, error) {
-	mods := make([]*module, 0)
-	for _, p := range repo.ObjKeys {
-		if repo.Obj[p].Kind != attegit.Blob || path.Base(p.String()) != "go.mod" {
-			continue
-		}
-		contents, err := repo.ShowContext(ctx, p)
-		if err != nil {
-			return nil, fmt.Errorf("read %q: %w", p, err)
-		}
-		dir := path.Dir(p.String())
-		if dir == "." {
-			dir = ""
-		}
-		m, err := parseModule(dir, p.String(), contents)
-		if err != nil {
-			return nil, err
-		}
-		mods = append(mods, m)
-	}
-	return mods, nil
 }
 
 // assumedGoVersion is the language version the go command assumes for a go.mod
