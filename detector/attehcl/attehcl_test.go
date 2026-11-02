@@ -320,6 +320,41 @@ test "unit" {
 	graphtest.MustHaveRelation(t, got, attegit.EntityID(reference.Root), unit, attegit.ContainsRelation)
 }
 
+func TestGraphDirectoryDependencies(t *testing.T) {
+	repo := newHCLFixture(t, map[string]string{
+		"atte.hcl": strings.TrimLeft(`
+test "root" {
+  script       = "true"
+  triggered_by = ["."]
+}
+
+test "subdir" {
+  script     = "true"
+  depends_on = ["//subdir"]
+}
+`, "\n"),
+		"subdir/atte.hcl": strings.TrimLeft(`
+lint "own-dir" {
+  script       = "true"
+  triggered_by = ["."]
+}
+`, "\n"),
+		"subdir/file.txt": "content\n",
+	})
+
+	got, err := Graph(t.Context(), repo, testCapabilities{functions: attegit.PathHCLFunctions}, graphset.WithAttachToTree())
+	must.NoError(t, err)
+
+	root := EntityID(TestKind, "atte.hcl", "root")
+	subdir := EntityID(TestKind, "atte.hcl", "subdir")
+	ownDir := EntityID(LintKind, "subdir/atte.hcl", "own-dir")
+	test.EqOp(t, attegit.TreeKind, got.Entities[attegit.EntityID(reference.Root)].Kind)
+	test.EqOp(t, attegit.TreeKind, got.Entities[attegit.EntityID(reference.Tree("subdir"))].Kind)
+	graphtest.MustHaveRelation(t, got, root, attegit.EntityID(reference.Root), DependsOnRelation)
+	graphtest.MustHaveRelation(t, got, subdir, attegit.EntityID(reference.Tree("subdir")), DependsOnRelation)
+	graphtest.MustHaveRelation(t, got, ownDir, attegit.EntityID(reference.Tree("subdir")), DependsOnRelation)
+}
+
 func TestGraphLabeledAndUnlabeledCodegenAndLintBlocks(t *testing.T) {
 	repo := newHCLFixture(t, map[string]string{
 		"atte.hcl": `
