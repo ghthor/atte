@@ -428,15 +428,52 @@ func parseModule(dir, name string, contents []byte) (*module, error) {
 	return m, nil
 }
 
+// modulesKey identifies the parsed go.mod files that modules remembers on a Repo.
+type modulesKey struct{}
+
+// modules returns every go.mod in repo parsed once per Repo, deepest module
+// directory first so that the first module whose directory contains a path owns
+// it. The graph and the content tokens both read it, so go.mod files are parsed
+// once however many callers need them. The result is shared and read-only.
+func modules(ctx context.Context, repo *attegit.Repo) ([]*module, error) {
+	return attegit.Memoize(repo, modulesKey{}, func() ([]*module, error) {
+		mods := make([]*module, 0)
+		for _, p := range repo.ObjKeys {
+			if repo.Obj[p].Kind != attegit.Blob || path.Base(p.String()) != "go.mod" {
+				continue
+			}
+			contents, err := repo.ShowContext(ctx, p)
+			if err != nil {
+				return nil, fmt.Errorf("read %q: %w", p, err)
+			}
+			dir := path.Dir(p.String())
+			if dir == "." {
+				dir = ""
+			}
+			m, err := parseModule(dir, p.String(), contents)
+			if err != nil {
+				return nil, err
+			}
+			mods = append(mods, m)
+		}
+		sort.Slice(mods, func(i, j int) bool { return len(mods[i].dir) > len(mods[j].dir) })
+		return mods, nil
+	})
+}
+
+// scan returns the modules of repo and the imports of every Go file in it.
 func scan(ctx context.Context, repo *attegit.Repo) ([]*module, []goFile, error) {
-	mods := make([]*module, 0, len(repo.ObjKeys))
+	mods, err := modules(ctx, repo)
+	if err != nil {
+		return nil, nil, err
+	}
 	files := make([]goFile, 0, len(repo.ObjKeys))
 	for _, p := range repo.ObjKeys {
 		if repo.Obj[p].Kind != attegit.Blob {
 			continue
 		}
 		name := p.String()
-		if path.Base(name) != "go.mod" && !strings.HasSuffix(name, ".go") {
+		if !strings.HasSuffix(name, ".go") {
 			continue
 		}
 		contents, err := repo.ShowContext(ctx, p)
@@ -446,14 +483,6 @@ func scan(ctx context.Context, repo *attegit.Repo) ([]*module, []goFile, error) 
 		dir := path.Dir(name)
 		if dir == "." {
 			dir = ""
-		}
-		if path.Base(name) == "go.mod" {
-			m, err := parseModule(dir, name, contents)
-			if err != nil {
-				return nil, nil, err
-			}
-			mods = append(mods, m)
-			continue
 		}
 		f, err := parser.ParseFile(token.NewFileSet(), name, contents, parser.ImportsOnly)
 		if err != nil {
@@ -469,7 +498,6 @@ func scan(ctx context.Context, repo *attegit.Repo) ([]*module, []goFile, error) 
 		}
 		files = append(files, goFile{dir: dir, name: name, imports: imports, test: strings.HasSuffix(name, "_test.go")})
 	}
-	sort.Slice(mods, func(i, j int) bool { return len(mods[i].dir) > len(mods[j].dir) })
 	return mods, files, nil
 }
 

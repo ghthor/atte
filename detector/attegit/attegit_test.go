@@ -1,10 +1,12 @@
 package attegit
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/ghthor/atte/reference"
@@ -80,6 +82,92 @@ func TestGraphContainsPointsToChildren(t *testing.T) {
 	graphtest.MustHaveRelation(t, g, nested, child, ContainsRelation)
 	graphtest.MustNotHaveRelation(t, g, child, nested, ContainsRelation)
 	graphtest.MustNotHaveRelation(t, g, nested, root, ContainsRelation)
+}
+
+type memoKey struct{ name string }
+
+func TestMemoize(t *testing.T) {
+	git := committedRepo(t, map[string]string{"root.txt": "root"})
+	repo, err := Open(git.Dir(), "HEAD")
+	must.NoError(t, err)
+
+	calls := 0
+	compute := func() (*string, error) {
+		calls++
+		value := "computed"
+		return &value, nil
+	}
+
+	first, err := Memoize(repo, memoKey{"a"}, compute)
+	must.NoError(t, err)
+	second, err := Memoize(repo, memoKey{"a"}, compute)
+	must.NoError(t, err)
+	other, err := Memoize(repo, memoKey{"b"}, compute)
+	must.NoError(t, err)
+
+	test.EqOp(t, 2, calls)
+	must.True(t, first == second, must.Sprint("the same key should return the same value"))
+	must.False(t, first == other, must.Sprint("a different key should compute its own value"))
+
+	otherRepo, err := Open(git.Dir(), "HEAD")
+	must.NoError(t, err)
+	elsewhere, err := Memoize(otherRepo, memoKey{"a"}, compute)
+	must.NoError(t, err)
+	must.False(t, first == elsewhere, must.Sprint("values should not be shared between repositories"))
+}
+
+func TestMemoizeDoesNotRememberErrors(t *testing.T) {
+	git := committedRepo(t, map[string]string{"root.txt": "root"})
+	repo, err := Open(git.Dir(), "HEAD")
+	must.NoError(t, err)
+
+	failing := true
+	compute := func() (string, error) {
+		if failing {
+			return "", errors.New("canceled")
+		}
+		return "value", nil
+	}
+
+	_, err = Memoize(repo, memoKey{"a"}, compute)
+	test.ErrorContains(t, err, "canceled")
+
+	failing = false
+	got, err := Memoize(repo, memoKey{"a"}, compute)
+	must.NoError(t, err)
+	test.EqOp(t, "value", got)
+}
+
+func TestMemoizeRejectsChangedType(t *testing.T) {
+	git := committedRepo(t, map[string]string{"root.txt": "root"})
+	repo, err := Open(git.Dir(), "HEAD")
+	must.NoError(t, err)
+
+	_, err = Memoize(repo, memoKey{"a"}, func() (string, error) { return "text", nil })
+	must.NoError(t, err)
+	_, err = Memoize(repo, memoKey{"a"}, func() (int, error) { return 1, nil })
+
+	test.ErrorContains(t, err, "has type string, not int")
+}
+
+func TestMemoizeIsSafeForConcurrentUse(t *testing.T) {
+	git := committedRepo(t, map[string]string{"root.txt": "root"})
+	repo, err := Open(git.Dir(), "HEAD")
+	must.NoError(t, err)
+
+	const callers = 16
+	results := make([]*int, callers)
+	var wg sync.WaitGroup
+	for i := range callers {
+		wg.Go(func() {
+			results[i], _ = Memoize(repo, memoKey{"a"}, func() (*int, error) { return new(int), nil })
+		})
+	}
+	wg.Wait()
+
+	for _, result := range results {
+		must.True(t, result == results[0], must.Sprint("every caller should share the first stored value"))
+	}
 }
 
 func TestContentTokens(t *testing.T) {

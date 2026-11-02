@@ -29,7 +29,9 @@ type SensorSpec struct {
 	DecodeID       func(graph.EntityID) (graph.Entity, error)
 	HCLSettings    func(context.Context, *attegit.Repo, reference.Tree) ([]hclblock.SettingValue, error)
 
-	// DependencyRelations and ContentTokens are provided together; see ContentSensor.
+	// ContentTokens provides content hash inputs; see ContentSensor.
+	// DependencyRelations is only meaningful with ContentTokens and is rejected
+	// without it. A Sensor may supply tokens and no relations.
 	DependencyRelations []graph.RelationKind
 	ContentTokens       func(context.Context, *attegit.Repo, *graph.Graph) (map[graph.EntityID]string, error)
 }
@@ -308,6 +310,9 @@ func (b *Builder) validateSensor(sensor SensorSpec, hasHCLCapabilities bool) err
 			return fmt.Errorf("sensor %q target capability is missing ExecuteTarget", sensor.Namespace)
 		}
 	}
+	if len(sensor.DependencyRelations) > 0 && sensor.ContentTokens == nil {
+		return fmt.Errorf("sensor %q content capability is missing ContentTokens", sensor.Namespace)
+	}
 	if sensor.Graph == nil && !targetCapability && sensor.DecodeID == nil && sensor.HCLSettings == nil && sensor.ContentTokens == nil && !hasHCLCapabilities {
 		return fmt.Errorf("sensor %q has no capabilities", sensor.Namespace)
 	}
@@ -528,10 +533,12 @@ func (s *compiledScanner) ContentHashes(ctx context.Context, repo *attegit.Repo,
 	}
 	relations := make([]graph.RelationKind, 0)
 	tokens := make(map[graph.EntityID]string)
+	provided := false
 	for _, sensor := range s.sensors {
 		if sensor.ContentTokens == nil {
 			continue
 		}
+		provided = true
 		relations = append(relations, sensor.DependencyRelations...)
 		sensorTokens, err := sensor.ContentTokens(ctx, repo, g)
 		if err != nil {
@@ -544,7 +551,7 @@ func (s *compiledScanner) ContentHashes(ctx context.Context, repo *attegit.Repo,
 			tokens[id] = token
 		}
 	}
-	if len(relations) == 0 {
+	if !provided {
 		return nil, fmt.Errorf("no attached sensor provides content hashes")
 	}
 	return contenthash.New(g, relations, tokens), nil
