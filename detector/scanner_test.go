@@ -457,6 +457,73 @@ func TestHCLConfigDispatch(t *testing.T) {
 	})
 }
 
+// contentSensor is a Sensor whose entities depend on each other through its
+// own relation and carry fixed tokens.
+type contentSensor struct {
+	namespace string
+	relation  graph.RelationKind
+	tokens    map[graph.EntityID]string
+	err       error
+}
+
+func (s contentSensor) Namespace() string { return s.namespace }
+
+func (s contentSensor) DependencyRelations() []graph.RelationKind {
+	return []graph.RelationKind{s.relation}
+}
+
+func (s contentSensor) ContentTokens(context.Context, *attegit.Repo, *graph.Graph) (map[graph.EntityID]string, error) {
+	return s.tokens, s.err
+}
+
+func contentGraph(t *testing.T) *graph.Graph {
+	t.Helper()
+	g, err := graph.New(
+		[]graph.Entity{{ID: "one:a", Kind: "one"}, {ID: "one:b", Kind: "one"}, {ID: "two:c", Kind: "two"}},
+		[]graph.Relationship{{From: "one:a", To: "one:b", Kind: "one-dep"}, {From: "one:b", To: "two:c", Kind: "two-dep"}},
+	)
+	must.NoError(t, err)
+	return g
+}
+
+func TestContentHashesCombineSensors(t *testing.T) {
+	builder := NewBuilder()
+	must.NoError(t, builder.AttachSensor(contentSensor{namespace: "one", relation: "one-dep", tokens: map[graph.EntityID]string{"one:b": "b"}}))
+	must.NoError(t, builder.AttachSensor(contentSensor{namespace: "two", relation: "two-dep", tokens: map[graph.EntityID]string{"two:c": "c"}}))
+
+	calculator, err := compileScanner(t, builder).ContentHashes(t.Context(), nil, contentGraph(t))
+	must.NoError(t, err)
+
+	closure, err := calculator.Closure("one:a")
+	must.NoError(t, err)
+	test.Eq(t, []graph.EntityID{"one:b", "two:c"}, closure)
+	test.EqOp(t, "b", calculator.Token("one:b"))
+	test.EqOp(t, "c", calculator.Token("two:c"))
+}
+
+func TestContentHashesErrors(t *testing.T) {
+	t.Run("no content sensor", func(t *testing.T) {
+		_, err := compileScanner(t, NewBuilder()).ContentHashes(t.Context(), nil, contentGraph(t))
+		test.ErrorContains(t, err, "no attached sensor provides content hashes")
+	})
+	t.Run("token outside the sensor namespace", func(t *testing.T) {
+		builder := NewBuilder()
+		must.NoError(t, builder.AttachSensor(contentSensor{namespace: "one", relation: "one-dep", tokens: map[graph.EntityID]string{"two:c": "c"}}))
+		_, err := compileScanner(t, builder).ContentHashes(t.Context(), nil, contentGraph(t))
+		test.ErrorContains(t, err, "outside its namespace")
+	})
+	t.Run("sensor error", func(t *testing.T) {
+		builder := NewBuilder()
+		must.NoError(t, builder.AttachSensor(contentSensor{namespace: "one", relation: "one-dep", err: errors.New("unresolved")}))
+		_, err := compileScanner(t, builder).ContentHashes(t.Context(), nil, contentGraph(t))
+		test.ErrorContains(t, err, "compute one content tokens: unresolved")
+	})
+	t.Run("nil graph", func(t *testing.T) {
+		_, err := compileScanner(t, NewBuilder()).ContentHashes(t.Context(), nil, nil)
+		test.ErrorContains(t, err, "graph is nil")
+	})
+}
+
 func TestAttachTargetValidation(t *testing.T) {
 	test.Error(t, AttachHCLTargetBlock(nil, "custom", testTargetSpec(nil)))
 	builder := NewBuilder()

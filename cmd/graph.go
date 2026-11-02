@@ -17,6 +17,7 @@ import (
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/attehcl"
+	"github.com/ghthor/atte/detector/contenthash"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphset"
 	"github.com/ghthor/atte/reference"
@@ -30,6 +31,8 @@ type graphOptions struct {
 	externalImports bool
 	goFiles         bool
 	runTargets      bool
+	contentHash     bool
+	goVersions      bool
 }
 
 // PrintGraphOptions controls the details included in graph output.
@@ -40,7 +43,25 @@ type PrintGraphOptions struct {
 	IncludeGoFiles bool
 	// IncludeRunTargets renders runnable entities using atte run selectors.
 	IncludeRunTargets bool
+	// IncludeContentHash shows the abbreviated content hash after each tree,
+	// file, package and target, and the module version of external imports.
+	IncludeContentHash bool
+	// IncludeGoVersions shows the Go version each package's module declares.
+	IncludeGoVersions bool
 }
+
+// renderOptions is what printing a graph works from: the caller's options and
+// the state computed from them once the graph is built.
+type renderOptions struct {
+	PrintGraphOptions
+
+	// hashes is set when content hashes or Go versions are shown.
+	hashes *contenthash.Calculator
+}
+
+// contentHashLength is the number of leading hex characters of a content hash
+// that graph output shows.
+const contentHashLength = 12
 
 func newGraphCommand() *cobra.Command {
 	options := &graphOptions{}
@@ -72,7 +93,13 @@ func newGraphCommand() *cobra.Command {
 				cmd.OutOrStdout(),
 				repo,
 				relative,
-				PrintGraphOptions{IncludeExternalImports: options.externalImports, IncludeGoFiles: options.goFiles, IncludeRunTargets: options.runTargets},
+				PrintGraphOptions{
+					IncludeExternalImports: options.externalImports,
+					IncludeGoFiles:         options.goFiles,
+					IncludeRunTargets:      options.runTargets,
+					IncludeContentHash:     options.contentHash,
+					IncludeGoVersions:      options.goVersions,
+				},
 			)
 		},
 	}
@@ -81,6 +108,8 @@ func newGraphCommand() *cobra.Command {
 	graphCmd.Flags().BoolVar(&options.externalImports, "external-imports", false, "Include external Go imports")
 	graphCmd.Flags().BoolVar(&options.goFiles, "go-files", false, "Include Go source files")
 	graphCmd.Flags().BoolVar(&options.runTargets, "run-targets", false, "Render runnable entities as atte run selectors")
+	graphCmd.Flags().BoolVar(&options.contentHash, "content-hash", false, "Show the content hash of each entity")
+	graphCmd.Flags().BoolVar(&options.goVersions, "go-versions", false, "Show the Go version each package's module declares")
 	return graphCmd
 }
 
@@ -138,6 +167,15 @@ func printGraph(ctx context.Context, w io.Writer, repo *attegit.Repo, relativePa
 			return fmt.Errorf("merge detector graph: %w", err)
 		}
 	}
+	render := renderOptions{PrintGraphOptions: printOptions}
+	if printOptions.IncludeContentHash || printOptions.IncludeGoVersions {
+		// Hashes cover the whole graph, so an entity prints the same hash from
+		// any working directory.
+		render.hashes, err = detector.ContentHashes(ctx, repo, gitGraph)
+		if err != nil {
+			return fmt.Errorf("compute content hashes: %w", err)
+		}
+	}
 	var runSelectors map[graph.EntityID]string
 	if printOptions.IncludeRunTargets {
 		runSelectors, err = graphRunTargetSelectors(ctx, repo)
@@ -145,7 +183,7 @@ func printGraph(ctx context.Context, w io.Writer, repo *attegit.Repo, relativePa
 			return fmt.Errorf("discover run targets: %w", err)
 		}
 	}
-	return printGitGraph(w, repo, gitGraph, relativePath, printOptions, detector, runSelectors)
+	return printGitGraph(w, repo, gitGraph, relativePath, render, detector, runSelectors)
 }
 
 func graphRunTargetSelectors(ctx context.Context, repo *attegit.Repo) (map[graph.EntityID]string, error) {
@@ -180,7 +218,7 @@ func printGitGraph(
 	repo *attegit.Repo,
 	g *graph.Graph,
 	relativePath string,
-	options PrintGraphOptions,
+	options renderOptions,
 	detector detector.Scanner,
 	runSelectors ...map[graph.EntityID]string,
 ) error {
@@ -200,6 +238,19 @@ func printGitGraph(
 	}
 	_, err := fmt.Fprint(w, tree.String())
 	return err
+}
+
+// hashSuffix returns the text appended to the label of id: a space and the
+// abbreviated content hash, or nothing when hashes are not shown.
+func (options renderOptions) hashSuffix(id graph.EntityID) (string, error) {
+	if !options.IncludeContentHash {
+		return "", nil
+	}
+	sum, err := options.hashes.Sum(id)
+	if err != nil {
+		return "", fmt.Errorf("content hash of %q: %w", id, err)
+	}
+	return " " + plainStyle.Render(sum.String()[:contentHashLength]), nil
 }
 
 func isHCLTargetKind(kind string) bool {
@@ -236,7 +287,7 @@ func addGraphChildren(
 	repo *attegit.Repo,
 	g *graph.Graph,
 	parentID graph.EntityID,
-	options PrintGraphOptions,
+	options renderOptions,
 	detector detector.Scanner,
 	runSelectors ...map[graph.EntityID]string,
 ) error {
@@ -251,26 +302,14 @@ func addGraphChildren(
 		return fmt.Errorf("parent entity %q not found", parentID)
 	}
 	children := make([]graph.EntityID, 0)
-	seen := make(map[graph.EntityID]struct{})
-	for _, id := range g.EntityKeys {
-		for _, relation := range g.Out(id) {
-			if relation.Kind != attegit.ContainsRelation {
-				continue
-			}
-			var child graph.EntityID
-			switch {
-			case relation.To == parentID:
-				child = id
-			case id == parentID && (isGraphChild(string(g.Entities[relation.To].Kind)) ||
-				isRunTarget(options.IncludeRunTargets, selectors[relation.To])):
-				child = relation.To
-			default:
-				continue
-			}
-			if _, ok := seen[child]; !ok {
-				children = append(children, child)
-				seen[child] = struct{}{}
-			}
+	for _, relation := range g.Out(parentID) {
+		if relation.Kind != attegit.ContainsRelation {
+			continue
+		}
+		kind := g.Entities[relation.To].Kind
+		if kind == attegit.TreeKind || kind == attegit.BlobKind || isGraphChild(string(kind)) ||
+			isRunTarget(options.IncludeRunTargets, selectors[relation.To]) {
+			children = append(children, relation.To)
 		}
 	}
 	slices.Sort(children)
@@ -278,7 +317,11 @@ func addGraphChildren(
 		entity := g.Entities[id]
 		if options.IncludeRunTargets && !isHCLTargetKind(string(entity.Kind)) && entity.Kind != attego.PackageTestKind {
 			if value, ok := selectors[id]; ok {
-				parent.AddBranch(value)
+				suffix, err := options.hashSuffix(id)
+				if err != nil {
+					return err
+				}
+				parent.AddBranch(value + suffix)
 				continue
 			}
 		}
@@ -292,7 +335,9 @@ func addGraphChildren(
 					label = value
 				}
 			}
-			addTargetNode(parent, repo, g, id, label, options, detector)
+			if err := addTargetNode(parent, repo, g, id, label, options, detector); err != nil {
+				return err
+			}
 			continue
 		}
 		switch entity.Kind {
@@ -301,12 +346,16 @@ func addGraphChildren(
 			if err != nil {
 				return fmt.Errorf("decode Git entity %q: %w", id, err)
 			}
-			branch := parent.AddBranch(plainStyle.Render(path.Base(entityPath.String()) + "/"))
+			suffix, err := options.hashSuffix(id)
+			if err != nil {
+				return err
+			}
+			branch := parent.AddBranch(plainStyle.Render(path.Base(entityPath.String())+"/") + suffix)
 			if err := addGraphChildren(branch, repo, g, id, options, detector, selectors); err != nil {
 				return err
 			}
 		case attegit.BlobKind:
-			if err := addBlobNode(parent, repo, id); err != nil {
+			if err := addBlobNode(parent, repo, id, options); err != nil {
 				return err
 			}
 		case attego.PackageKind:
@@ -316,7 +365,11 @@ func addGraphChildren(
 		case attego.PackageTestKind:
 			if options.IncludeRunTargets {
 				if selector, ok := selectors[id]; ok {
-					parent.AddBranch(selector)
+					suffix, err := options.hashSuffix(id)
+					if err != nil {
+						return err
+					}
+					parent.AddBranch(selector + suffix)
 					break
 				}
 			}
@@ -336,19 +389,23 @@ func addTargetNode(
 	g *graph.Graph,
 	id graph.EntityID,
 	label string,
-	options PrintGraphOptions,
+	options renderOptions,
 	detector detector.Scanner,
-) {
+) error {
 	dependencies := make([]graph.EntityID, 0)
 	for _, relation := range g.Out(id) {
 		if relation.Kind == attehcl.DependsOnRelation {
 			dependencies = append(dependencies, relation.To)
 		}
 	}
-	label = atteHCLStyle.Render(label)
+	suffix, err := options.hashSuffix(id)
+	if err != nil {
+		return err
+	}
+	label = atteHCLStyle.Render(label) + suffix
 	if len(dependencies) == 0 {
 		parent.AddNode(label)
-		return
+		return nil
 	}
 
 	branch := parent.AddBranch(label)
@@ -361,6 +418,7 @@ func addTargetNode(
 		}
 		branch.AddNode(graphDependencyLabel(g, dependency, detector))
 	}
+	return nil
 }
 
 func graphDependencyLabel(g *graph.Graph, id graph.EntityID, detector detector.Scanner) string {
@@ -401,7 +459,7 @@ func entityPathString(id graph.EntityID) (string, error) {
 	return p.String(), nil
 }
 
-func addBlobNode(parent treeprint.Tree, repo *attegit.Repo, id graph.EntityID) error {
+func addBlobNode(parent treeprint.Tree, repo *attegit.Repo, id graph.EntityID, options renderOptions) error {
 	p, err := entityPath(id)
 	if err != nil {
 		return fmt.Errorf("decode Git blob %q: %w", id, err)
@@ -416,11 +474,15 @@ func addBlobNode(parent treeprint.Tree, repo *attegit.Repo, id graph.EntityID) e
 	} else {
 		label = plainStyle.Render(label)
 	}
-	parent.AddNode(label)
+	suffix, err := options.hashSuffix(id)
+	if err != nil {
+		return err
+	}
+	parent.AddNode(label + suffix)
 	return nil
 }
 
-func addPackageNode(parent treeprint.Tree, repo *attegit.Repo, g *graph.Graph, id graph.EntityID, options PrintGraphOptions) error {
+func addPackageNode(parent treeprint.Tree, repo *attegit.Repo, g *graph.Graph, id graph.EntityID, options renderOptions) error {
 	label := "go package"
 	if g.Entities[id].Kind == attego.PackageTestKind {
 		label = "go package-test"
@@ -429,17 +491,32 @@ func addPackageNode(parent treeprint.Tree, repo *attegit.Repo, g *graph.Graph, i
 	if err != nil {
 		return fmt.Errorf("decode Go package %q: %w", id, err)
 	}
-	localImports, stdlibImports, externalImports := packageImports(g, id)
+	localImports, stdlibImports, externalImports, externalIDs := packageImports(g, id)
 	if !options.IncludeExternalImports {
 		stdlibImports = nil
 		externalImports = nil
 	}
 	files := packageFiles(g, id, options.IncludeGoFiles)
-	if len(localImports) == 0 && len(stdlibImports) == 0 && len(externalImports) == 0 && len(files) == 0 {
-		parent.AddNode(goPackageStyle.Render(fmt.Sprintf("%s %s", label, importPath)))
+	var goVersion string
+	if options.IncludeGoVersions {
+		goVersion, err = packageGoVersion(g, id, options)
+		if err != nil {
+			return err
+		}
+	}
+	suffix, err := options.hashSuffix(id)
+	if err != nil {
+		return err
+	}
+	packageLabel := goPackageStyle.Render(fmt.Sprintf("%s %s", label, importPath)) + suffix
+	if len(localImports) == 0 && len(stdlibImports) == 0 && len(externalImports) == 0 && len(files) == 0 && goVersion == "" {
+		parent.AddNode(packageLabel)
 		return nil
 	}
-	branch := parent.AddBranch(goPackageStyle.Render(fmt.Sprintf("%s %s", label, importPath)))
+	branch := parent.AddBranch(packageLabel)
+	if goVersion != "" {
+		branch.AddNode(goVersion)
+	}
 	for _, file := range files {
 		branch.AddNode("file " + file)
 	}
@@ -450,15 +527,47 @@ func addPackageNode(parent treeprint.Tree, repo *attegit.Repo, g *graph.Graph, i
 		branch.AddNode(stdlibStyle.Render("std import " + imported))
 	}
 	for _, imported := range externalImports {
-		branch.AddNode("external import " + imported)
+		line := "external import " + imported
+		if options.IncludeContentHash {
+			// The module and version stand in for a hash: external packages are
+			// leaves, and their module version is their whole content.
+			if module, ok := strings.CutPrefix(options.hashes.Token(externalIDs[imported]), "go-module:"); ok {
+				line += " " + plainStyle.Render("("+module+")")
+			}
+		}
+		branch.AddNode(line)
 	}
 	return nil
 }
 
-func packageImports(g *graph.Graph, source graph.EntityID) ([]string, []string, []string) {
+// packageGoVersion returns the output line for the Go version of the module
+// that owns the package, or "" when the package has none.
+func packageGoVersion(g *graph.Graph, source graph.EntityID, options renderOptions) (string, error) {
+	for _, relation := range g.Out(source) {
+		if relation.Kind != attego.GoVersionRelation {
+			continue
+		}
+		version, ok := strings.CutPrefix(options.hashes.Token(relation.To), "go-version:")
+		if !ok {
+			continue
+		}
+		suffix, err := options.hashSuffix(relation.To)
+		if err != nil {
+			return "", err
+		}
+		return "go version " + version + suffix, nil
+	}
+	return "", nil
+}
+
+// packageImports returns the sorted import paths of source, grouped into
+// repository, standard library and external packages. It also returns the
+// entity of each external import path.
+func packageImports(g *graph.Graph, source graph.EntityID) ([]string, []string, []string, map[string]graph.EntityID) {
 	local := make(map[string]struct{})
 	stdlib := make(map[string]struct{})
 	external := make(map[string]struct{})
+	externalIDs := make(map[string]graph.EntityID)
 	for _, relation := range g.Out(source) {
 		if relation.Kind != attego.ImportsRelation || !g.Has(relation.To) {
 			continue
@@ -477,9 +586,10 @@ func packageImports(g *graph.Graph, source graph.EntityID) ([]string, []string, 
 			stdlib[importPath] = struct{}{}
 		case attego.PackageExternalKind:
 			external[importPath] = struct{}{}
+			externalIDs[importPath] = relation.To
 		}
 	}
-	return sortedStrings(local), sortedStrings(stdlib), sortedStrings(external)
+	return sortedStrings(local), sortedStrings(stdlib), sortedStrings(external), externalIDs
 }
 
 func packageFiles(g *graph.Graph, source graph.EntityID, enabled bool) []string {

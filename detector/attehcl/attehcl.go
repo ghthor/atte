@@ -15,12 +15,11 @@ const (
 	RootFilename = "atte.hcl"
 	Namespace    = "attehcl"
 
-	TestKind                              = Namespace + ":test"
-	CodegenKind                           = Namespace + ":codegen"
-	LintKind                              = Namespace + ":lint"
-	SourceFileRelation graph.RelationKind = hclblock.TargetSourceFileRelation
-	ScriptRelation     graph.RelationKind = "script"
-	DependsOnRelation  graph.RelationKind = "depends-on"
+	TestKind                             = Namespace + ":test"
+	CodegenKind                          = Namespace + ":codegen"
+	LintKind                             = Namespace + ":lint"
+	ScriptRelation    graph.RelationKind = "script"
+	DependsOnRelation graph.RelationKind = "depends-on"
 
 	DecodingPathPrefix = "attehcl-path:"
 )

@@ -130,6 +130,7 @@ func addGoListPackages(
 		if len(pkg.TestImports)+len(pkg.XTestImports) > 0 {
 			testID := EntityID(PackageTestKind, moduleTree, pkg.ImportPath)
 			entities[testID] = graph.Entity{ID: testID, Kind: PackageTestKind}
+			relations[graph.Relationship{From: testID, To: packageID, Kind: TestsRelation}] = struct{}{}
 			imports := make([]string, 0, len(pkg.TestImports)+len(pkg.XTestImports))
 			imports = append(imports, pkg.TestImports...)
 			imports = append(imports, pkg.XTestImports...)
@@ -179,6 +180,28 @@ func addGoListImport(
 	}
 	entities[target] = graph.Entity{ID: target, Kind: graph.EntityKind(kind)}
 	relations[graph.Relationship{From: from, To: target, Kind: ImportsRelation}] = struct{}{}
+}
+
+// withoutGoVersions drops the go-version entities and relationships, which
+// `go list` has no equivalent for.
+func withoutGoVersions(t *testing.T, g *graph.Graph) *graph.Graph {
+	t.Helper()
+	entities := make([]graph.Entity, 0, len(g.EntityKeys))
+	relations := make([]graph.Relationship, 0, len(g.EntityKeys))
+	for _, id := range g.EntityKeys {
+		if g.Entities[id].Kind == GoVersionKind {
+			continue
+		}
+		entities = append(entities, g.Entities[id])
+		for _, relation := range g.Out(id) {
+			if relation.Kind != GoVersionRelation {
+				relations = append(relations, relation)
+			}
+		}
+	}
+	filtered, err := graph.New(entities, relations)
+	must.NoError(t, err)
+	return filtered
 }
 
 func relativeModuleDir(repositoryDir, moduleDir string) string {

@@ -1,6 +1,7 @@
 package attegit
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -15,7 +16,10 @@ const (
 	TreeKind = Namespace + ":tree"
 	// BlobKind identifies Git blob entities in the graph.
 	BlobKind = Namespace + ":blob"
-	// ContainsRelation identifies Git containment relationships.
+	// ContainsRelation identifies containment relationships. The relationship
+	// always points from the container to what it contains: a tree contains its
+	// blobs, subtrees, packages and targets, and an atte.hcl blob contains its
+	// targets.
 	ContainsRelation graph.RelationKind = "contains"
 )
 
@@ -43,6 +47,47 @@ type Detector struct{}
 
 func (Detector) Namespace() string { return Namespace }
 
+// DependencyRelations reports that containment is the Git dependency: a tree
+// depends on what it contains.
+func (Detector) DependencyRelations() []graph.RelationKind {
+	return []graph.RelationKind{ContainsRelation}
+}
+
+// ContentTokens returns `git-blob:<hash>` and `git-tree:<hash>` tokens from
+// the object hashes of repo, which include working-tree overlays. Entities
+// without a hash, such as the repository root tree and directories that only
+// exist in the working tree, have no token. Git object ids are opaque here.
+func (Detector) ContentTokens(ctx context.Context, repo *Repo, g *graph.Graph) (map[graph.EntityID]string, error) {
+	tokens := make(map[graph.EntityID]string)
+	for _, id := range g.EntityKeys {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		var (
+			prefix string
+			key    reference.Path
+			err    error
+		)
+		switch g.Entities[id].Kind {
+		case BlobKind:
+			prefix = "git-blob:"
+			key, err = reference.ParseBlob(strings.TrimPrefix(string(id), entityPrefix))
+		case TreeKind:
+			prefix = "git-tree:"
+			key, err = reference.ParseTree(strings.TrimPrefix(string(id), entityPrefix))
+		default:
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("decode Git entity %q: %w", id, err)
+		}
+		if obj, ok := repo.Obj[key]; ok && !obj.Hash.IsZero() {
+			tokens[id] = prefix + obj.Hash.String()
+		}
+	}
+	return tokens, nil
+}
+
 // DecodeID validates an attegit entity ID. Git entity IDs identify paths, so
 // the specific tree/blob kind cannot be recovered without a repository.
 func (Detector) DecodeID(id graph.EntityID) (graph.Entity, error) {
@@ -58,7 +103,8 @@ type Graphs struct {
 }
 
 // Graph converts the repository tree into the language-agnostic propagation
-// graph. Containment relationships point from a child to its containing tree.
+// graph. Containment relationships point from a tree to each blob and subtree
+// it contains.
 func (r *Repo) Graph() (*graph.Graph, error) {
 	if r.fullGraph != nil {
 		return r.fullGraph, nil
@@ -93,8 +139,8 @@ func (r *Repo) Graph() (*graph.Graph, error) {
 		}
 
 		rel := graph.Relationship{
-			From: EntityID(p),
-			To:   EntityID(parent),
+			From: EntityID(parent),
+			To:   EntityID(p),
 			Kind: ContainsRelation,
 		}
 		e := graph.Entity{ID: EntityID(p), Kind: BlobKind}

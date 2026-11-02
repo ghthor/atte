@@ -132,6 +132,103 @@ func TestPrintGraphImportsGolden(t *testing.T) {
 	assertGraphGolden(t, "imports", renderTestGraph(t, repo, PrintGraphOptions{IncludeExternalImports: true}))
 }
 
+// contentHashFiles is a module whose main package imports a package in the
+// repository and one external module.
+func contentHashFiles(value string) map[string]string {
+	return map[string]string{
+		"go.mod": `
+			module example.com/root
+
+			go 1.20
+
+			require github.com/shoenig/test v1.13.2
+		`,
+		"main.go": `
+			package main
+
+			import (
+				"fmt"
+				"example.com/root/internal/value"
+				"github.com/shoenig/test/must"
+			)
+
+			var _ = fmt.Println
+			var _ = value.Value
+			var _ = must.NoError
+		`,
+		"internal/value/value.go": "package value\n\nconst Value = " + value + "\n",
+	}
+}
+
+func TestPrintGraphContentHashGolden(t *testing.T) {
+	repo := repoWithFiles(t, contentHashFiles("1"))
+	assertGraphGolden(t, "content-hash", renderTestGraph(t, repo, PrintGraphOptions{
+		IncludeContentHash:     true,
+		IncludeGoVersions:      true,
+		IncludeExternalImports: true,
+		IncludeGoFiles:         true,
+	}))
+}
+
+// hashOf returns the content hash printed next to the line containing needle
+// when the graph is printed from relativePath.
+func hashOf(t *testing.T, repo *attegit.Repo, relativePath, needle string) string {
+	t.Helper()
+	var output bytes.Buffer
+	must.NoError(t, printGraph(t.Context(), &output, repo, relativePath, PrintGraphOptions{IncludeContentHash: true}))
+	var hash string
+	for line := range strings.Lines(ansi.Strip(output.String())) {
+		if fields := strings.Fields(line); strings.Contains(line, needle) && len(fields) > 0 {
+			hash = fields[len(fields)-1]
+			break
+		}
+	}
+	must.NotEq(t, "", hash, must.Sprintf("no line containing %q in:\n%s", needle, output.String()))
+	return hash
+}
+
+func TestPrintGraphContentHashIgnoresWorkingDirectory(t *testing.T) {
+	repo := repoWithFiles(t, contentHashFiles("1"))
+	const needle = "go package example.com/root/internal/value"
+
+	fromRoot := hashOf(t, repo, "", needle)
+
+	test.EqOp(t, contentHashLength, len(fromRoot))
+	test.EqOp(t, fromRoot, hashOf(t, repo, "internal", needle))
+	test.EqOp(t, fromRoot, hashOf(t, repo, "internal/value", needle))
+}
+
+func TestPrintGraphContentHashFollowsDependencies(t *testing.T) {
+	before := repoWithFiles(t, contentHashFiles("1"))
+	after := repoWithFiles(t, contentHashFiles("2"))
+
+	// main imports internal/value, so a change to value.go reaches it.
+	test.NotEq(t, hashOf(t, before, "", "go package example.com/root/internal/value"), hashOf(t, after, "", "go package example.com/root/internal/value"))
+	test.NotEq(t, hashOf(t, before, "", "go package example.com/root "), hashOf(t, after, "", "go package example.com/root "))
+	test.EqOp(t, hashOf(t, before, "", "go.mod"), hashOf(t, after, "", "go.mod"))
+}
+
+func TestPrintGraphRejectsUnresolvedExternalImport(t *testing.T) {
+	repo := repoWithFiles(t, map[string]string{
+		"go.mod":  "module example.com/root\n\ngo 1.20\n",
+		"main.go": "package main\n\nimport _ \"github.com/shoenig/test/must\"\n",
+	})
+
+	// Both flags need the hashes, so both fail before any output is written.
+	for name, options := range map[string]PrintGraphOptions{
+		"content hash": {IncludeContentHash: true},
+		"go versions":  {IncludeGoVersions: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var output bytes.Buffer
+			err := printGraph(t.Context(), &output, repo, "", options)
+
+			test.ErrorContains(t, err, "matches no require directive")
+			test.EqOp(t, "", output.String())
+		})
+	}
+}
+
 func assertGraphGolden(t *testing.T, name, got string) {
 	t.Helper()
 	goldenPath := filepath.Join(graphTestdataDir(), name+".golden")

@@ -12,9 +12,6 @@ import (
 	"github.com/hashicorp/hcl/v2"
 )
 
-// TargetSourceFileRelation connects a target to the atte.hcl file that declares it.
-const TargetSourceFileRelation graph.RelationKind = "source-file"
-
 // TargetGraphContext provides common dependency resolution to a graph projector.
 type TargetGraphContext struct {
 	ResolveTarget   func(hcl.Traversal) (graph.Entity, error)
@@ -138,7 +135,7 @@ func (target Target) GraphProjectionBase(attachToTree bool) TargetGraph {
 		graph.Entity{ID: file, Kind: attegit.BlobKind},
 	)
 	result.Relationships = append(result.Relationships,
-		graph.Relationship{From: target.ID, To: file, Kind: TargetSourceFileRelation},
+		graph.Relationship{From: file, To: target.ID, Kind: attegit.ContainsRelation},
 		graph.Relationship{From: tree, To: target.ID, Kind: attegit.ContainsRelation},
 	)
 	return result

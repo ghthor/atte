@@ -311,7 +311,7 @@ test "unit" {
 	unit := EntityID(TestKind, "atte.hcl", "unit")
 	test.EqOp(t, TestKind, got.Entities[first].Kind)
 	test.EqOp(t, TestKind, got.Entities[unit].Kind)
-	graphtest.MustHaveRelation(t, got, first, attegit.EntityID(testPath("atte.hcl")), SourceFileRelation)
+	graphtest.MustHaveRelation(t, got, attegit.EntityID(testPath("atte.hcl")), first, attegit.ContainsRelation)
 	graphtest.MustHaveRelation(t, got, first, attegit.EntityID(testPath("first.sh")), ScriptRelation)
 	graphtest.MustHaveRelation(t, got, first, attegit.EntityID(testPath("config.yaml")), DependsOnRelation)
 	graphtest.MustHaveRelation(t, got, unit, attegit.EntityID(testPath("unit.sh")), ScriptRelation)
@@ -371,7 +371,7 @@ lint "vet" {
 	test.EqOp(t, LintKind, got.Entities[lintVet].Kind)
 
 	for _, id := range []graph.EntityID{testTarget, testUnit, codegen, codegenProto, lint, lintVet} {
-		graphtest.MustHaveRelation(t, got, id, attegit.EntityID(testPath("atte.hcl")), SourceFileRelation)
+		graphtest.MustHaveRelation(t, got, attegit.EntityID(testPath("atte.hcl")), id, attegit.ContainsRelation)
 		graphtest.MustHaveRelation(t, got, attegit.EntityID(reference.Root), id, attegit.ContainsRelation)
 	}
 	graphtest.MustHaveRelation(t, got, testTarget, attegit.EntityID(testPath("test.sh")), ScriptRelation)
