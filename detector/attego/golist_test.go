@@ -130,6 +130,7 @@ func addGoListPackages(
 		if len(pkg.TestImports)+len(pkg.XTestImports) > 0 {
 			testID := EntityID(PackageTestKind, moduleTree, pkg.ImportPath)
 			entities[testID] = graph.Entity{ID: testID, Kind: PackageTestKind}
+			relations[graph.Relationship{From: testID, To: packageID, Kind: TestsRelation}] = struct{}{}
 			imports := make([]string, 0, len(pkg.TestImports)+len(pkg.XTestImports))
 			imports = append(imports, pkg.TestImports...)
 			imports = append(imports, pkg.XTestImports...)

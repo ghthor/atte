@@ -251,26 +251,14 @@ func addGraphChildren(
 		return fmt.Errorf("parent entity %q not found", parentID)
 	}
 	children := make([]graph.EntityID, 0)
-	seen := make(map[graph.EntityID]struct{})
-	for _, id := range g.EntityKeys {
-		for _, relation := range g.Out(id) {
-			if relation.Kind != attegit.ContainsRelation {
-				continue
-			}
-			var child graph.EntityID
-			switch {
-			case relation.To == parentID:
-				child = id
-			case id == parentID && (isGraphChild(string(g.Entities[relation.To].Kind)) ||
-				isRunTarget(options.IncludeRunTargets, selectors[relation.To])):
-				child = relation.To
-			default:
-				continue
-			}
-			if _, ok := seen[child]; !ok {
-				children = append(children, child)
-				seen[child] = struct{}{}
-			}
+	for _, relation := range g.Out(parentID) {
+		if relation.Kind != attegit.ContainsRelation {
+			continue
+		}
+		kind := g.Entities[relation.To].Kind
+		if kind == attegit.TreeKind || kind == attegit.BlobKind || isGraphChild(string(kind)) ||
+			isRunTarget(options.IncludeRunTargets, selectors[relation.To]) {
+			children = append(children, relation.To)
 		}
 	}
 	slices.Sort(children)

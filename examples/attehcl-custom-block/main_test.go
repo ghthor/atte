@@ -111,13 +111,13 @@ func TestDeployTargetIdentityAndGraph(t *testing.T) {
 	targetID := attehcl.EntityID("attehcl:deploy", reference.Blob("atte.hcl"), "release")
 	test.True(t, graph.Has(targetID), test.Sprintf("graph should contain deploy target %q", targetID))
 	test.EqOp(t, attegit.BlobKind, graph.Entities[attegit.EntityID(reference.Blob("atte.hcl"))].Kind)
-	out := graph.Out(targetID)
+	out := graph.Out(attegit.EntityID(reference.Blob("atte.hcl")))
 	test.Len(t, 1, out)
 	if len(out) == 0 {
 		return
 	}
-	test.EqOp(t, attegit.EntityID(reference.Blob("atte.hcl")), out[0].To)
-	test.EqOp(t, attehcl.SourceFileRelation, out[0].Kind)
+	test.EqOp(t, targetID, out[0].To)
+	test.EqOp(t, attegit.ContainsRelation, out[0].Kind)
 
 	stdout, stderr, err := executeAcceptanceCommand(t, repository, "graph")
 	test.NoError(t, err)

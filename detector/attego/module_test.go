@@ -324,7 +324,8 @@ func TestGraphPackagesAndTests(t *testing.T) {
 	packageID := EntityID(PackageKind, "", "example.com/root/p")
 	normalFile := attegit.EntityID(testPath("p/p.go"))
 	testFile := attegit.EntityID(testPath("p/p_test.go"))
-	graphtest.MustHaveRelation(t, g, testPackage, packageID, attegit.ContainsRelation)
+	graphtest.MustHaveRelation(t, g, testPackage, packageID, TestsRelation)
+	graphtest.MustNotHaveRelation(t, g, testPackage, packageID, attegit.ContainsRelation)
 	graphtest.MustHaveRelation(t, g, normal, normalFile, SourceFileRelation)
 	graphtest.MustNotHaveRelation(t, g, normal, testFile, SourceFileRelation)
 	graphtest.MustHaveRelation(t, g, testPackage, testFile, SourceFileRelation)
@@ -333,4 +334,45 @@ func TestGraphPackagesAndTests(t *testing.T) {
 	graphtest.MustHaveRelation(t, g, treeID, normal, attegit.ContainsRelation)
 	graphtest.MustHaveRelation(t, g, treeID, testPackage, attegit.ContainsRelation)
 	graphtest.MustNotHaveRelation(t, g, normal, treeID, attegit.ContainsRelation)
+}
+
+func TestGraphTestsRelationIgnoresAttachToTree(t *testing.T) {
+	dir := newBasicFixture(t)
+	packageID := EntityID(PackageKind, "", "example.com/root/p")
+	testPackage := EntityID(PackageTestKind, "", "example.com/root/p")
+
+	for name, g := range map[string]*graph.Graph{
+		"detached": openTestGraph(t, dir),
+		"attached": openTestGraphWithContainment(t, dir),
+	} {
+		t.Run(name, func(t *testing.T) {
+			graphtest.MustHaveRelation(t, g, testPackage, packageID, TestsRelation)
+			graphtest.MustNotHaveRelation(t, g, testPackage, packageID, attegit.ContainsRelation)
+		})
+	}
+}
+
+func TestGraphSkipsCgoImport(t *testing.T) {
+	git := attegittest.NewGitRepo(t)
+	git.WriteFiles(t, map[string]string{
+		"go.mod": "module example.com/root\n\ngo 1.24\n",
+		"c/c.go": `
+package c
+
+// #include <stdio.h>
+import "C"
+
+import "fmt"
+
+var _ = fmt.Println
+`,
+	})
+	git.CommitAll(t, "init")
+
+	g := openTestGraph(t, git.Dir())
+
+	cgo := EntityID(PackageStdlibKind, "", "C")
+	fmtID := EntityID(PackageStdlibKind, "", "fmt")
+	test.False(t, g.Has(cgo), test.Sprint("cgo pseudo-package should not be an entity"))
+	test.True(t, g.Has(fmtID), test.Sprint("real stdlib imports should remain"))
 }

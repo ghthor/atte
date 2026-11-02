@@ -45,7 +45,13 @@ const (
 	// ImportsRelation relates a package to an imported package entity.
 	ImportsRelation    graph.RelationKind = "imports"
 	SourceFileRelation graph.RelationKind = "source-file"
+	// TestsRelation relates a package test to the package it tests.
+	TestsRelation graph.RelationKind = "tests"
 )
+
+// cgoImportPath is the pseudo-package a cgo file imports to enable cgo. It has
+// no source and is not a Go package, so it never becomes a graph entity.
+const cgoImportPath = "C"
 
 type module struct {
 	dir      reference.Tree
@@ -335,9 +341,9 @@ func graphFor(ctx context.Context, repo *attegit.Repo, options graphset.Options)
 		tid := EntityID(PackageTestKind, p.module.dir, p.importPath)
 		if p.hasTests {
 			entities[tid] = graph.Entity{ID: tid, Kind: PackageTestKind}
+			relations[graph.Relationship{From: tid, To: pid, Kind: TestsRelation}] = struct{}{}
 			if options.AttachToTree {
 				relations[graph.Relationship{From: treeID, To: tid, Kind: attegit.ContainsRelation}] = struct{}{}
-				relations[graph.Relationship{From: tid, To: pid, Kind: attegit.ContainsRelation}] = struct{}{}
 				for _, file := range p.testFiles {
 					fileID := attegit.EntityID(file)
 					obj, ok := repo.Obj[file]
@@ -421,7 +427,11 @@ func scan(ctx context.Context, repo *attegit.Repo) ([]*module, []goFile, error) 
 		}
 		imports := make([]string, 0, len(f.Imports))
 		for _, imp := range f.Imports {
-			imports = append(imports, strings.Trim(imp.Path.Value, `"`))
+			importPath := strings.Trim(imp.Path.Value, `"`)
+			if importPath == cgoImportPath {
+				continue
+			}
+			imports = append(imports, importPath)
 		}
 		files = append(files, goFile{dir: dir, name: name, imports: imports, test: strings.HasSuffix(name, "_test.go")})
 	}

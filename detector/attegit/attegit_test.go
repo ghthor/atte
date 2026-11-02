@@ -8,6 +8,7 @@ import (
 	"github.com/ghthor/atte/reference"
 
 	"github.com/ghthor/atte/detector/attegittest"
+	"github.com/ghthor/atte/detector/graph/graphtest"
 	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
 )
@@ -54,6 +55,28 @@ func TestOpenAndShow(t *testing.T) {
 
 	_, err = repo.Show(testPath("missing"))
 	test.Error(t, err)
+}
+
+func TestGraphContainsPointsToChildren(t *testing.T) {
+	git := committedRepo(t, map[string]string{
+		"root.txt":         "root",
+		"nested/child.txt": "child",
+	})
+	repo, err := Open(git.Dir(), "HEAD")
+	must.NoError(t, err)
+	g, err := repo.Graph()
+	must.NoError(t, err)
+
+	root := EntityID(reference.Root)
+	nested := EntityID(testPath("nested"))
+	rootFile := EntityID(testPath("root.txt"))
+	child := EntityID(testPath("nested/child.txt"))
+
+	graphtest.MustHaveRelation(t, g, root, rootFile, ContainsRelation)
+	graphtest.MustHaveRelation(t, g, root, nested, ContainsRelation)
+	graphtest.MustHaveRelation(t, g, nested, child, ContainsRelation)
+	graphtest.MustNotHaveRelation(t, g, child, nested, ContainsRelation)
+	graphtest.MustNotHaveRelation(t, g, nested, root, ContainsRelation)
 }
 
 func TestWorkingTree(t *testing.T) {

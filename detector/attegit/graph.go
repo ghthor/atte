@@ -15,7 +15,10 @@ const (
 	TreeKind = Namespace + ":tree"
 	// BlobKind identifies Git blob entities in the graph.
 	BlobKind = Namespace + ":blob"
-	// ContainsRelation identifies Git containment relationships.
+	// ContainsRelation identifies containment relationships. The relationship
+	// always points from the container to what it contains: a tree contains its
+	// blobs, subtrees, packages and targets, and an atte.hcl blob contains its
+	// targets.
 	ContainsRelation graph.RelationKind = "contains"
 )
 
@@ -58,7 +61,8 @@ type Graphs struct {
 }
 
 // Graph converts the repository tree into the language-agnostic propagation
-// graph. Containment relationships point from a child to its containing tree.
+// graph. Containment relationships point from a tree to each blob and subtree
+// it contains.
 func (r *Repo) Graph() (*graph.Graph, error) {
 	if r.fullGraph != nil {
 		return r.fullGraph, nil
@@ -93,8 +97,8 @@ func (r *Repo) Graph() (*graph.Graph, error) {
 		}
 
 		rel := graph.Relationship{
-			From: EntityID(p),
-			To:   EntityID(parent),
+			From: EntityID(parent),
+			To:   EntityID(p),
 			Kind: ContainsRelation,
 		}
 		e := graph.Entity{ID: EntityID(p), Kind: BlobKind}
