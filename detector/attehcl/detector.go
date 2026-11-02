@@ -61,6 +61,18 @@ func (Detector) TargetSelector(target graphtarget.ID) selector.Target {
 	})
 }
 
+// DependencyRelations reports that a target depends on what it lists in
+// depends_on. HCL targets have no content of their own.
+func (Detector) DependencyRelations() []graph.RelationKind {
+	return []graph.RelationKind{DependsOnRelation}
+}
+
+// ContentTokens returns no tokens: a target's content arrives through its
+// dependencies.
+func (Detector) ContentTokens(context.Context, *attegit.Repo, *graph.Graph) (map[graph.EntityID]string, error) {
+	return nil, nil
+}
+
 func (d Detector) Graph(ctx context.Context, repo *attegit.Repo, options ...graphset.Option) (*graph.Graph, error) {
 	return Graph(ctx, repo, d.scanner, options...)
 }

@@ -51,6 +51,20 @@ type HCLSettingSensor interface {
 	HCLSettings(context.Context, *attegit.Repo, reference.Tree) ([]hclblock.SettingValue, error)
 }
 
+// ContentSensor supplies the inputs for content hashes: which of its
+// relationships mean "From depends on To", and the content token of the
+// entities it owns. A content token identifies the entity's own content (for
+// example a Git object hash or a module version) and is empty for entities
+// whose content arrives through their dependencies. Tokens may only be
+// returned for entities in the Sensor's namespace. ContentTokens receives the
+// complete graph and returns an error when an entity's content cannot be
+// identified, rather than hashing it as empty.
+type ContentSensor interface {
+	Sensor
+	DependencyRelations() []graph.RelationKind
+	ContentTokens(context.Context, *attegit.Repo, *graph.Graph) (map[graph.EntityID]string, error)
+}
+
 // SensorWithScanner opts a Sensor into receiving the compiled Scanner during
 // Builder.Compile. Implementations may validate the Scanner against a local
 // capability interface and return a new bound Sensor to keep compiled snapshots

@@ -182,6 +182,28 @@ func addGoListImport(
 	relations[graph.Relationship{From: from, To: target, Kind: ImportsRelation}] = struct{}{}
 }
 
+// withoutGoVersions drops the go-version entities and relationships, which
+// `go list` has no equivalent for.
+func withoutGoVersions(t *testing.T, g *graph.Graph) *graph.Graph {
+	t.Helper()
+	entities := make([]graph.Entity, 0, len(g.EntityKeys))
+	relations := make([]graph.Relationship, 0, len(g.EntityKeys))
+	for _, id := range g.EntityKeys {
+		if g.Entities[id].Kind == GoVersionKind {
+			continue
+		}
+		entities = append(entities, g.Entities[id])
+		for _, relation := range g.Out(id) {
+			if relation.Kind != GoVersionRelation {
+				relations = append(relations, relation)
+			}
+		}
+	}
+	filtered, err := graph.New(entities, relations)
+	must.NoError(t, err)
+	return filtered
+}
+
 func relativeModuleDir(repositoryDir, moduleDir string) string {
 	rel, err := filepath.Rel(repositoryDir, moduleDir)
 	if err != nil || rel == "." {

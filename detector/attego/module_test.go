@@ -304,7 +304,7 @@ func openTestGraphWithContainment(t *testing.T, dir string) *graph.Graph {
 
 func TestGraphMatchesGoList(t *testing.T) {
 	dir := newBasicFixture(t)
-	assertGraphsEqual(t, goListGraph(t, dir), openTestGraph(t, dir))
+	assertGraphsEqual(t, goListGraph(t, dir), withoutGoVersions(t, openTestGraph(t, dir)))
 }
 
 func TestGraphPackagesAndTests(t *testing.T) {

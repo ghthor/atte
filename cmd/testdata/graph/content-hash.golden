@@ -1,0 +1,15 @@
+.
+├── go.mod c4cb68ede642
+├── internal/ afa0b9abae4f
+│   └── value/ 7103353f3d68
+│       ├── value.go 36f627c487a2
+│       └── go package example.com/root/internal/value 97dd3509f626
+│           ├── go version go=1.20 dcd38ac294e3
+│           └── file value.go
+├── main.go f2b6dd5b462d
+└── go package example.com/root fa2b57046a3f
+    ├── go version go=1.20 dcd38ac294e3
+    ├── file main.go
+    ├── import example.com/root/internal/value
+    ├── std import fmt
+    └── external import github.com/shoenig/test/must (github.com/shoenig/test@v1.13.2)

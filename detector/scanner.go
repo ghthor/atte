@@ -9,6 +9,7 @@ import (
 
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attehcl/hclblock"
+	"github.com/ghthor/atte/detector/contenthash"
 	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graphset"
 	"github.com/ghthor/atte/detector/graphtarget"
@@ -27,6 +28,10 @@ type SensorSpec struct {
 	ExecuteTarget  func(context.Context, *attegit.Repo, string, graphtarget.ID) (graphtarget.Execution, error)
 	DecodeID       func(graph.EntityID) (graph.Entity, error)
 	HCLSettings    func(context.Context, *attegit.Repo, reference.Tree) ([]hclblock.SettingValue, error)
+
+	// DependencyRelations and ContentTokens are provided together; see ContentSensor.
+	DependencyRelations []graph.RelationKind
+	ContentTokens       func(context.Context, *attegit.Repo, *graph.Graph) (map[graph.EntityID]string, error)
 }
 
 // HCLFunctionFactory constructs a function for one repository and HCL file.
@@ -57,6 +62,11 @@ type Scanner interface {
 	// Graph combines the graphs produced by all attached Sensors for repo.
 	// Each option is passed to every Sensor that contributes a graph.
 	Graph(context.Context, *attegit.Repo, ...graphset.Option) (*graph.Graph, error)
+
+	// ContentHashes returns a calculator of content hashes over g, which must be a
+	// complete graph built for repo. Every attached ContentSensor contributes its
+	// dependency relations and the content tokens of its entities.
+	ContentHashes(context.Context, *attegit.Repo, *graph.Graph) (*contenthash.Calculator, error)
 
 	// TargetKinds returns the attached HCL target-kind specifications.
 	// The returned map and any schemas it contains are independent copies that
@@ -298,7 +308,7 @@ func (b *Builder) validateSensor(sensor SensorSpec, hasHCLCapabilities bool) err
 			return fmt.Errorf("sensor %q target capability is missing ExecuteTarget", sensor.Namespace)
 		}
 	}
-	if sensor.Graph == nil && !targetCapability && sensor.DecodeID == nil && sensor.HCLSettings == nil && !hasHCLCapabilities {
+	if sensor.Graph == nil && !targetCapability && sensor.DecodeID == nil && sensor.HCLSettings == nil && sensor.ContentTokens == nil && !hasHCLCapabilities {
 		return fmt.Errorf("sensor %q has no capabilities", sensor.Namespace)
 	}
 	if _, exists := b.sensors[sensor.Namespace]; exists {
@@ -429,6 +439,10 @@ func adaptSensor(value Sensor) SensorSpec {
 	if sensor, ok := value.(HCLSettingSensor); ok {
 		adapted.HCLSettings = sensor.HCLSettings
 	}
+	if sensor, ok := value.(ContentSensor); ok {
+		adapted.DependencyRelations = sensor.DependencyRelations()
+		adapted.ContentTokens = sensor.ContentTokens
+	}
 	return adapted
 }
 
@@ -504,6 +518,36 @@ func (s *compiledScanner) Graph(ctx context.Context, repo *attegit.Repo, options
 		}
 	}
 	return result, nil
+}
+
+// ContentHashes combines the dependency relations and content tokens of all
+// compiled Sensors into one calculator over g.
+func (s *compiledScanner) ContentHashes(ctx context.Context, repo *attegit.Repo, g *graph.Graph) (*contenthash.Calculator, error) {
+	if g == nil {
+		return nil, fmt.Errorf("graph is nil")
+	}
+	relations := make([]graph.RelationKind, 0)
+	tokens := make(map[graph.EntityID]string)
+	for _, sensor := range s.sensors {
+		if sensor.ContentTokens == nil {
+			continue
+		}
+		relations = append(relations, sensor.DependencyRelations...)
+		sensorTokens, err := sensor.ContentTokens(ctx, repo, g)
+		if err != nil {
+			return nil, fmt.Errorf("compute %s content tokens: %w", sensor.Namespace, err)
+		}
+		for id, token := range sensorTokens {
+			if id.Namespace() != sensor.Namespace {
+				return nil, fmt.Errorf("sensor %q returned a content token for %q outside its namespace", sensor.Namespace, id)
+			}
+			tokens[id] = token
+		}
+	}
+	if len(relations) == 0 {
+		return nil, fmt.Errorf("no attached sensor provides content hashes")
+	}
+	return contenthash.New(g, relations, tokens), nil
 }
 
 // Targets returns all compiled executable targets in namespace order.

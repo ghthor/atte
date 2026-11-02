@@ -41,12 +41,18 @@ const (
 	PackageTestKind     = Namespace + ":package-test"
 	PackageStdlibKind   = Namespace + ":package-stdlib"
 	PackageExternalKind = Namespace + ":package-external"
+	// GoVersionKind identifies the Go version a go.mod declares. There is one
+	// per go.mod, and its import path segment is empty.
+	GoVersionKind = Namespace + ":go-version"
 
 	// ImportsRelation relates a package to an imported package entity.
 	ImportsRelation    graph.RelationKind = "imports"
 	SourceFileRelation graph.RelationKind = "source-file"
 	// TestsRelation relates a package test to the package it tests.
 	TestsRelation graph.RelationKind = "tests"
+	// GoVersionRelation relates a package entity to the Go version of the
+	// go.mod that owns or requires it.
+	GoVersionRelation graph.RelationKind = "go-version"
 )
 
 // cgoImportPath is the pseudo-package a cgo file imports to enable cgo. It has
@@ -56,9 +62,17 @@ const cgoImportPath = "C"
 type module struct {
 	dir      reference.Tree
 	name     string
-	replaces []replace
+	replaces []replace // replacements by a path in the repository
+
+	goVersion, toolchain string // empty when the directive is absent
+	requires             []require
+	moduleReplaces       []moduleReplace // replacements by another module version
 }
-type replace struct{ old, target string }
+type (
+	replace       struct{ old, target string }
+	require       struct{ path, version string }
+	moduleReplace struct{ oldPath, oldVersion, newPath, newVersion string }
+)
 
 type goFile struct {
 	dir, name string
@@ -100,7 +114,7 @@ func DecodeEntityID(id graph.EntityID) (string, reference.Tree, string, error) {
 	importPath := string(decoded)
 
 	kind := Namespace + ":" + parts[1]
-	if kind != PackageKind && kind != PackageTestKind && kind != PackageStdlibKind && kind != PackageExternalKind {
+	if kind != PackageKind && kind != PackageTestKind && kind != PackageStdlibKind && kind != PackageExternalKind && kind != GoVersionKind {
 		return "", "", "", fmt.Errorf("invalid attego entity kind %q", kind)
 	}
 	tree, err := reference.ParseTree(moduleDir)
@@ -316,6 +330,9 @@ func graphFor(ctx context.Context, repo *attegit.Repo, options graphset.Options)
 		}
 		pid := EntityID(PackageKind, p.module.dir, p.importPath)
 		entities[pid] = graph.Entity{ID: pid, Kind: PackageKind}
+		goVersion := EntityID(GoVersionKind, p.module.dir, "")
+		entities[goVersion] = graph.Entity{ID: goVersion, Kind: GoVersionKind}
+		relations[graph.Relationship{From: pid, To: goVersion, Kind: GoVersionRelation}] = struct{}{}
 		var treeID graph.EntityID
 		if options.AttachToTree {
 			tree, err := reference.ParseTree(p.dir)
@@ -342,6 +359,7 @@ func graphFor(ctx context.Context, repo *attegit.Repo, options graphset.Options)
 		if p.hasTests {
 			entities[tid] = graph.Entity{ID: tid, Kind: PackageTestKind}
 			relations[graph.Relationship{From: tid, To: pid, Kind: TestsRelation}] = struct{}{}
+			relations[graph.Relationship{From: tid, To: goVersion, Kind: GoVersionRelation}] = struct{}{}
 			if options.AttachToTree {
 				relations[graph.Relationship{From: treeID, To: tid, Kind: attegit.ContainsRelation}] = struct{}{}
 				for _, file := range p.testFiles {
@@ -386,10 +404,26 @@ func parseModule(dir, name string, contents []byte) (*module, error) {
 		}
 	}
 	m := &module{dir: moduleDir, name: f.Module.Mod.Path}
+	if f.Go != nil {
+		m.goVersion = f.Go.Version
+	}
+	if f.Toolchain != nil && f.Toolchain.Name != "default" && f.Toolchain.Name != "local" {
+		m.toolchain = f.Toolchain.Name
+	}
+	for _, r := range f.Require {
+		m.requires = append(m.requires, require{path: r.Mod.Path, version: r.Mod.Version})
+	}
 	for _, r := range f.Replace {
 		if r.New.Version == "" {
 			m.replaces = append(m.replaces, replace{old: r.Old.Path, target: path.Clean(path.Join(dir, r.New.Path))})
+			continue
 		}
+		m.moduleReplaces = append(m.moduleReplaces, moduleReplace{
+			oldPath:    r.Old.Path,
+			oldVersion: r.Old.Version,
+			newPath:    r.New.Path,
+			newVersion: r.New.Version,
+		})
 	}
 	return m, nil
 }
@@ -478,6 +512,8 @@ func addImport(
 		}
 		target = EntityID(kind, p.module.dir, imp)
 		entities[target] = graph.Entity{ID: target, Kind: graph.EntityKind(kind)}
+		goVersion := EntityID(GoVersionKind, p.module.dir, "")
+		relations[graph.Relationship{From: target, To: goVersion, Kind: GoVersionRelation}] = struct{}{}
 	}
 	relations[graph.Relationship{From: from, To: target, Kind: ImportsRelation}] = struct{}{}
 }

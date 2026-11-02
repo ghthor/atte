@@ -2,12 +2,15 @@ package attegit
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ghthor/atte/reference"
 
 	"github.com/ghthor/atte/detector/attegittest"
+	"github.com/ghthor/atte/detector/graph"
 	"github.com/ghthor/atte/detector/graph/graphtest"
 	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
@@ -77,6 +80,46 @@ func TestGraphContainsPointsToChildren(t *testing.T) {
 	graphtest.MustHaveRelation(t, g, nested, child, ContainsRelation)
 	graphtest.MustNotHaveRelation(t, g, child, nested, ContainsRelation)
 	graphtest.MustNotHaveRelation(t, g, nested, root, ContainsRelation)
+}
+
+func TestContentTokens(t *testing.T) {
+	git := committedRepo(t, map[string]string{
+		"root.txt":         "root",
+		"nested/child.txt": "child",
+	})
+	git.WriteFile(t, "root.txt", []byte("modified"), 0o644)
+	git.WriteFile(t, "scratch/new.txt", []byte("new"), 0o644)
+
+	tokens := func(options ...OpenOption) map[graph.EntityID]string {
+		t.Helper()
+		repo, err := Open(git.Dir(), "HEAD", options...)
+		must.NoError(t, err)
+		g, err := repo.Graph()
+		must.NoError(t, err)
+		got, err := Detector{}.ContentTokens(t.Context(), repo, g)
+		must.NoError(t, err)
+		return got
+	}
+	hash := func(prefix, objectPath string) string {
+		t.Helper()
+		out, err := exec.Command("git", "-C", git.Dir(), "rev-parse", "HEAD:"+objectPath).Output()
+		must.NoError(t, err)
+		return prefix + strings.TrimSpace(string(out))
+	}
+
+	committed := tokens()
+	test.EqOp(t, hash("git-blob:", "root.txt"), committed[EntityID(testPath("root.txt"))])
+	test.EqOp(t, hash("git-blob:", "nested/child.txt"), committed[EntityID(testPath("nested/child.txt"))])
+	test.EqOp(t, hash("git-tree:", "nested"), committed[EntityID(testPath("nested"))])
+	test.MapNotContainsKey(t, committed, EntityID(reference.Root))
+
+	// A working tree overlay hashes dirty blobs but never recomputes the
+	// hash of a tree that exists in the revision.
+	dirty := tokens(WithWorkingTree())
+	test.NotEq(t, committed[EntityID(testPath("root.txt"))], dirty[EntityID(testPath("root.txt"))])
+	test.EqOp(t, committed[EntityID(testPath("nested"))], dirty[EntityID(testPath("nested"))])
+	test.MapContainsKey(t, dirty, EntityID(testPath("scratch/new.txt")))
+	test.MapNotContainsKey(t, dirty, EntityID(testPath("scratch")))
 }
 
 func TestWorkingTree(t *testing.T) {
