@@ -299,11 +299,11 @@ Frontiers:
 - `Frontiers` returns `([][]graph.EntityID, error)` instead of the bare slice, because `Dependencies` fails for an unknown entity. That cannot happen for a `Delta` built by `Diff`.
 - An entity whose only dependency was removed has no changed dependency, so it is in layer 0. The removed entity cannot be listed, and its dependents are the nearest thing to the edit.
 - `Dependencies` excludes the entity itself, as `Closure` does.
+- The layers in the Frontiers table above are checked by `TestFrontiersOfTheWorkedExample`, which captures the worked example's repository before and after the edit. The other layering tests use hand-built worlds.
 
 ### Not done
 
 - The design listed command-level goldens for an `atte.hcl` edit, a `go.mod` bump with `--external-imports`, a deleted file, and a mode-only change. No command test renders the first two or the last. The Cone for them follows from the unit tests over hand-built graphs, but nothing checks the rendered output. A deleted file appears only as a working-tree default-selection case, whose output is the changed parent tree.
-- The Frontiers table for the worked example was checked once in a scratch test against a captured repository and matched. It was not kept as a test. The committed tests check layering on hand-built worlds and, on a captured repository, that the edited file is the only member of layer 0.
 - Nothing renders the Frontiers.
 
 ### Open from review
