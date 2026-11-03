@@ -1,8 +1,3 @@
-// Package cone is the Broad Phase of Atte: it finds the entities whose content
-// changed between two revisions of a repository.
-//
-// A Snapshot is the complete graph of one revision together with, when asked
-// for, the content hashes of its entities.
 package cone
 
 import (

@@ -291,6 +291,11 @@ Progress, recorded by the PR that did the work:
   - The `cone` package documentation is a short placeholder. The vocabulary (Snapshot, Cone, Candidate versus Impact) arrives with `Diff` in PR 3, as planned.
   - Tests are black-box (`cone_test`) against the default scanner and `attegittest`: the graph holds Git tree and detector entities, `Hashes` is nil without the option, hashes follow file content, and an unresolved external import fails only with `WithContentHashes`.
   - No `atte graph` golden changed.
+- PR 3 (`cone-diff`): added `cone.Diff` and `cone.Delta` (`Changed`, `Added`, `Removed`, `Graph`, `Contains`), the package documentation in `cone/doc.go`, and `cone/README.md`. Notes:
+  - `Diff` returns an error when either snapshot lacks `Hashes`, or is nil, so a caller that forgot `WithContentHashes` fails with that name rather than on a nil pointer.
+  - `Changed`, `Added` and `Removed` are never nil, so an empty Cone compares equal to an empty list. `Contains` is backed by an unexported set.
+  - The README is `cone/README.md`; no other package has one, so it is the first and is kept short. The package documentation carries the vocabulary and the README repeats it as a table with an example.
+  - Tests build worlds with `graph.New` and `contenthash.New`: identical snapshots, an edited token reaching dependents, a non-dependency relationship that does not propagate, an added entity, a removed entity, a rename, the induced graph, connectivity through `contains`, missing hashes, and a pair of real captured repositories.
 
 Order notes:
 
