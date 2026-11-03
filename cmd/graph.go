@@ -13,13 +13,13 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/ghthor/atte/cone"
 	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/detector/contenthash"
 	"github.com/ghthor/atte/detector/graph"
-	"github.com/ghthor/atte/detector/graphset"
 	"github.com/ghthor/atte/reference"
 	"github.com/spf13/cobra"
 	"github.com/xlab/treeprint"
@@ -57,6 +57,18 @@ type renderOptions struct {
 
 	// hashes is set when content hashes or Go versions are shown.
 	hashes *contenthash.Calculator
+
+	// hashLabel, when set, replaces the abbreviated hash that follows an entity
+	// when content hashes are shown. It lets a caller print something that is
+	// not the hash of one revision, such as a range of two.
+	hashLabel func(graph.EntityID) (string, error)
+
+	// complete is set when the graph being printed is a subset of a larger
+	// graph, as for the entities that changed between two revisions. It is the
+	// graph that decides whether an imported package belongs to the repository,
+	// because a subset can lack the source files that say so. Leaving it nil
+	// means the graph being printed is complete.
+	complete *graph.Graph
 }
 
 // contentHashLength is the number of leading hex characters of a content hash
@@ -150,32 +162,23 @@ func printGraph(ctx context.Context, w io.Writer, repo *attegit.Repo, relativePa
 	if len(options) > 0 {
 		printOptions = options[0]
 	}
-	gitGraph, err := repo.Graph()
-	if err != nil {
-		return fmt.Errorf("build Git graph: %w", err)
-	}
 	detector, err := scannerForContext(ctx)
 	if err != nil {
 		return fmt.Errorf("register detectors: %w", err)
 	}
-	detectorGraph, err := detector.Graph(ctx, repo, graphset.WithAttachToTree())
-	if err != nil {
-		return fmt.Errorf("build detector graph: %w", err)
-	}
-	if detectorGraph != nil {
-		if err := gitGraph.Absorb(detectorGraph); err != nil {
-			return fmt.Errorf("merge detector graph: %w", err)
-		}
-	}
-	render := renderOptions{PrintGraphOptions: printOptions}
+	// Hashes cover the whole graph, so an entity prints the same hash from any
+	// working directory. They are computed only when shown: content tokens are
+	// strict, and plain graph output must work for a repository whose external
+	// imports cannot all be resolved.
+	var captureOptions []cone.CaptureOption
 	if printOptions.IncludeContentHash || printOptions.IncludeGoVersions {
-		// Hashes cover the whole graph, so an entity prints the same hash from
-		// any working directory.
-		render.hashes, err = detector.ContentHashes(ctx, repo, gitGraph)
-		if err != nil {
-			return fmt.Errorf("compute content hashes: %w", err)
-		}
+		captureOptions = append(captureOptions, cone.WithContentHashes())
 	}
+	snapshot, err := cone.Capture(ctx, detector, repo, captureOptions...)
+	if err != nil {
+		return err
+	}
+	render := renderOptions{PrintGraphOptions: printOptions, hashes: snapshot.Hashes}
 	var runSelectors map[graph.EntityID]string
 	if printOptions.IncludeRunTargets {
 		runSelectors, err = graphRunTargetSelectors(ctx, repo)
@@ -183,7 +186,7 @@ func printGraph(ctx context.Context, w io.Writer, repo *attegit.Repo, relativePa
 			return fmt.Errorf("discover run targets: %w", err)
 		}
 	}
-	return printGitGraph(w, repo, gitGraph, relativePath, render, detector, runSelectors)
+	return printGitGraph(w, repo, snapshot.Graph, relativePath, render, detector, runSelectors)
 }
 
 func graphRunTargetSelectors(ctx context.Context, repo *attegit.Repo) (map[graph.EntityID]string, error) {
@@ -226,14 +229,18 @@ func printGitGraph(
 	if len(runSelectors) > 0 {
 		selectors = runSelectors[0]
 	}
-	tree := treeprint.New()
-	if err := addGraphChildren(tree, repo, g, func() graph.EntityID {
-		if relativePath == "" {
-			return attegit.EntityID(reference.Root)
-		}
+	start := attegit.EntityID(reference.Root)
+	if relativePath != "" {
 		tree, _ := reference.ParseTree(relativePath)
-		return attegit.EntityID(tree)
-	}(), options, detector, selectors); err != nil {
+		start = attegit.EntityID(tree)
+	}
+	// A subset has no tree where nothing below it changed, which is an empty
+	// result. A complete graph has every tree, so a missing one is an error.
+	if options.complete != nil && !g.Has(start) {
+		return nil
+	}
+	tree := treeprint.New()
+	if err := addGraphChildren(tree, repo, g, start, options, detector, selectors); err != nil {
 		return err
 	}
 	_, err := fmt.Fprint(w, tree.String())
@@ -245,6 +252,13 @@ func printGitGraph(
 func (options renderOptions) hashSuffix(id graph.EntityID) (string, error) {
 	if !options.IncludeContentHash {
 		return "", nil
+	}
+	if options.hashLabel != nil {
+		label, err := options.hashLabel(id)
+		if err != nil {
+			return "", err
+		}
+		return " " + plainStyle.Render(label), nil
 	}
 	sum, err := options.hashes.Sum(id)
 	if err != nil {
@@ -491,7 +505,7 @@ func addPackageNode(parent treeprint.Tree, repo *attegit.Repo, g *graph.Graph, i
 	if err != nil {
 		return fmt.Errorf("decode Go package %q: %w", id, err)
 	}
-	localImports, stdlibImports, externalImports, externalIDs := packageImports(g, id)
+	localImports, stdlibImports, externalImports, externalIDs := packageImports(g, options.complete, id)
 	if !options.IncludeExternalImports {
 		stdlibImports = nil
 		externalImports = nil
@@ -562,8 +576,12 @@ func packageGoVersion(g *graph.Graph, source graph.EntityID, options renderOptio
 
 // packageImports returns the sorted import paths of source, grouped into
 // repository, standard library and external packages. It also returns the
-// entity of each external import path.
-func packageImports(g *graph.Graph, source graph.EntityID) ([]string, []string, []string, map[string]graph.EntityID) {
+// entity of each external import path. A package is a repository package when
+// complete, or g if complete is nil, has source files or contents for it.
+func packageImports(g, complete *graph.Graph, source graph.EntityID) ([]string, []string, []string, map[string]graph.EntityID) {
+	if complete == nil {
+		complete = g
+	}
 	local := make(map[string]struct{})
 	stdlib := make(map[string]struct{})
 	external := make(map[string]struct{})
@@ -579,7 +597,7 @@ func packageImports(g *graph.Graph, source graph.EntityID) ([]string, []string, 
 		}
 		switch entity.Kind {
 		case attego.PackageKind:
-			if hasContainment(g, relation.To) {
+			if hasContainment(complete, relation.To) {
 				local[importPath] = struct{}{}
 			}
 		case attego.PackageStdlibKind:

@@ -96,6 +96,26 @@ func (c *Calculator) Closure(id graph.EntityID) ([]graph.EntityID, error) {
 	return c.closureOf(v), nil
 }
 
+// Dependencies returns the entities that id depends on directly, sorted
+// bytewise. Unlike Closure it stops at one step, and it excludes id itself.
+func (c *Calculator) Dependencies(id graph.EntityID) ([]graph.EntityID, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	v, ok := c.index[id]
+	if !ok {
+		return nil, fmt.Errorf("unknown entity %q", id)
+	}
+	direct := c.dependencies(v)
+	ids := make([]graph.EntityID, 0, len(direct))
+	// Indexes follow the sorted order of EntityKeys, so ids come out sorted.
+	for _, w := range direct {
+		if w != v {
+			ids = append(ids, c.graph.EntityKeys[w])
+		}
+	}
+	return ids, nil
+}
+
 // Sum returns the content hash of id.
 func (c *Calculator) Sum(id graph.EntityID) (Sum, error) {
 	c.mu.Lock()
