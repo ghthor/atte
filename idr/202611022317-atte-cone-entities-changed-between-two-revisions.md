@@ -318,6 +318,13 @@ Progress, recorded by the PR that did the work:
   - The line is written after the comparison is chosen and before either revision is opened, so a revision that does not resolve is still preceded by the line that says what was attempted.
   - Command tests build the cases from the design in a temporary repository: clean, touched only, ignored, unstaged, staged, untracked, deleted, and staged then reverted on disk, plus `--working-tree`, `--quiet`, explicit revisions on a dirty tree, and a one-commit repository both clean and dirty. They assert on the output and on stderr; the touched-only and ignored cases compare `HEAD^..HEAD`.
   - A mode-only change was not tested.
+- PR 7 (`cone-frontiers`): added `Delta.Frontiers()` in `cone/frontiers.go` and `contenthash.Calculator.Dependencies(id)`. Notes:
+  - `Frontiers` returns `([][]graph.EntityID, error)`, not the bare slice of the sketch, because `Dependencies` can fail for an unknown entity. The error cannot happen for a `Delta` that `Diff` built, but the signature does not hide it.
+  - `Dependencies` returns the direct followed dependencies, sorted, without the entity itself, as `Closure` does.
+  - Layering follows the design: added entities and entities with no changed dependency are layer 0; the rest are one more than their nearest changed dependency; cycles are condensed first with Tarjan's algorithm, and a cycle containing an added entity is layer 0 as a whole.
+  - An entity whose only dependency was removed has no changed dependency, so it is an Impulse. The removed entity cannot be listed, and its dependents are the nearest thing to the edit.
+  - The worked-example layering was checked on the small hand-built world, and on a captured repository where the edited file is the only member of layer 0. The IDR's table for the full repository was not reproduced as a test.
+  - The package README gained a short section. Nothing renders the layers.
 
 Order notes:
 

@@ -214,6 +214,31 @@ func TestUnknownEntity(t *testing.T) {
 	test.Error(t, err)
 }
 
+func TestDependenciesAreDirectSortedAndFollowed(t *testing.T) {
+	g := build(t,
+		[]graph.EntityID{"a", "b", "c", "d", "e"},
+		[]edge{{"a", "d", dep}, {"a", "b", dep}, {"a", "c", other}, {"b", "e", dep}, {"a", "a", dep}},
+	)
+	c := New(g, []graph.RelationKind{dep}, nil)
+
+	got, err := c.Dependencies("a")
+
+	must.NoError(t, err)
+	// Not c, which is not followed, e, which is not direct, or a itself.
+	test.Eq(t, []graph.EntityID{"b", "d"}, got)
+	got, err = c.Dependencies("e")
+	must.NoError(t, err)
+	test.SliceEmpty(t, got)
+}
+
+func TestDependenciesOfUnknownEntity(t *testing.T) {
+	c := New(build(t, []graph.EntityID{"a"}, nil), []graph.RelationKind{dep}, nil)
+
+	_, err := c.Dependencies("missing")
+
+	test.Error(t, err)
+}
+
 // TestRandomGraphsMatchReference compares the memoized per-component
 // calculation with the slow specification, evaluating entities in a random
 // order so that results prove independent of where a walk starts.

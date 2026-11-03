@@ -36,6 +36,14 @@ same way as an edit.
 Candidates and the relationships between them. A tree that contains a Candidate is itself a
 Candidate, so the pruned graph stays connected from the repository root.
 
+## Frontiers
+
+`Delta.Frontiers` layers the Cone by distance from the Impulses, so that what
+was edited can be told from what changed as a consequence. Layer 0 is the
+Impulses: the entities that are new, and those with no changed dependency.
+Trees depend on what they contain, so they appear in later layers, and a
+consumer that wants only some kinds filters them.
+
 ## What the Cone gets wrong
 
 - **False positives are by design.** A hash sees bytes, not meaning: a comment
