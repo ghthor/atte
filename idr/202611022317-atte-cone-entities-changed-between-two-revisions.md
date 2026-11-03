@@ -79,11 +79,11 @@ The two sides are resolved before anything is captured. The defaults for both si
 | has uncommitted changes, or `--working-tree` is given | `HEAD` | `HEAD` + working tree |
 | clean | `HEAD^` | `HEAD` |
 
-`--base` and `--head` each replace only their own side; the other side keeps its default from the table. `--base HEAD^ --head HEAD` is therefore the committed comparison regardless of the working tree, and `--base origin/main` compares the working tree (if dirty) against `origin/main`. `--working-tree` overlays the working tree on whichever head is used, `--head REV` included. There is no derived default such as `REV^` for an explicit `--head`: passing `--head` alone pairs it with the default base from the table.
+`--base` and `--head` each replace only their own side; the other side keeps its default from the table. `--base HEAD^ --head HEAD` is therefore the committed comparison regardless of the working tree, and `--base origin/main` compares the working tree (if dirty) against `origin/main`. `--working-tree` overlays the working tree on whichever head is used, `--head REV` included. An explicit `--head` is never overlaid by a dirty tree alone, only by `--working-tree`. There is no derived default such as `REV^` for an explicit `--head`: passing `--head` alone pairs it with the default base from the table.
 
 *Uncommitted changes* is whatever git reports. `attegit` runs `git --no-optional-locks status --porcelain -z --untracked-files=normal` in the repository root and treats any output as dirty. That covers the same three sources `WithWorkingTree` reads (unstaged, staged, untracked and not ignored), so untracked files count, and it leaves the question of what is dirty to git instead of re-deriving it. `git status` refreshes stat information before it compares, so a file that was only touched is not reported, unlike `git diff-files`, which lists stat-dirty entries. Two consequences follow, both visible in the stderr line below. A change git calls dirty but the graph does not model, such as a mode-only change, compares `HEAD..working tree` and finds an empty Cone. A change that is staged and then reverted on disk is dirty to git because the index differs, and also finds an empty Cone. When the tree is clean `HEAD` is opened once as the head and `HEAD^` as the base; when it is dirty `HEAD` is opened as the base and `HEAD` with the working tree overlay as the head.
 
-Because the default depends on repository state, the command writes the comparison it made to stderr before the output, for example `cone: HEAD..working tree` or `cone: HEAD^..HEAD`, and `--quiet` silences it (stdout stays the tree only). The line is stderr so piped output is unchanged.
+Because the default depends on repository state, the command writes the comparison it made to stderr before the output, for example `cone: HEAD..working tree` or `cone: HEAD^..HEAD` (`cone: HEAD^..feature + working tree` when an explicit head is overlaid), and `--quiet` silences it (stdout stays the tree only). The line is stderr so piped output is unchanged.
 
 Like `atte graph`, output is scoped to the working directory: the renderer starts at the working directory's tree in the induced graph. Hashes are still computed over both complete graphs, so the same entity shows the same result from any directory.
 
@@ -110,7 +110,7 @@ Consequences, all following from how hashes are defined:
 
 ### Frontiers
 
-`Delta.Frontiers()` layers the Cone by how far each Candidate is from the Impulses, which is the Frontier of the glossary at each step of Propagation. Hash comparison finds the Cone without walking, so the layers are derived afterwards from `Delta.Graph`, following only the dependency relations, which `Delta` reads from the head `Calculator` through a new `Dependencies()` accessor in `contenthash`.
+`Delta.Frontiers()` layers the Cone by how far each Candidate is from the Impulses, which is the Frontier of the glossary at each step of Propagation. Hash comparison finds the Cone without walking, so the layers are derived afterwards from `Delta.Graph`, following only the dependency relations, which `Delta` reads from the head `Calculator` through a new `Dependencies()` accessor in `contenthash`. A dependency on an entity that was removed is not a changed dependency, so an entity that lost its only dependency is in layer 0: the removed entity cannot be listed, and its dependents are the nearest thing to the edit.
 
 - **Layer 0, the Impulses.** Every added entity, and every changed entity that has no changed dependency. A tree token is itself a Merkle hash, so "its own token changed" would also select every tree above a change; "no changed dependency" selects only entities whose change is not explained by something they depend on. A changed cycle of entities that depends on nothing else that changed is layer 0 as a whole, since the cycle has no entry point of its own.
 - **Layer k.** Changed entities whose nearest changed dependency is in layer k-1, that is `1 + min` over their changed dependencies. Cycles are condensed first so this is well defined.
@@ -169,6 +169,8 @@ type Snapshot struct {
 // with WithContentHashes: content tokens are strict, so a repository with an
 // unresolvable external import has a graph but no hashes, and plain atte graph
 // must keep working on it. atte cone always asks for hashes.
+//
+// Diff returns an error naming WithContentHashes for a snapshot without hashes.
 func Capture(ctx context.Context, scanner detector.Scanner, repo *attegit.Repo, options ...CaptureOption) (*Snapshot, error)
 
 // Delta is the Broad Phase output: the Cone of the change from base to head,
@@ -190,7 +192,9 @@ func Diff(base, head *Snapshot) (*Delta, error)
 func (d *Delta) Contains(id graph.EntityID) bool
 
 // Frontiers returns Changed layered by distance from the Impulses; see Frontiers.
-func (d *Delta) Frontiers() [][]graph.EntityID
+// The error is for an entity the head calculator does not know, which cannot
+// happen for a Delta that Diff built.
+func (d *Delta) Frontiers() ([][]graph.EntityID, error)
 ```
 
 `Diff` forces `Sum` for every head entity and for every base entity that head also has, so after it both calculators are fully memoized. `Delta.Graph` is built with `graph.New` from the changed entities and the filtered relationships, so any consumer can walk it with the normal `graph` API; nothing in `graph` changes.
@@ -200,13 +204,13 @@ func (d *Delta) Frontiers() [][]graph.EntityID
 `atte cone` reuses `printGitGraph` with the head repository and `Delta.Graph`. Three adjustments to `cmd/graph.go`:
 
 - `renderOptions` currently holds a `*contenthash.Calculator` and formats one abbreviated hash. It gains a hash-label hook (a function or small interface) so `atte graph` supplies `<head>` and `atte cone` supplies `<base>..<head>` or `new`. Token lookups (`go version`, external module versions) use the head calculator.
-- When the starting tree is not in the graph, `printGitGraph` prints nothing and returns nil instead of `parent entity %q not found`. For `atte graph` this cannot happen (the complete graph has every tree); for `atte cone` it is the "nothing changed below here" case.
-- `hasContainment` decides whether an import is local by looking for `contains` or `source-file` edges leaving the package. In the induced graph a package that changed only because one of *its* imports changed has no changed source files, so those edges are gone and its importers would stop listing it. The check must use the entity kind and the head graph, not the induced graph, or the renderer must be given a membership predicate alongside the full graph. Which of the two is a detail for implementation, but the golden test for this case (a two-hop import chain where only the leaf file changes) must exist.
+- When the starting tree is not in a subset, `printGitGraph` prints nothing and returns nil. That is the "nothing changed below here" case of `atte cone`. A complete graph still fails with `parent entity %q not found`, so `atte graph` in a directory that does not exist at `--ref` is still an error. The renderer tells the two apart by whether it was given `complete`.
+- `hasContainment` decides whether an import is local by looking for `contains` or `source-file` edges leaving the package. In the induced graph a package that changed only because one of *its* imports changed has no changed source files, so those edges are gone and its importers would stop listing it. The renderer is therefore given the complete graph next to the graph it prints (`complete`) and asks that one. The golden test for this case is a two-hop import chain where only the leaf file changes.
 
 ### Testing
 
 - `cone` unit tests over hand-built graphs and tokens (`graph.New`, `contenthash.New`): identical snapshots give an empty delta; a token change marks the entity and every dependent; a new entity is `Added` and `Changed`; a missing entity is `Removed` and its container is `Changed`; the induced graph drops relationships whose other end is unchanged; the connectivity property holds on a small tree. `Frontiers` puts added entities and entities with no changed dependency in layer 0, layers the rest by shortest distance, puts a changed cycle with no changed outside dependency in layer 0, and returns every changed entity in exactly one layer.
-- `cmd` golden tests built with `attegittest.GitRepo` (two commits, opened at `HEAD^` and `HEAD`): the worked example above; the two-hop import chain; an `atte.hcl` edit; a `go.mod` version bump with `--external-imports`; a deleted file; no change (empty output); default selection with a clean tree (`HEAD^..HEAD`), with an unstaged edit, with a staged-only edit, with an untracked file, with a deleted file, with a staged edit reverted on disk (`HEAD..working tree`, empty Cone), and with a touched-but-identical file (the first and last compare `HEAD^..HEAD`, the rest `HEAD..working tree`); explicit `--base`/`--head` ignoring a dirty tree; `--working-tree` on a clean tree; a subdirectory with nothing changed below it; `--content-hash` showing `base..head` and `new`.
+- `cmd` tests built with `attegittest.GitRepo` (two commits, opened at `HEAD^` and `HEAD`): the worked example above; the two-hop import chain; no change (empty output); `new` labels; default selection with a clean tree (`HEAD^..HEAD`), with an unstaged edit, with a staged-only edit, with an untracked file, with a deleted file, with a staged edit reverted on disk (`HEAD..working tree`, empty Cone), and with a touched-but-identical file (the first and last compare `HEAD^..HEAD`, the rest `HEAD..working tree`); explicit `--base`/`--head` ignoring a dirty tree; `--working-tree` on a clean tree; a subdirectory with nothing changed below it; `--content-hash` showing `base..head` and `new`.
 - Error tests: unresolvable `--base` and `--head`; `HEAD^` on a single-commit repository with a clean tree (error) and with a dirty tree (works: base is `HEAD`).
 
 ## Cross cutting concerns
@@ -217,14 +221,14 @@ func (d *Delta) Frontiers() [][]graph.EntityID
   - *False positives are by design.* An entity is in the Cone when anything in its dependency closure changed, whether or not the change can affect it: a comment or formatting edit, a change to a function the dependent never calls, code behind a build constraint that is not active (build constraints are ignored). Removing these Echoes takes analysis of the change itself (AST, ABI or build-and-compare), which is Narrow Phase work. It is out of scope for `cone`, and nothing here should be traded against speed to shrink the Cone. A refinement fast enough to run at Broad Phase speed would need its own IDR.
   - *False negatives are defects.* They come only from inputs the graph does not model yet, listed in the content hash IDR: `script` edges, `//go:embed`, `testdata`, file modes, and toolchain upgrades that do not touch `go.mod`. Each is closed by modeling the input, not by accepting it as a trade-off.
   - The help text of `atte cone` states both: the output may include entities the change cannot affect, and it can miss entities affected through the unmodeled inputs, until those are closed.
-- **Test injection.** `ExecuteOptions.Repository` injects one `*attegit.Repo` and `openRepository` returns it for every ref, which cannot serve a command that opens two. Command tests call the internal print function with two opened repositories, as the graph tests do with `printGraph`; if end-to-end Cobra tests are wanted, `ExecuteOptions` needs a way to inject a repository root for discovery without injecting a repository.
+- **Test injection.** `ExecuteOptions.Repository` injects one `*attegit.Repo` and `openRepository` returns it for every ref, which cannot serve a command that opens two. `atte cone` therefore opens its revisions itself and ignores the injected repository. Its tests run the real command in a temporary Git repository, and the rendering is tested through `printCone` with two opened repositories, as the graph tests do with `printGraph`.
 - **CI.** Shallow checkouts need `fetch-depth: 2` for the clean default, or an explicit `--base origin/main`. A CI job whose earlier steps dirty the tree (codegen, formatters) would silently switch to a working-tree comparison, so CI should pass `--base` and `--head` explicitly; the stderr line makes the choice visible in logs.
 - **Implicit default.** The default now depends on state the user may not be thinking about. The stderr line and the explicit-flag override are the mitigations; the clean-tree default keeps the command usable after committing.
 
 ## Alternatives considered
 
 - **Propagate from token-changed entities with a graph walk over reversed edges (what `propagation.Broad` was meant for).** Finds everything whose closure contains a changed token, but misses closure *membership* changes with no token change: a deleted file changes its tree's hash although no surviving token changed, and a new import of an unchanged package changes the importer's closure. Hash comparison captures both, is already memoized, and agrees with `atte graph --content-hash` by construction.
-- **A membership predicate instead of an induced graph.** Simpler for the renderer, but the request is for a graph value that downstream consumers can walk, and `graph.New` already validates it. The predicate is kept too (`Contains`) for the `hasContainment` case.
+- **A membership predicate instead of an induced graph.** Simpler for the renderer, but the request is for a graph value that downstream consumers can walk, and `graph.New` already validates it. `Contains` is kept for consumers that only need membership; the renderer is given the complete graph instead.
 - **`atte graph --diff REV` instead of a new command.** Fewer commands, but the output is a different thing (a delta, not a view), it needs two repositories, and `cone` is the vocabulary the rest of Atte uses for this stage.
 - **A positional `BASE..HEAD` range like git.** Familiar, but flags were asked for and are easier to default independently.
 
@@ -241,101 +245,67 @@ func (d *Delta) Frontiers() [][]graph.EntityID
 - Render `Delta.Frontiers()`: mark Impulses in the tree or print the layer next to each node. Layer 0 alone cannot be rendered with the tree renderer because it lacks the ancestors that connect it to the root, so this needs the full `Delta.Graph` with markers.
 - Derive the default base from an explicit `--head` (`<head>^`) instead of pairing it with the default base.
 - Follow the `script` edge so target scripts are inputs (content hash IDR follow-up), addressed specifically and separately from this IDR.
+- Command tests that render an `atte.hcl` edit, a `go.mod` bump with `--external-imports`, a deleted file and a mode-only change. See Implementation.
+- One strongly-connected-components implementation shared by `cone` and `contenthash`. See Implementation.
 
 ## Other reading
 
 - `idr/202611021822-content-sha-summing-for-graph-targets.md`: hash definition, dependency edge kinds, known limitations.
 - `GLOSSARY.md`: Signature, Snapshot, Impulse, Cone, Impact.
+- `cone/doc.go` and `cone/README.md`: the vocabulary (Cone, Candidate and Impact, and how a Cone is computed from two Snapshots) and what a Cone gets wrong.
 - `cmd/graph.go`: the renderer this command reuses.
-
-## Decisions from review
-
-Answers given in review. They are already reflected in the sections above and are kept here as a record.
-
-- **Removed entities** are not listed in v1. They are visible only through their changed parent tree. `Delta.Removed` is computed, and listing them is future work.
-- **Staged and unstaged changes** are not distinguished. "The working tree" is their combination, as `WithWorkingTree` already defines it. A separate index comparison is future work.
-- **Exit status** is 0 when nothing changed. `--exit-code` is future work.
-- **Working directory scope** is the same as `atte graph`: output starts at the working directory's tree.
-- **Revision syntax** is flags only. There is no positional `BASE..HEAD`.
-- **Package location** is the root package `cone`.
-- **The `script` edge** is out of this IDR and its PR plan. It will be addressed specifically later; until then, editing a target's script does not change the target.
-- **Untracked files** count as uncommitted changes, as they do for `atte graph --working-tree`.
-- **Dirtiness** is decided by `git status`, not by comparing blobs or by `git diff-files`.
-- **The comparison is announced** on stderr, silenced by `--quiet`.
-- **No derived default base** for an explicit `--head`. It pairs with the default base. Deriving one is future work.
-- **`--content-hash` format** is `<base>..<head>` abbreviated hashes, with `new` for added entities. Coloring of this output is future work.
-- **Vocabulary** (Cone, Candidate and Impact, and how a Cone is computed from two Snapshots) is documented in the `cone` package documentation and README, not in the GLOSSARY.
-- **The `propagation` package** is deleted. `cone.Delta` is the Broad Phase output that `atte cone` consumes.
-- **`Delta.Frontiers()`** is an unused API at the top of the stack. Rendering it is future work.
 
 ## Implementation (ephemeral)
 
-Stacked PRs on top of this IDR's PR, bottom to top. Every PR passes the repository's verification targets on its own, keeps `atte graph` output unchanged unless stated, and carries its own tests. The order puts what the goals need first and what they need least last.
+Delivered as seven pull requests stacked on this IDR's PR. Each passed the repository's verification targets on its own, and no `atte graph` output changed.
 
-| # | PR | Contents | Notes |
-| --- | --- | --- | --- |
-| 1 | `propagation: delete the unused package` | Remove `propagation/`. | No importers or tests, so a pure removal. Independent of everything above it. |
-| 2 | `cone: capture a revision's graph and hashes` | `cone.Snapshot` and `cone.Capture`, moved out of `printGraph`, which now calls them. | Pure refactor: existing `atte graph` goldens must not change. Hashes are optional, see the hints. |
-| 3 | `cone: diff two snapshots` | `cone.Diff` and `cone.Delta` (`Changed`, `Added`, `Removed`, `Graph`, `Contains`), with the unit tests over hand-built graphs, and the package documentation and README that define the vocabulary: Snapshot, Cone, Candidate versus Impact, and how a Cone is computed from two Snapshots. | The Broad Phase output. No command yet. |
-| 4 | `cmd: let graph rendering show a subset of a graph` | Hash-label hook in `renderOptions`, an empty starting tree prints nothing, and `hasContainment` judged on the head graph. | No change for `atte graph`. Tests render a `Delta.Graph`, including the two-hop import chain. |
-| 5 | `cmd: add atte cone` | The command with `--base` (default `HEAD^`), `--head` (default `HEAD`), `--content-hash` and the other presentation flags, two-repository open, golden and error tests, and help text listing the inherited limitations. | Smallest useful `atte cone`: always the committed comparison. |
-| 6 | `cmd/cone: default to the working tree when it is dirty` | `--working-tree`, `--quiet`, the stderr line, revision selection as a pure function with its table test, and the `git status` check in `attegit` that decides dirtiness. | Changes the default of the command from PR 5 to what Revision selection describes. Golden tests for staged, unstaged, untracked, deleted and touched-only files. |
-| 7 | `cone: add Delta.Frontiers` | `Delta.Frontiers()`, `contenthash.Calculator.Dependencies()`, and the Frontiers unit tests. | Top of the stack on purpose: no consumer, and none of the goals depend on it. Can be dropped or merged later without affecting the rest. |
+| # | PR | Delivered |
+| --- | --- | --- |
+| 1 | #9 `propagation: delete the unused package` | Removed `propagation/`. Nothing imported it. |
+| 2 | #11 `cone: capture a revision's graph and hashes` | `cone.Snapshot`, `cone.Capture`, `cone.WithContentHashes`. `printGraph` calls `Capture`. |
+| 3 | #12 `cone: diff two snapshots` | `cone.Diff`, `cone.Delta`, `cone/doc.go` and `cone/README.md`. |
+| 4 | #13 `cmd: let graph rendering show a subset of a graph` | `hashLabel` and `complete` in `renderOptions`, and the subset goldens. |
+| 5 | #14 `cmd: add atte cone` | The command with `--base`, `--head`, `--content-hash` and the other presentation flags. |
+| 6 | #15 `cmd/cone: default to the working tree when it is dirty` | `--working-tree`, `--quiet`, the stderr line, revision selection, and `attegit.HasUncommittedChanges`. |
+| 7 | #16 `cone: add Delta.Frontiers` | `Delta.Frontiers()` and `contenthash.Calculator.Dependencies()`. |
 
-Progress, recorded by the PR that did the work:
+### Where the implementation differs from the first approved design
 
-- PR 1 (`propagation-delete`): removed `propagation/`. A search for the package name found no importers, no `atte.hcl` targets and no documentation references other than unrelated uses of the word "propagation" in GLOSSARY.md and a comment in `detector/attegit/graph.go`; those stay. No design change.
-- PR 2 (`cone-capture`): added `cone.Snapshot`, `cone.Capture` and `cone.WithContentHashes`, and made `printGraph` call `Capture`. Notes on how it differs from the sketch above:
-  - `Capture` keeps `printGraph`'s error prefixes ("build Git graph", "build detector graph", "merge detector graph", "compute content hashes"), so existing error assertions are unchanged. `printGraph` returns them as they are.
-  - `printGraph` now resolves the scanner before building the graph, where it used to build the Git graph first. Only the error that wins when both fail could differ.
-  - The `cone` package documentation is a short placeholder. The vocabulary (Snapshot, Cone, Candidate versus Impact) arrives with `Diff` in PR 3, as planned.
-  - Tests are black-box (`cone_test`) against the default scanner and `attegittest`: the graph holds Git tree and detector entities, `Hashes` is nil without the option, hashes follow file content, and an unresolved external import fails only with `WithContentHashes`.
-  - No `atte graph` golden changed.
-- PR 3 (`cone-diff`): added `cone.Diff` and `cone.Delta` (`Changed`, `Added`, `Removed`, `Graph`, `Contains`), the package documentation in `cone/doc.go`, and `cone/README.md`. Notes:
-  - `Diff` returns an error when either snapshot lacks `Hashes`, or is nil, so a caller that forgot `WithContentHashes` fails with that name rather than on a nil pointer.
-  - `Changed`, `Added` and `Removed` are never nil, so an empty Cone compares equal to an empty list. `Contains` is backed by an unexported set.
-  - The README is `cone/README.md`; no other package has one, so it is the first and is kept short. The package documentation carries the vocabulary and the README repeats it as a table with an example.
-  - Tests build worlds with `graph.New` and `contenthash.New`: identical snapshots, an edited token reaching dependents, a non-dependency relationship that does not propagate, an added entity, a removed entity, a rename, the induced graph, connectivity through `contains`, missing hashes, and a pair of real captured repositories.
-- PR 4 (`graph-subset`): `renderOptions` gained `hashLabel` and `complete`; `atte graph` sets neither, so its output is unchanged. Notes on how it differs from the sketch above:
-  - The missing-start-tree case is tied to `complete`. Only a subset prints nothing when its starting tree is absent; a complete graph still fails with `parent entity ... not found`, so `atte graph` in a directory that does not exist at `--ref` is still an error. The sketch had every graph print nothing.
-  - Of the two options for `hasContainment`, the renderer is given the complete graph (`complete`) next to the graph it prints. `packageImports` asks that graph whether an imported package has source files or contents.
-  - `hashLabel` replaces the abbreviated hash for every entity that shows one. Go version and external import lines still read tokens from `hashes`, which `atte cone` will set to the head calculator.
-  - Only changed dependencies are listed, so a package in the Cone does not show a `go version` line when the version entity did not change.
-  - Tests live in `cmd/graph_subset_test.go` and render a real `Delta.Graph` from a two-commit repository: the worked example with and without `base..head` hashes (goldens `subset-edit` and `subset-edit-content-hash`, the first containing the two-hop import chain), the imports of packages with no changed files, `new` labels, an unchanged subdirectory, no change, and the unchanged error for a complete graph. The two-commit fixture is reusable by the command's tests in PR 5.
-- PR 5 (`cone-command`): added `atte cone` in `cmd/cone.go`, with `--base` (`HEAD^`), `--head` (`HEAD`), `--content-hash`, `--external-imports`, `--go-files`, `--run-targets` and `--go-versions`. Notes:
-  - `printCone(ctx, w, base, head, relativePath, options)` does the work and the Cobra function only opens the two revisions, so the rendering is testable with repositories and not with flags. `rangeHashLabel` produces `<base>..<head>` or `new`. The PR 4 fixture's `render` now calls `printCone` instead of repeating its setup.
-  - Each revision is opened with `attegit.Open` directly. The `ExecuteOptions.Repository` injection stands for a single revision and is ignored by this command, so its tests run the real command in a temporary Git repository through `t.Chdir`.
-  - Errors name the side and the revision: `resolve base revision "HEAD^": ...`. Errors from `Capture` and `Diff` are prefixed `capture base`, `capture head` and `compare revisions`.
-  - As planned, the command always compares committed revisions: uncommitted changes are ignored. The help says so. `--head` alone pairs with the default base `HEAD^`, as Revision selection says, and a test records it.
-  - The help lists the limitations inherited from the content hash IDR: the `script` edge, `//go:embed`, `.s`/`.c`/`.h` files and `testdata`, the toolchain, indirectly reached module upgrades, and `go.work`.
-  - Run targets are discovered on the head revision.
-  - The subset goldens from PR 4 are reused by the command tests, so the command and the renderer tests cannot drift apart. No new golden files.
-- PR 6 (`cone-working-tree`): the default now follows the working tree, as Revision selection says. Notes:
-  - `attegit.HasUncommittedChanges(path)` runs the `git status` command from the design. It treats any output as dirty. Its test covers a clean tree, an ignored file, a touched-only file, untracked, unstaged, staged and deleted files, and a staged edit reverted on disk.
-  - `selectComparison(options, dirty)` is the pure function, with a table test of the cases above. The flags default to the empty string, which means "not given", so the help describes the defaults in words.
-  - Git is asked only when the flags leave something for the answer to decide: not with `--working-tree`, and not when both `--base` and `--head` are given.
-  - An explicit `--head` is compared as committed even when the tree is dirty, and only `--working-tree` overlays it. The stderr line for that case reads `REV + working tree`; for `HEAD` it reads `working tree`, as in the design.
-  - The line is written after the comparison is chosen and before either revision is opened, so a revision that does not resolve is still preceded by the line that says what was attempted.
-  - Command tests build the cases from the design in a temporary repository: clean, touched only, ignored, unstaged, staged, untracked, deleted, and staged then reverted on disk, plus `--working-tree`, `--quiet`, explicit revisions on a dirty tree, and a one-commit repository both clean and dirty. They assert on the output and on stderr; the touched-only and ignored cases compare `HEAD^..HEAD`.
-  - A mode-only change was not tested.
-- PR 7 (`cone-frontiers`): added `Delta.Frontiers()` in `cone/frontiers.go` and `contenthash.Calculator.Dependencies(id)`. Notes:
-  - `Frontiers` returns `([][]graph.EntityID, error)`, not the bare slice of the sketch, because `Dependencies` can fail for an unknown entity. The error cannot happen for a `Delta` that `Diff` built, but the signature does not hide it.
-  - `Dependencies` returns the direct followed dependencies, sorted, without the entity itself, as `Closure` does.
-  - Layering follows the design: added entities and entities with no changed dependency are layer 0; the rest are one more than their nearest changed dependency; cycles are condensed first with Tarjan's algorithm, and a cycle containing an added entity is layer 0 as a whole.
-  - An entity whose only dependency was removed has no changed dependency, so it is an Impulse. The removed entity cannot be listed, and its dependents are the nearest thing to the edit.
-  - The worked-example layering was checked on the small hand-built world, and on a captured repository where the edited file is the only member of layer 0. The IDR's table for the full repository was not reproduced as a test.
-  - The package README gained a short section. Nothing renders the layers.
+The sections above were updated to describe what was built. These are the points where it differs from what was first written.
 
-Order notes:
+Capture and Diff:
 
-- PRs 2 and 3 precede the command so the abstraction is reviewable on its own, apart from Cobra and rendering.
-- PR 6 is split from PR 5 so the command can land with a simple, stateless default first. `attegit` gains the dirty check only when something uses it.
-- `Dependencies()` lands with PR 7 because only `Frontiers` reads it.
-- Following the `script` edge is not part of this stack.
+- `printGraph` resolves the scanner before building the graph, where it used to build the Git graph first. Only which error wins when both fail can differ. `Capture` keeps the old error prefixes.
+- `Diff` returns an error naming `WithContentHashes` when a snapshot is nil or has no hashes. `Changed`, `Added` and `Removed` are never nil, and `Contains` is backed by an unexported set.
+- The vocabulary (Snapshot, Cone, Candidate versus Impact) is in the `cone` package documentation and in `cone/README.md`, the first README in the repository. It is not in the GLOSSARY.
 
-Hints:
+Rendering:
 
-- `openRepository` already takes a ref; call it twice. `attegit.WithWorkingTree` only on the head open of the dirty pair. The dirty check is a small exported function in `attegit` that runs `git --no-optional-locks status --porcelain -z --untracked-files=normal` and reports whether it printed anything, so it can be tested with `attegittest.GitRepo` independent of the command.
-- The default resolution is a pure function of the flags and a dirty bool; unit test it as a table of the cases in Revision selection before wiring it to git.
-- `attegit.Open` runs `git ls-tree -r -t --full-tree REV`; its stderr is what the revision error should carry.
-- `printGraph` is the only caller of the graph assembly today; after `Capture` exists it should call it rather than duplicate it. It computes hashes only under `--content-hash` or `--go-versions` (`Scanner.ContentHashes` fails on an import that matches no `require`), so PR 2 keeps that behaviour by passing `WithContentHashes` only in those cases.
+- An absent starting tree prints nothing only for a subset, that is when the renderer has been given `complete`. For a complete graph it is still the error `parent entity ... not found`, so `atte graph` in a directory that does not exist at `--ref` still fails. The first design made every graph print nothing.
+- For `hasContainment` the renderer is given the complete graph next to the graph it prints, the first of the two options the design left open. `Contains` is not used for this.
+- `hashLabel` replaces the abbreviated hash for every entity that shows one. The `go version` and external import lines still read tokens from `hashes`, which `atte cone` sets to the head calculator.
+
+Command:
+
+- `--base` and `--head` default to the empty string, meaning "not given", so the help describes the defaults in words. An explicit `--head` is compared as committed even when the tree is dirty, and only `--working-tree` overlays it. The stderr line reads `REV + working tree` for that case and `working tree` for `HEAD`.
+- Git is asked about uncommitted changes only when the flags leave something for the answer to decide: not with `--working-tree`, and not when both `--base` and `--head` are given.
+- The stderr line is written after the comparison is chosen and before either revision is opened, so a revision that does not resolve is preceded by the line that says what was attempted.
+- Errors from `Capture` and `Diff` are prefixed `capture base`, `capture head` and `compare revisions`. Run targets are discovered on the head revision.
+- The command opens both revisions with `attegit.Open` and ignores `ExecuteOptions.Repository`, which stands for a single revision. Its tests run the real command in a temporary Git repository through `t.Chdir`, so `ExecuteOptions` did not need to change.
+- The help lists the limitations inherited from the content hash IDR, including `go.work` files, which are ignored.
+
+Frontiers:
+
+- `Frontiers` returns `([][]graph.EntityID, error)` instead of the bare slice, because `Dependencies` fails for an unknown entity. That cannot happen for a `Delta` built by `Diff`.
+- An entity whose only dependency was removed has no changed dependency, so it is in layer 0. The removed entity cannot be listed, and its dependents are the nearest thing to the edit.
+- `Dependencies` excludes the entity itself, as `Closure` does.
+
+### Not done
+
+- The design listed command-level goldens for an `atte.hcl` edit, a `go.mod` bump with `--external-imports`, a deleted file, and a mode-only change. No command test renders the first two or the last. The Cone for them follows from the unit tests over hand-built graphs, but nothing checks the rendered output. A deleted file appears only as a working-tree default-selection case, whose output is the changed parent tree.
+- The Frontiers table for the worked example was checked once in a scratch test against a captured repository and matched. It was not kept as a test. The committed tests check layering on hand-built worlds and, on a captured repository, that the edited file is the only member of layer 0.
+- Nothing renders the Frontiers.
+
+### Open from review
+
+- `cone/frontiers.go` has its own eager strongly-connected-components function next to the lazy one in `contenthash`. PR 7's review asked why. The options are to share the eager one through a small helper, to ask the `Calculator` for component membership, or to rebuild `contenthash` on a shared iterator in its own change.
