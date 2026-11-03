@@ -282,6 +282,10 @@ Stacked PRs on top of this IDR's PR, bottom to top. Every PR passes the reposito
 | 6 | `cmd/cone: default to the working tree when it is dirty` | `--working-tree`, `--quiet`, the stderr line, revision selection as a pure function with its table test, and the `git status` check in `attegit` that decides dirtiness. | Changes the default of the command from PR 5 to what Revision selection describes. Golden tests for staged, unstaged, untracked, deleted and touched-only files. |
 | 7 | `cone: add Delta.Frontiers` | `Delta.Frontiers()`, `contenthash.Calculator.Dependencies()`, and the Frontiers unit tests. | Top of the stack on purpose: no consumer, and none of the goals depend on it. Can be dropped or merged later without affecting the rest. |
 
+Progress, recorded by the PR that did the work:
+
+- PR 1 (`propagation-delete`): removed `propagation/`. A search for the package name found no importers, no `atte.hcl` targets and no documentation references other than unrelated uses of the word "propagation" in GLOSSARY.md and a comment in `detector/attegit/graph.go`; those stay. No design change.
+
 Order notes:
 
 - PRs 2 and 3 precede the command so the abstraction is reviewable on its own, apart from Cobra and rendering.
