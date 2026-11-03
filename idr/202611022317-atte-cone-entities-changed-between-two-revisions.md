@@ -310,6 +310,14 @@ Progress, recorded by the PR that did the work:
   - The help lists the limitations inherited from the content hash IDR: the `script` edge, `//go:embed`, `.s`/`.c`/`.h` files and `testdata`, the toolchain, indirectly reached module upgrades, and `go.work`.
   - Run targets are discovered on the head revision.
   - The subset goldens from PR 4 are reused by the command tests, so the command and the renderer tests cannot drift apart. No new golden files.
+- PR 6 (`cone-working-tree`): the default now follows the working tree, as Revision selection says. Notes:
+  - `attegit.HasUncommittedChanges(path)` runs the `git status` command from the design. It treats any output as dirty. Its test covers a clean tree, an ignored file, a touched-only file, untracked, unstaged, staged and deleted files, and a staged edit reverted on disk.
+  - `selectComparison(options, dirty)` is the pure function, with a table test of the cases above. The flags default to the empty string, which means "not given", so the help describes the defaults in words.
+  - Git is asked only when the flags leave something for the answer to decide: not with `--working-tree`, and not when both `--base` and `--head` are given.
+  - An explicit `--head` is compared as committed even when the tree is dirty, and only `--working-tree` overlays it. The stderr line for that case reads `REV + working tree`; for `HEAD` it reads `working tree`, as in the design.
+  - The line is written after the comparison is chosen and before either revision is opened, so a revision that does not resolve is still preceded by the line that says what was attempted.
+  - Command tests build the cases from the design in a temporary repository: clean, touched only, ignored, unstaged, staged, untracked, deleted, and staged then reverted on disk, plus `--working-tree`, `--quiet`, explicit revisions on a dirty tree, and a one-commit repository both clean and dirty. They assert on the output and on stderr; the touched-only and ignored cases compare `HEAD^..HEAD`.
+  - A mode-only change was not tested.
 
 Order notes:
 

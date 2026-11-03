@@ -15,6 +15,8 @@ import (
 type coneOptions struct {
 	base            string
 	head            string
+	workingTree     bool
+	quiet           bool
 	externalImports bool
 	goFiles         bool
 	runTargets      bool
@@ -32,9 +34,22 @@ them, directly or not. Output is the head graph pruned to the Cone, starting at
 the working directory like atte graph.
 
 Both revisions are read from Git and passed as given to Git, so anything it
-resolves works: HEAD~3, origin/main, a tag or a sha. Uncommitted changes are
-not read. Entities that were removed are not listed; their parent trees are
-shown because their contents changed.
+resolves works: HEAD~3, origin/main, a tag or a sha.
+
+With no flags the command answers "what does my current work affect?" when Git
+reports uncommitted changes (staged, unstaged, or untracked and not ignored),
+and "what did the last commit affect?" otherwise:
+
+  uncommitted changes, or --working-tree   HEAD..HEAD plus the working tree
+  clean                                    HEAD^..HEAD
+
+--base and --head each replace only their own side, and the other keeps the
+default from the table. An explicit --head is compared as committed unless
+--working-tree is given. The comparison that was made is printed to stderr,
+unless --quiet is given.
+
+Entities that were removed are not listed; their parent trees are shown because
+their contents changed.
 
 The Cone over-approximates by design. A hash sees bytes, not meaning, so a
 comment edit is in the Cone along with everything that depends on the file.
@@ -66,11 +81,28 @@ func newConeCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			base, err := openRevision(repoRoot, "base", options.base)
+			dirty := false
+			if options.dependsOnWorkingTreeState() {
+				dirty, err = attegit.HasUncommittedChanges(repoRoot)
+				if err != nil {
+					return fmt.Errorf("check for uncommitted changes: %w", err)
+				}
+			}
+			comparison := selectComparison(*options, dirty)
+			if !options.quiet {
+				if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "cone: %s\n", comparison); err != nil {
+					return fmt.Errorf("write comparison: %w", err)
+				}
+			}
+			base, err := openRevision(repoRoot, "base", comparison.base)
 			if err != nil {
 				return err
 			}
-			head, err := openRevision(repoRoot, "head", options.head)
+			var headOptions []attegit.OpenOption
+			if comparison.headWorkingTree {
+				headOptions = append(headOptions, attegit.WithWorkingTree())
+			}
+			head, err := openRevision(repoRoot, "head", comparison.head, headOptions...)
 			if err != nil {
 				return err
 			}
@@ -83,8 +115,11 @@ func newConeCommand() *cobra.Command {
 			})
 		},
 	}
-	coneCmd.Flags().StringVar(&options.base, "base", "HEAD^", "Base revision")
-	coneCmd.Flags().StringVar(&options.head, "head", "HEAD", "Head revision")
+	coneCmd.Flags().StringVar(&options.base, "base", "", `Base revision (default "HEAD" with uncommitted changes, otherwise "HEAD^")`)
+	coneCmd.Flags().StringVar(&options.head, "head", "", `Head revision (default "HEAD", plus the working tree when there are uncommitted changes)`)
+	coneCmd.Flags().
+		BoolVar(&options.workingTree, "working-tree", false, "Include modified and non-ignored untracked files in the head revision, even if there are none")
+	coneCmd.Flags().BoolVar(&options.quiet, "quiet", false, "Do not print the comparison that was made to stderr")
 	coneCmd.Flags().BoolVar(&options.externalImports, "external-imports", false, "Include external Go imports")
 	coneCmd.Flags().BoolVar(&options.goFiles, "go-files", false, "Include Go source files")
 	coneCmd.Flags().BoolVar(&options.runTargets, "run-targets", false, "Render runnable entities as atte run selectors")
@@ -93,11 +128,56 @@ func newConeCommand() *cobra.Command {
 	return coneCmd
 }
 
+// coneComparison is the pair of revisions atte cone compares.
+type coneComparison struct {
+	base            string
+	head            string
+	headWorkingTree bool
+}
+
+func (c coneComparison) String() string {
+	head := c.head
+	switch {
+	case c.headWorkingTree && c.head == "HEAD":
+		head = "working tree"
+	case c.headWorkingTree:
+		head += " + working tree"
+	}
+	return c.base + ".." + head
+}
+
+// dependsOnWorkingTreeState reports whether the flags leave anything for the
+// state of the working tree to decide. When they do not, Git is not asked.
+func (o coneOptions) dependsOnWorkingTreeState() bool {
+	return !o.workingTree && (o.base == "" || o.head == "")
+}
+
+// selectComparison chooses the revisions to compare from the flags and from
+// whether the repository has uncommitted changes. An empty base or head means
+// that the flag was not given.
+func selectComparison(options coneOptions, dirty bool) coneComparison {
+	comparison := coneComparison{
+		base:            options.base,
+		head:            options.head,
+		headWorkingTree: options.workingTree || (dirty && options.head == ""),
+	}
+	if comparison.base == "" {
+		comparison.base = "HEAD^"
+		if options.workingTree || dirty {
+			comparison.base = "HEAD"
+		}
+	}
+	if comparison.head == "" {
+		comparison.head = "HEAD"
+	}
+	return comparison
+}
+
 // openRevision opens revision of the repository at root. It does not use an
 // injected repository, which stands for a single revision. Errors name the
 // side so that a bad --base is told apart from a bad --head.
-func openRevision(root, side, revision string) (*attegit.Repo, error) {
-	repo, err := attegit.Open(root, revision)
+func openRevision(root, side, revision string, options ...attegit.OpenOption) (*attegit.Repo, error) {
+	repo, err := attegit.Open(root, revision, options...)
 	if err != nil {
 		return nil, fmt.Errorf("resolve %s revision %q: %w", side, revision, err)
 	}
