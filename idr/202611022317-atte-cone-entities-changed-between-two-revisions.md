@@ -285,6 +285,12 @@ Stacked PRs on top of this IDR's PR, bottom to top. Every PR passes the reposito
 Progress, recorded by the PR that did the work:
 
 - PR 1 (`propagation-delete`): removed `propagation/`. A search for the package name found no importers, no `atte.hcl` targets and no documentation references other than unrelated uses of the word "propagation" in GLOSSARY.md and a comment in `detector/attegit/graph.go`; those stay. No design change.
+- PR 2 (`cone-capture`): added `cone.Snapshot`, `cone.Capture` and `cone.WithContentHashes`, and made `printGraph` call `Capture`. Notes on how it differs from the sketch above:
+  - `Capture` keeps `printGraph`'s error prefixes ("build Git graph", "build detector graph", "merge detector graph", "compute content hashes"), so existing error assertions are unchanged. `printGraph` returns them as they are.
+  - `printGraph` now resolves the scanner before building the graph, where it used to build the Git graph first. Only the error that wins when both fail could differ.
+  - The `cone` package documentation is a short placeholder. The vocabulary (Snapshot, Cone, Candidate versus Impact) arrives with `Diff` in PR 3, as planned.
+  - Tests are black-box (`cone_test`) against the default scanner and `attegittest`: the graph holds Git tree and detector entities, `Hashes` is nil without the option, hashes follow file content, and an unresolved external import fails only with `WithContentHashes`.
+  - No `atte graph` golden changed.
 
 Order notes:
 

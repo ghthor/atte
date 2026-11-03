@@ -13,13 +13,13 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/ghthor/atte/cone"
 	"github.com/ghthor/atte/detector"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attego"
 	"github.com/ghthor/atte/detector/attehcl"
 	"github.com/ghthor/atte/detector/contenthash"
 	"github.com/ghthor/atte/detector/graph"
-	"github.com/ghthor/atte/detector/graphset"
 	"github.com/ghthor/atte/reference"
 	"github.com/spf13/cobra"
 	"github.com/xlab/treeprint"
@@ -150,32 +150,23 @@ func printGraph(ctx context.Context, w io.Writer, repo *attegit.Repo, relativePa
 	if len(options) > 0 {
 		printOptions = options[0]
 	}
-	gitGraph, err := repo.Graph()
-	if err != nil {
-		return fmt.Errorf("build Git graph: %w", err)
-	}
 	detector, err := scannerForContext(ctx)
 	if err != nil {
 		return fmt.Errorf("register detectors: %w", err)
 	}
-	detectorGraph, err := detector.Graph(ctx, repo, graphset.WithAttachToTree())
-	if err != nil {
-		return fmt.Errorf("build detector graph: %w", err)
-	}
-	if detectorGraph != nil {
-		if err := gitGraph.Absorb(detectorGraph); err != nil {
-			return fmt.Errorf("merge detector graph: %w", err)
-		}
-	}
-	render := renderOptions{PrintGraphOptions: printOptions}
+	// Hashes cover the whole graph, so an entity prints the same hash from any
+	// working directory. They are computed only when shown: content tokens are
+	// strict, and plain graph output must work for a repository whose external
+	// imports cannot all be resolved.
+	var captureOptions []cone.CaptureOption
 	if printOptions.IncludeContentHash || printOptions.IncludeGoVersions {
-		// Hashes cover the whole graph, so an entity prints the same hash from
-		// any working directory.
-		render.hashes, err = detector.ContentHashes(ctx, repo, gitGraph)
-		if err != nil {
-			return fmt.Errorf("compute content hashes: %w", err)
-		}
+		captureOptions = append(captureOptions, cone.WithContentHashes())
 	}
+	snapshot, err := cone.Capture(ctx, detector, repo, captureOptions...)
+	if err != nil {
+		return err
+	}
+	render := renderOptions{PrintGraphOptions: printOptions, hashes: snapshot.Hashes}
 	var runSelectors map[graph.EntityID]string
 	if printOptions.IncludeRunTargets {
 		runSelectors, err = graphRunTargetSelectors(ctx, repo)
@@ -183,7 +174,7 @@ func printGraph(ctx context.Context, w io.Writer, repo *attegit.Repo, relativePa
 			return fmt.Errorf("discover run targets: %w", err)
 		}
 	}
-	return printGitGraph(w, repo, gitGraph, relativePath, render, detector, runSelectors)
+	return printGitGraph(w, repo, snapshot.Graph, relativePath, render, detector, runSelectors)
 }
 
 func graphRunTargetSelectors(ctx context.Context, repo *attegit.Repo) (map[graph.EntityID]string, error) {
