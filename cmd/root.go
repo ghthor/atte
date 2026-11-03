@@ -30,6 +30,7 @@ deployment systems, and CI pipelines.`,
 		newRunCommand(),
 		newConfigCommand(),
 		newGraphCommand(),
+		newConeCommand(),
 	)
 	return rootCmd
 }

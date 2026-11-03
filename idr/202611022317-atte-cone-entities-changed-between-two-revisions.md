@@ -302,6 +302,14 @@ Progress, recorded by the PR that did the work:
   - `hashLabel` replaces the abbreviated hash for every entity that shows one. Go version and external import lines still read tokens from `hashes`, which `atte cone` will set to the head calculator.
   - Only changed dependencies are listed, so a package in the Cone does not show a `go version` line when the version entity did not change.
   - Tests live in `cmd/graph_subset_test.go` and render a real `Delta.Graph` from a two-commit repository: the worked example with and without `base..head` hashes (goldens `subset-edit` and `subset-edit-content-hash`, the first containing the two-hop import chain), the imports of packages with no changed files, `new` labels, an unchanged subdirectory, no change, and the unchanged error for a complete graph. The two-commit fixture is reusable by the command's tests in PR 5.
+- PR 5 (`cone-command`): added `atte cone` in `cmd/cone.go`, with `--base` (`HEAD^`), `--head` (`HEAD`), `--content-hash`, `--external-imports`, `--go-files`, `--run-targets` and `--go-versions`. Notes:
+  - `printCone(ctx, w, base, head, relativePath, options)` does the work and the Cobra function only opens the two revisions, so the rendering is testable with repositories and not with flags. `rangeHashLabel` produces `<base>..<head>` or `new`. The PR 4 fixture's `render` now calls `printCone` instead of repeating its setup.
+  - Each revision is opened with `attegit.Open` directly. The `ExecuteOptions.Repository` injection stands for a single revision and is ignored by this command, so its tests run the real command in a temporary Git repository through `t.Chdir`.
+  - Errors name the side and the revision: `resolve base revision "HEAD^": ...`. Errors from `Capture` and `Diff` are prefixed `capture base`, `capture head` and `compare revisions`.
+  - As planned, the command always compares committed revisions: uncommitted changes are ignored. The help says so. `--head` alone pairs with the default base `HEAD^`, as Revision selection says, and a test records it.
+  - The help lists the limitations inherited from the content hash IDR: the `script` edge, `//go:embed`, `.s`/`.c`/`.h` files and `testdata`, the toolchain, indirectly reached module upgrades, and `go.work`.
+  - Run targets are discovered on the head revision.
+  - The subset goldens from PR 4 are reused by the command tests, so the command and the renderer tests cannot drift apart. No new golden files.
 
 Order notes:
 

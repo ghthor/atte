@@ -6,10 +6,8 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/ghthor/atte/cone"
 	"github.com/ghthor/atte/detector/attegit"
 	"github.com/ghthor/atte/detector/attegittest"
-	"github.com/ghthor/atte/detector/graph"
 	"github.com/shoenig/test"
 	"github.com/shoenig/test/must"
 )
@@ -77,40 +75,11 @@ func newChangeFixture(t *testing.T, before, after map[string]string) changeFixtu
 	return changeFixture{git: git, base: base, head: head}
 }
 
-// render prints the Cone of the change from relativePath, labelling hashes as
-// base..head.
+// render prints the Cone of the change from relativePath.
 func (f changeFixture) render(t *testing.T, relativePath string, options PrintGraphOptions) string {
 	t.Helper()
-	scanner, err := scannerForContext(t.Context())
-	must.NoError(t, err)
-	base, err := cone.Capture(t.Context(), scanner, f.base, cone.WithContentHashes())
-	must.NoError(t, err)
-	head, err := cone.Capture(t.Context(), scanner, f.head, cone.WithContentHashes())
-	must.NoError(t, err)
-	delta, err := cone.Diff(base, head)
-	must.NoError(t, err)
-
-	render := renderOptions{
-		PrintGraphOptions: options,
-		hashes:            head.Hashes,
-		complete:          head.Graph,
-		hashLabel: func(id graph.EntityID) (string, error) {
-			headSum, err := head.Hashes.Sum(id)
-			if err != nil {
-				return "", err
-			}
-			if !base.Graph.Has(id) {
-				return "new", nil
-			}
-			baseSum, err := base.Hashes.Sum(id)
-			if err != nil {
-				return "", err
-			}
-			return baseSum.String()[:contentHashLength] + ".." + headSum.String()[:contentHashLength], nil
-		},
-	}
 	var output bytes.Buffer
-	must.NoError(t, printGitGraph(&output, f.head, delta.Graph, relativePath, render, scanner))
+	must.NoError(t, printCone(t.Context(), &output, f.base, f.head, relativePath, options))
 	return output.String()
 }
 
