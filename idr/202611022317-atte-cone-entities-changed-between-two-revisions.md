@@ -296,6 +296,12 @@ Progress, recorded by the PR that did the work:
   - `Changed`, `Added` and `Removed` are never nil, so an empty Cone compares equal to an empty list. `Contains` is backed by an unexported set.
   - The README is `cone/README.md`; no other package has one, so it is the first and is kept short. The package documentation carries the vocabulary and the README repeats it as a table with an example.
   - Tests build worlds with `graph.New` and `contenthash.New`: identical snapshots, an edited token reaching dependents, a non-dependency relationship that does not propagate, an added entity, a removed entity, a rename, the induced graph, connectivity through `contains`, missing hashes, and a pair of real captured repositories.
+- PR 4 (`graph-subset`): `renderOptions` gained `hashLabel` and `complete`; `atte graph` sets neither, so its output is unchanged. Notes on how it differs from the sketch above:
+  - The missing-start-tree case is tied to `complete`. Only a subset prints nothing when its starting tree is absent; a complete graph still fails with `parent entity ... not found`, so `atte graph` in a directory that does not exist at `--ref` is still an error. The sketch had every graph print nothing.
+  - Of the two options for `hasContainment`, the renderer is given the complete graph (`complete`) next to the graph it prints. `packageImports` asks that graph whether an imported package has source files or contents.
+  - `hashLabel` replaces the abbreviated hash for every entity that shows one. Go version and external import lines still read tokens from `hashes`, which `atte cone` will set to the head calculator.
+  - Only changed dependencies are listed, so a package in the Cone does not show a `go version` line when the version entity did not change.
+  - Tests live in `cmd/graph_subset_test.go` and render a real `Delta.Graph` from a two-commit repository: the worked example with and without `base..head` hashes (goldens `subset-edit` and `subset-edit-content-hash`, the first containing the two-hop import chain), the imports of packages with no changed files, `new` labels, an unchanged subdirectory, no change, and the unchanged error for a complete graph. The two-commit fixture is reusable by the command's tests in PR 5.
 
 Order notes:
 

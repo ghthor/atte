@@ -1,0 +1,14 @@
+.
+├── atte.hcl fd16145cb81f..4cf7988ae04f
+├── cmd/ ab997c2bd64c..68e57cb2a513
+│   └── go package example.com/root/cmd 71d9eb2fe96a..499015278f74
+│       └── import example.com/root/internal/value
+├── internal/ afa0b9abae4f..b5a31f57dccb
+│   └── value/ 7103353f3d68..4dc19c0f46af
+│       ├── value.go 36f627c487a2..669b001473fa
+│       └── go package example.com/root/internal/value 97dd3509f626..8cafd63068f9
+├── go package example.com/root 1759b2b888cc..28d046048833
+│   └── import example.com/root/cmd
+└── codegen attehcl:codegen:atte.hcl:go 6e69eed0e9bb..266433bbf590
+    └── go package example.com/root/cmd 71d9eb2fe96a..499015278f74
+        └── import example.com/root/internal/value
